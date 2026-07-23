@@ -1,0 +1,4 @@
+# Super-repo union of host toolchain floors (ADR-0023). Each code submodule also carries its own.
+golang 1.26.0
+nodejs 26.0.0
+# TypeScript via npm (floor 7). git >= 2. Service image tags: deploy/dev/versions.env.

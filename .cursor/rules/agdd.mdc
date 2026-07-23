@@ -1,0 +1,11 @@
+---
+description: AGDD governance rules for this repo
+alwaysApply: true
+---
+Read `/AGENTS.md` and `/governance/AGENTS.md` first — they are authoritative. The `governance`
+repo is the Source of Truth (ADRs, specs, invariants 1–25, contracts, policies).
+
+- One submodule per change; never span two in a commit.
+- Dependency direction: webfrontend → bff → backend → governance (governance depends on nothing).
+- Spec-first + TDD. New decision → Proposed ADR in governance and stop. API change → governance PR first.
+- Full loop: /governance/docs/process/agdd.md. Definition of Done: /governance/docs/process/definition-of-done.md.

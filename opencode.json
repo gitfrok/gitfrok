@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md",
+    "governance/AGENTS.md",
+    "governance/docs/agents/invariants.md",
+    "governance/docs/process/agdd.md",
+    "governance/docs/architecture/04-repository-topology.md"
+  ]
+}

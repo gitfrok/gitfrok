@@ -1,0 +1,18 @@
+# Replace the relative URLs with your org's repo URLs. Pins are by commit; `branch` supports
+# `git submodule update --remote`. See ADR-0027 and docs/architecture/04-repository-topology.md.
+[submodule "governance"]
+	path = governance
+	url = ../governance.git
+	branch = main
+[submodule "backend"]
+	path = backend
+	url = ../backend.git
+	branch = main
+[submodule "bff"]
+	path = bff
+	url = ../bff.git
+	branch = main
+[submodule "webfrontend"]
+	path = webfrontend
+	url = ../webfrontend.git
+	branch = main
