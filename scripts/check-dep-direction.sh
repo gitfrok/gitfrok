@@ -11,16 +11,27 @@ fail=0
 report() { echo "DEP-DIRECTION VIOLATION: $1"; fail=1; }
 
 # Grep real Go source (skip generated gen/ and vendored trees) for forbidden module imports.
+#
+# Match import *statements* only, not every occurrence of the module path. An import spec is a
+# quoted path optionally preceded by `import` and/or an alias (`_`, `.`, or an identifier), and
+# nothing else on the line. That deliberately excludes assignments, const declarations, struct
+# tags and comments — a repo's own boundary checker has to name the forbidden module in a string
+# constant to enforce against it, and that is not itself a dependency (T-0002).
+import_re() { # import_re <module>
+  printf '^[[:space:]]*(import[[:space:]]+)?([A-Za-z0-9_.]+[[:space:]]+)?"%s(/|")' "$1"
+}
+
 scan() { # scan <repo> <forbidden-module-substr...>
   local repo="$1"; shift
   [ -d "$repo" ] || return 0
   local files
   files=$(find "$repo" -type f -name '*.go' -not -path '*/gen/*' -not -path '*/node_modules/*' 2>/dev/null || true)
   [ -n "$files" ] || return 0
-  local m
+  local m re
   for m in "$@"; do
-    if grep -RlE "\"$m(/|\")" $files >/dev/null 2>&1; then
-      grep -RlE "\"$m(/|\")" $files | while read -r f; do report "$repo imports $m ($f)"; done
+    re=$(import_re "$m")
+    if grep -RlE "$re" $files >/dev/null 2>&1; then
+      grep -RlE "$re" $files | while read -r f; do report "$repo imports $m ($f)"; done
       fail=1
     fi
   done
