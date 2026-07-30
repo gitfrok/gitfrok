@@ -1,0 +1,39 @@
+# Super-repo fitness gates (T-0002 AC5, invariants 22–25). Runs the composition-level checks that
+# no single submodule can run alone: dependency direction across repos, toolchain floors, and that
+# a clean clone bootstraps. Per-repo build/test gates live in each submodule's own CI.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: super-repo fitness gates
+    runs-on: ubuntu-latest
+    steps:
+      # Submodules are pinned commits (invariant 25); recursive checkout materialises exactly the
+      # pins under review, which is what the dependency-direction scan needs to see.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: submodule pins under review
+        run: git submodule status
+
+      # Fails if any repo imports another's Go packages, or a submodule drops below an ADR-0023
+      # toolchain floor.
+      - name: make verify
+        run: make verify
+
+      # Proves a clean clone can be brought up — the path every new agent and human takes first.
+      - name: make bootstrap
+        run: make bootstrap
+
+      # Not gated here: shellcheck over scripts/*.sh. The fitness scripts rely on deliberate word
+      # splitting (`grep ... $files`), which shellcheck flags as SC2086, so it needs targeted
+      # disables first. Adding it unverified would just make this workflow red.
