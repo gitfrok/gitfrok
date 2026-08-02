@@ -1,5 +1,7 @@
-# Replace the relative URLs with your org's repo URLs. Pins are by commit; `branch` supports
-# `git submodule update --remote`. See ADR-0027 and docs/architecture/04-repository-topology.md.
+# URLs are relative on purpose: `../<repo>.git` resolves against whatever remote this super-repo
+# was cloned from, so SSH and HTTPS clones both work without a per-developer rewrite. Pins are by
+# commit (invariant 25); `branch` is what `git submodule update --remote` follows.
+# See ADR-0027 and governance/docs/architecture/04-repository-topology.md.
 [submodule "governance"]
 	path = governance
 	url = ../governance.git
