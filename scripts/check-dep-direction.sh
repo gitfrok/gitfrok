@@ -24,16 +24,25 @@ import_re() { # import_re <module>
 scan() { # scan <repo> <forbidden-module-substr...>
   local repo="$1"; shift
   [ -d "$repo" ] || return 0
-  local files
-  files=$(find "$repo" -type f -name '*.go' -not -path '*/gen/*' -not -path '*/node_modules/*' 2>/dev/null || true)
-  [ -n "$files" ] || return 0
+
+  # Collect into an array over a NUL-delimited find, not a word-split string. Word splitting was
+  # the SC2086 that kept shellcheck out of CI, and it was also a real bug waiting on the first
+  # path containing a space.
+  local files=()
+  while IFS= read -r -d '' f; do
+    files+=("$f")
+  done < <(find "$repo" -type f -name '*.go' \
+    -not -path '*/gen/*' -not -path '*/node_modules/*' -print0 2>/dev/null)
+  [ ${#files[@]} -gt 0 ] || return 0
+
   local m re
   for m in "$@"; do
     re=$(import_re "$m")
-    if grep -RlE "$re" $files >/dev/null 2>&1; then
-      grep -RlE "$re" $files | while read -r f; do report "$repo imports $m ($f)"; done
-      fail=1
-    fi
+    # Process substitution, not a pipe: a `while` on the right of a pipe runs in a subshell, so
+    # report's `fail=1` would be discarded and a violation would print without failing the gate.
+    while IFS= read -r f; do
+      report "$repo imports $m ($f)"
+    done < <(grep -lE "$re" "${files[@]}" 2>/dev/null || true)
   done
 }
 
