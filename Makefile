@@ -1,10 +1,13 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up update-pins verify codegen
+.PHONY: bootstrap submodules dev-up update-pins verify lint-shell codegen
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors (T-0001, invariants 22–23)
 	@./scripts/check-dep-direction.sh
 	@./scripts/check-version-floors.sh
+lint-shell: ## shellcheck the fitness scripts (T-0009); CI gates this on every PR
+	@command -v shellcheck >/dev/null || { echo "shellcheck not installed: https://shellcheck.net"; exit 1; }
+	@shellcheck scripts/*.sh && echo "shellcheck: OK"
 codegen: ## regenerate Go (backend, bff) + TS (webfrontend) from governance/contracts (ADR-0022)
 	@cd backend && buf generate
 	@cd bff && buf generate

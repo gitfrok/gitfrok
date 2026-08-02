@@ -34,6 +34,8 @@ jobs:
       - name: make bootstrap
         run: make bootstrap
 
-      # Not gated here: shellcheck over scripts/*.sh. The fitness scripts rely on deliberate word
-      # splitting (`grep ... $files`), which shellcheck flags as SC2086, so it needs targeted
-      # disables first. Adding it unverified would just make this workflow red.
+      # The fitness scripts are the gates; nothing was gating them. T-0002 deferred this because
+      # the scripts relied on word splitting (SC2086); T-0009 replaced that with NUL-delimited
+      # arrays, so the lint runs clean with no suppressions to maintain.
+      - name: make lint-shell
+        run: make lint-shell
