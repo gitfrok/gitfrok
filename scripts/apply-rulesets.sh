@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# Super-repo operational gate: apply the ADR-0031 merge-enforcement rulesets to every repo.
+#
+# ADR-0031 splits `main` protection into two rulesets so admin bypass covers the human gate and
+# never the machine gate:
+#   main-integrity — PR required (0 approvals), required status checks, no force-push, no deletion,
+#                    conversation resolution.  bypass_actors: NONE.  This is T-0002 AC5.
+#   main-review    — 1 approving review + stale dismissal.  Bypassed by Repository admin until the
+#                    org has a second member (GitHub forbids self-approval, so binding this today
+#                    would make main unmergeable).
+#
+# Legacy branch protection is DELETED, not left alongside: overlapping rules are evaluated as a
+# union and the loosest bypass wins, which is confusing exactly where it matters most.
+#
+# Org-level rulesets need GitHub Team, so these are per-repo copies — which is why this is a script
+# and not five trips through the UI. Not run in CI: it needs an admin token, and super-repo CI has
+# `contents: read`. `check` mode is the seed of the ADR-0031 follow-up gate that guards the gates.
+#
+# Usage: apply-rulesets.sh [plan|apply|check]     (default: plan — reads nothing but the API)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+ORG=gitfrok
+MODE=${1:-plan}
+
+# repo:required-status-check-context. An empty context means the repo has no required check yet:
+# webfrontend has no workflow at all (ci-gates.md wants lint/unit/E2E/arch there). It still gets
+# main-integrity for the rules that do not depend on CI — a repo is not exempt from the mechanism
+# because its check list is empty.
+#
+# governance's docs gate (T-0009) runs today but was never a required check, so a broken link in the
+# SoT repo could merge. ADR-0031 lists wiring it as a follow-up; it is included here because the
+# ruleset is being created anyway and leaving it out would mean editing the same rule twice.
+REPOS=(
+  "gitfrok:super-repo fitness gates"
+  "backend:build + vet + arch gates"
+  "bff:build + vet + arch gates"
+  "governance:docs gates"
+  "webfrontend:"
+)
+
+for cmd in gh jq; do
+  command -v "$cmd" >/dev/null || { echo "$cmd not installed"; exit 1; }
+done
+
+case "$MODE" in
+  plan|apply|check) ;;
+  *) echo "usage: $0 [plan|apply|check]"; exit 2 ;;
+esac
+
+fail=0
+report() { echo "  FAIL: $1"; fail=1; }
+
+# Conditions target the default branch by name rather than a literal "main" so a repo that renames
+# its default branch stays covered.
+conditions='{ "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } }'
+
+integrity_body() { # integrity_body <required-check-context>
+  local ctx="$1" checks='[]'
+  if [ -n "$ctx" ]; then
+    checks=$(jq -nc --arg c "$ctx" '[{context: $c}]')
+  fi
+  jq -nc --argjson conditions "$conditions" --argjson checks "$checks" '
+    {
+      name: "main-integrity",
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: $conditions,
+      rules: (
+        [
+          # 0 approvals: AC5 is about checks blocking, not about review. The review requirement is
+          # main-review'\''s job, because that is the half a one-member org cannot satisfy.
+          { type: "pull_request", parameters: {
+              required_approving_review_count: 0,
+              dismiss_stale_reviews_on_push: false,
+              require_code_owner_review: false,
+              require_last_push_approval: false,
+              required_review_thread_resolution: true } },
+          { type: "non_fast_forward" },
+          { type: "deletion" }
+        ]
+        + (if ($checks | length) > 0 then
+            [ { type: "required_status_checks", parameters: {
+                  # Not strict: requiring every branch to be up to date with main forces a rebase
+                  # per merge, which buys little on a tree this small.
+                  strict_required_status_checks_policy: false,
+                  do_not_enforce_on_create: false,
+                  required_status_checks: $checks } } ]
+          else [] end)
+      )
+    }'
+}
+
+review_body() {
+  jq -nc --argjson conditions "$conditions" '
+    {
+      name: "main-review",
+      target: "branch",
+      enforcement: "active",
+      # The one bypass in the whole scheme, and it is time-boxed by a condition, not a date: it goes
+      # away when the org has a second member who can approve (ADR-0031 follow-up).
+      #
+      # Two entries for one intent. GitHub documents actor_id 1 for OrganizationAdmin exactly; the
+      # built-in RepositoryRole IDs (5 = admin) it does not, and getting that number wrong here
+      # would leave main unmergeable rather than merely unreviewed. Both entries are admins, so the
+      # scope is what ADR-0031 says it is either way.
+      bypass_actors: [
+        { actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always" },
+        { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }
+      ],
+      conditions: $conditions,
+      rules: [
+        { type: "pull_request", parameters: {
+            required_approving_review_count: 1,
+            dismiss_stale_reviews_on_push: true,
+            require_code_owner_review: false,
+            require_last_push_approval: false,
+            required_review_thread_resolution: false } }
+      ]
+    }'
+}
+
+ruleset_id() { # ruleset_id <repo> <name>
+  gh api "/repos/$ORG/$1/rulesets" --jq ".[] | select(.name == \"$2\") | .id" 2>/dev/null || true
+}
+
+upsert() { # upsert <repo> <name> <body>
+  local repo="$1" name="$2" body="$3" id
+  id=$(ruleset_id "$repo" "$name")
+  if [ -n "$id" ]; then
+    printf '%s' "$body" | gh api -X PUT "/repos/$ORG/$repo/rulesets/$id" --input - >/dev/null
+    echo "  $name: updated (id $id)"
+  else
+    printf '%s' "$body" | gh api -X POST "/repos/$ORG/$repo/rulesets" --input - >/dev/null
+    echo "  $name: created"
+  fi
+}
+
+drop_legacy() { # drop_legacy <repo> <default-branch>
+  local repo="$1" branch="$2"
+  if gh api "/repos/$ORG/$repo/branches/$branch/protection" >/dev/null 2>&1; then
+    gh api -X DELETE "/repos/$ORG/$repo/branches/$branch/protection" >/dev/null
+    echo "  legacy branch protection on $branch: deleted"
+  else
+    echo "  legacy branch protection on $branch: none"
+  fi
+}
+
+check_repo() { # check_repo <repo> <expected-check-context> <default-branch>
+  local repo="$1" ctx="$2" branch="$3" id rs types bypass got
+
+  id=$(ruleset_id "$repo" "main-integrity")
+  if [ -z "$id" ]; then
+    report "main-integrity missing"
+  else
+    rs=$(gh api "/repos/$ORG/$repo/rulesets/$id")
+    [ "$(jq -r '.enforcement' <<<"$rs")" = "active" ] || report "main-integrity not active"
+
+    # The rule this whole ADR exists for: no bypass on the machine gate, ever.
+    bypass=$(jq -r '.bypass_actors | length' <<<"$rs")
+    [ "$bypass" = "0" ] || report "main-integrity has $bypass bypass actor(s) — AC5 is re-opened"
+
+    types=$(jq -r '[.rules[].type] | sort | join(",")' <<<"$rs")
+    for t in deletion non_fast_forward pull_request; do
+      [[ ",$types," == *",$t,"* ]] || report "main-integrity missing rule $t"
+    done
+
+    got=$(jq -r '[.rules[] | select(.type == "required_status_checks")
+                 | .parameters.required_status_checks[].context] | join(",")' <<<"$rs")
+    [ "$got" = "$ctx" ] || report "main-integrity required checks are [$got], expected [$ctx]"
+  fi
+
+  [ -n "$(ruleset_id "$repo" "main-review")" ] || report "main-review missing"
+
+  if gh api "/repos/$ORG/$repo/branches/$branch/protection" >/dev/null 2>&1; then
+    report "legacy branch protection still present on $branch — its bypass unions with the rulesets"
+  fi
+}
+
+echo "ADR-0031 rulesets — mode: $MODE"
+for entry in "${REPOS[@]}"; do
+  repo=${entry%%:*}
+  ctx=${entry#*:}
+  branch=$(gh api "/repos/$ORG/$repo" --jq '.default_branch')
+  echo "$ORG/$repo ($branch):"
+
+  case "$MODE" in
+    plan)
+      echo "  main-integrity: bypass none; PR+0 approvals, no force-push, no deletion, threads resolved"
+      if [ -n "$ctx" ]; then
+        echo "                  required check: $ctx"
+      else
+        echo "                  required check: none (no workflow in this repo yet)"
+      fi
+      echo "  main-review:    bypass Repository admin; 1 approval, dismiss stale"
+      echo "  legacy branch protection on $branch: would be deleted"
+      ;;
+    apply)
+      # Rulesets first, legacy protection second — never a window with main unprotected.
+      upsert "$repo" "main-integrity" "$(integrity_body "$ctx")"
+      upsert "$repo" "main-review" "$(review_body)"
+      drop_legacy "$repo" "$branch"
+      ;;
+    check)
+      check_repo "$repo" "$ctx" "$branch"
+      ;;
+  esac
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "rulesets: DRIFT (see FAIL above) — ADR-0031"
+  exit 1
+fi
+echo "rulesets: OK ($MODE)"
