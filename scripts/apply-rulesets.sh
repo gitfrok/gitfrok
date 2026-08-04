@@ -5,9 +5,10 @@
 # never the machine gate:
 #   main-integrity — PR required (0 approvals), required status checks, no force-push, no deletion,
 #                    conversation resolution.  bypass_actors: NONE.  This is T-0002 AC5.
-#   main-review    — 1 approving review + stale dismissal.  Bypassed by Repository admin until the
-#                    org has a second member (GitHub forbids self-approval, so binding this today
-#                    would make main unmergeable).
+#   main-review    — 1 approving review + stale dismissal.  bypass_actors: NONE since 2026-08-04,
+#                    when a second org member joined. It was admin-bypassable until then only
+#                    because GitHub forbids self-approval and a one-member org would have been
+#                    unable to merge at all.
 #
 # Legacy branch protection is DELETED, not left alongside: overlapping rules are evaluated as a
 # union and the loosest bypass wins, which is confusing exactly where it matters most.
@@ -98,17 +99,11 @@ review_body() {
       name: "main-review",
       target: "branch",
       enforcement: "active",
-      # The one bypass in the whole scheme, and it is time-boxed by a condition, not a date: it goes
-      # away when the org has a second member who can approve (ADR-0031 follow-up).
-      #
-      # Two entries for one intent. GitHub documents actor_id 1 for OrganizationAdmin exactly; the
-      # built-in RepositoryRole IDs (5 = admin) it does not, and getting that number wrong here
-      # would leave main unmergeable rather than merely unreviewed. Both entries are admins, so the
-      # scope is what ADR-0031 says it is either way.
-      bypass_actors: [
-        { actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always" },
-        { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }
-      ],
+      # No bypass. The admin exemption here was time-boxed by a condition, not a date — a second org
+      # member who can approve — and that condition was met on 2026-08-04 when webenable-asia joined.
+      # GitHub forbids self-approval at every role, so four-eyes review on main is now real for
+      # everyone including owners (ADR-0031 follow-up, closed).
+      bypass_actors: [],
       conditions: $conditions,
       rules: [
         { type: "pull_request", parameters: {
@@ -171,7 +166,22 @@ check_repo() { # check_repo <repo> <expected-check-context> <default-branch>
     [ "$got" = "$ctx" ] || report "main-integrity required checks are [$got], expected [$ctx]"
   fi
 
-  [ -n "$(ruleset_id "$repo" "main-review")" ] || report "main-review missing"
+  id=$(ruleset_id "$repo" "main-review")
+  if [ -z "$id" ]; then
+    report "main-review missing"
+  else
+    rs=$(gh api "/repos/$ORG/$repo/rulesets/$id")
+    [ "$(jq -r '.enforcement' <<<"$rs")" = "active" ] || report "main-review not active"
+
+    # Since the org has a second member, the review gate is bound too — including for owners. A
+    # bypass reappearing here is someone quietly opting out of four-eyes review.
+    bypass=$(jq -r '.bypass_actors | length' <<<"$rs")
+    [ "$bypass" = "0" ] || report "main-review has $bypass bypass actor(s) — four-eyes review is optional again"
+
+    got=$(jq -r '[.rules[] | select(.type == "pull_request")
+                 | .parameters.required_approving_review_count] | join(",")' <<<"$rs")
+    [ "$got" = "1" ] || report "main-review required approvals are [$got], expected [1]"
+  fi
 
   if gh api "/repos/$ORG/$repo/branches/$branch/protection" >/dev/null 2>&1; then
     report "legacy branch protection still present on $branch — its bypass unions with the rulesets"
@@ -193,7 +203,7 @@ for entry in "${REPOS[@]}"; do
       else
         echo "                  required check: none (no workflow in this repo yet)"
       fi
-      echo "  main-review:    bypass Repository admin; 1 approval, dismiss stale"
+      echo "  main-review:    bypass none; 1 approval, dismiss stale"
       echo "  legacy branch protection on $branch: would be deleted"
       ;;
     apply)
