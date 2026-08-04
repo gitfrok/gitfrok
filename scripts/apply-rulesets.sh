@@ -24,10 +24,10 @@ cd "$(dirname "$0")/.."
 ORG=gitfrok
 MODE=${1:-plan}
 
-# repo:required-status-check-context. An empty context means the repo has no required check yet:
-# webfrontend has no workflow at all (ci-gates.md wants lint/unit/E2E/arch there). It still gets
-# main-integrity for the rules that do not depend on CI — a repo is not exempt from the mechanism
-# because its check list is empty.
+# repo:required-status-check-context. Every repo now has one: webfrontend's landed 2026-08-05
+# (build/typecheck/vitest/boundaries), closing the last "runs but nothing to require" gap ADR-0031
+# recorded. An empty context is still handled — a repo is not exempt from the mechanism because its
+# check list is empty — it just no longer occurs.
 #
 # governance's docs gate (T-0009) runs today but was never a required check, so a broken link in the
 # SoT repo could merge. ADR-0031 lists wiring it as a follow-up; it is included here because the
@@ -37,7 +37,7 @@ REPOS=(
   "backend:build + vet + arch gates"
   "bff:build + vet + arch gates"
   "governance:docs gates"
-  "webfrontend:"
+  "webfrontend:build + typecheck + test + arch gates"
 )
 
 for cmd in gh jq; do
