@@ -11,7 +11,7 @@ webfrontend ──HTTP──▶ bff ──gRPC──▶ backend ──imports─
 ```
 | Submodule | Owns | Depends on |
 |---|---|---|
-| **governance/** | ADRs (SoT), specs, `contracts/`, `policies/`, roadmap/backlog/plans/tasks, process, invariants, agent rules | nothing |
+| **governance/** | ADRs (SoT), specs, `contracts/`, `policies/`, product requirements (`docs/product/PRD.md`), roadmap/backlog/plans/tasks, process, invariants, agent rules | nothing |
 | **backend/** | Go modular monolith (`modules/`, `cmd/{dataplane,controlplane}-app`, `platform/`, git-storaged, agent, operator) | governance |
 | **bff/** | Go BFF (aggregation only) | governance, backend |
 | **webfrontend/** | Astro + React SSR | governance, bff |
@@ -25,6 +25,11 @@ webfrontend ──HTTP──▶ bff ──gRPC──▶ backend ──imports─
 4. **Decisions & shared surface live only in `governance/`** — ADRs, specs, invariants,
    `contracts/`, `policies/`. Changing an API = a **governance PR first** (additive-only), then
    consumers bump the pinned pointer.
+   **What** the product must do is `governance/docs/product/PRD.md` (`PR-#` requirements, phases,
+   non-goals, GA definition); **why it is built that way** is still the ADRs. The PRD restates
+   Accepted ADRs and never decides architecture — a requirement needing a new decision becomes a
+   Proposed ADR (ADR-0001, PRD §12). Check a task's requirement against the PRD's phase and
+   §7 non-goals before building; scope it does not list is not yours to add.
 5. **Cross-repo change order:** governance PR → consumer implements (bump governance pointer) →
    super-repo bumps submodule pointers to **merged** commits only. The super-repo stores **pins**,
    never in-place edits to a submodule path.
