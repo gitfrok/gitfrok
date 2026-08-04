@@ -1,0 +1,117 @@
+---
+# Hello fixture for the T-0003 smoke test — the "hello service" the acceptance criteria names.
+#
+# Its only job is to prove the ingress + mkcert TLS path end to end (AC3) *without* depending on
+# any real service booting. If the smoke test asserted against Zitadel or SeaweedFS instead, a red
+# test would not tell you whether TLS is broken or whether that service failed to start.
+#
+# busybox is reused deliberately: it is already in the tree (zitadel.yaml's db-wait init container)
+# and pinned in versions.env, so the fixture adds no new image to keep current.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-content
+  namespace: default
+  labels:
+    app: hello
+    phase: "0"
+data:
+  index.html: |
+    gitfrok dev cluster: hello over TLS
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  namespace: default
+  labels:
+    app: hello
+    phase: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello
+  template:
+    metadata:
+      labels:
+        app: hello
+        phase: "0"
+    spec:
+      containers:
+      - name: hello
+        # Image tag mirrors deploy/dev/versions.env (BUSYBOX_IMAGE) — dev-up.sh asserts the match.
+        image: busybox:1.35
+        imagePullPolicy: IfNotPresent
+        # -f foreground (the container must not daemonize), -v log requests, -h document root.
+        command:
+        - httpd
+        - -f
+        - -v
+        - -p
+        - "8080"
+        - -h
+        - /www
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+        # Serving a read-only ConfigMap needs no root, no writable root filesystem, and no
+        # capabilities. A test fixture is exactly where that should be the default.
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 2
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 1
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: content
+          mountPath: /www
+          readOnly: true
+      volumes:
+      - name: content
+        configMap:
+          name: hello-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+  namespace: default
+  labels:
+    app: hello
+    phase: "0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: hello

@@ -1,0 +1,89 @@
+---
+# Ingress for the local Minikube dev environment — ADR-0024 AC3.
+#
+# Every service here is ClusterIP; this is the only object that makes any of them reachable at
+# *.gitsaas.test over HTTPS. Requires the `ingress` addon (routing) and `ingress-dns` addon
+# (resolving *.test to the Minikube IP from the host).
+#
+# The TLS secret is NOT in this directory and must not be committed — it is a machine-local cert
+# from a machine-local CA. `make dev-up` creates it:
+#
+#   mkcert -install
+#   mkcert -cert-file /tmp/gitsaas.pem -key-file /tmp/gitsaas-key.pem "*.gitsaas.test"
+#   kubectl create secret tls gitsaas-tls \
+#     --cert=/tmp/gitsaas.pem --key=/tmp/gitsaas-key.pem -n default
+#
+# A wildcard cert covers every host below, so adding a host needs no new cert — but each host does
+# need its own rule: an Ingress wildcard host matches one DNS label and cannot fan out per service.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitfrok-dev
+  namespace: default
+  labels:
+    phase: "0"
+  annotations:
+    # Blob storage: the default 1m body limit would reject any upload worth storing.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - hello.gitsaas.test
+    - zitadel.gitsaas.test
+    - s3.gitsaas.test
+    - filer.gitsaas.test
+    secretName: gitsaas-tls
+  rules:
+  # The T-0003 smoke-test target (hello.yaml). Kept first and kept trivial: it isolates "is the
+  # ingress + mkcert TLS path working" from "did any real service boot".
+  - host: hello.gitsaas.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hello
+            port:
+              number: 8080
+  # Zitadel terminates TLS here, not in the pod (TLS.Enabled false + --tls-mode=external in
+  # zitadel.yaml). Its console and OIDC discovery advertise https://zitadel.gitsaas.test, which is
+  # what ExternalDomain/ExternalPort/ExternalSecure are set to.
+  #
+  # gRPC-web and the console work over this plain HTTP backend. A gRPC-native client (Zitadel's
+  # management API over h2) needs backend-protocol: GRPC, which cannot coexist with the console on
+  # one host — split it onto its own Ingress when T-0013 needs it.
+  - host: zitadel.gitsaas.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: zitadel
+            port:
+              number: 8080
+  # S3 API. In-cluster clients should use seaweedfs:8333 directly; this host exists because S3
+  # client libraries derive bucket URLs from a real hostname.
+  - host: s3.gitsaas.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: seaweedfs
+            port:
+              number: 8333
+  # Filer HTTP API — browsing and direct file PUT/GET.
+  - host: filer.gitsaas.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: seaweedfs
+            port:
+              number: 8888
