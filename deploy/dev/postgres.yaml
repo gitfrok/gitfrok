@@ -1,0 +1,166 @@
+---
+# PostgreSQL 18 deployment for local Minikube dev environment
+# Image tag mirrors deploy/dev/versions.env (ADR-0023) — copied by hand; nothing sources that file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: default
+  labels:
+    app: postgres
+    phase: "0"
+data:
+  init.sql: |
+    -- Tenant-scoped RLS baseline (T-0004 foundational setup).
+    --
+    -- RLS only binds a role that is neither superuser nor table owner: PostgreSQL exempts
+    -- superusers and BYPASSRLS roles from every policy, and exempts the owner unless the table is
+    -- FORCEd. `postgres` is both, so an app connecting as `postgres` reads every tenant's rows
+    -- while the policy still reports as enabled — enabled but inert.
+    CREATE SCHEMA IF NOT EXISTS tenant;
+    CREATE TABLE IF NOT EXISTS tenant.tenants (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- The role the app connects as — never `postgres`. Dev-only credentials.
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'gitfrok_app') THEN
+        CREATE ROLE gitfrok_app LOGIN PASSWORD 'gitfrok_app'
+          NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+      END IF;
+    END
+    $$;
+    GRANT USAGE ON SCHEMA tenant TO gitfrok_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON tenant.tenants TO gitfrok_app;
+
+    ALTER TABLE tenant.tenants ENABLE ROW LEVEL SECURITY;
+    -- Closes the owner exemption, so the policy still binds if gitfrok_app or a future migration
+    -- role ends up owning the table. It does not bind superusers — which is why the role above is
+    -- NOSUPERUSER NOBYPASSRLS.
+    ALTER TABLE tenant.tenants FORCE ROW LEVEL SECURITY;
+
+    -- missing_ok = true: with app.tenant_id unset, current_setting() returns NULL, the predicate is
+    -- NULL, and RLS reads NULL as "no rows" — fail closed. The erroring form (missing_ok = false)
+    -- also fails closed, but raises `unrecognized configuration parameter` on every query from a
+    -- bound role, including migrations that legitimately span tenants.
+    --
+    -- Callers scope each transaction with:  SET LOCAL app.tenant_id = '<tenant-id>';
+    DROP POLICY IF EXISTS tenant_isolation ON tenant.tenants;
+    CREATE POLICY tenant_isolation ON tenant.tenants
+      FOR ALL
+      USING (id = current_setting('app.tenant_id', true))
+      WITH CHECK (id = current_setting('app.tenant_id', true));
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: default
+  labels:
+    app: postgres
+    phase: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: default
+  labels:
+    app: postgres
+    phase: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        phase: "0"
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:18
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: db
+          containerPort: 5432
+          protocol: TCP
+        env:
+        - name: POSTGRES_PASSWORD
+          value: "postgres"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_DB
+          value: "gitfrok"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U postgres -d gitfrok
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U postgres -d gitfrok
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+          subPath: postgres
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+      - name: init
+        configMap:
+          name: postgres-init
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: default
+  labels:
+    app: postgres
+    phase: "0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: db
+    port: 5432
+    targetPort: db
+    protocol: TCP
+  selector:
+    app: postgres

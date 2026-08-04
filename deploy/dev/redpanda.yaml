@@ -1,0 +1,153 @@
+---
+# Redpanda v26.1 deployment for local Minikube dev environment
+# Image tag mirrors deploy/dev/versions.env (ADR-0023) — copied by hand; nothing sources that file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redpanda-pvc
+  namespace: default
+  labels:
+    app: redpanda
+    phase: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+# There is deliberately no redpanda-config ConfigMap. Mounting one over /etc/redpanda replaces the
+# config the image generates at startup, and a partial file is worse than none: Redpanda needs
+# data_directory, kafka_api, rpc_server and seed_servers to boot, and rpk rewrites this file during
+# startup, which a ConfigMap mount makes read-only. Listeners and dev sizing are passed as flags
+# below instead, which is how `rpk redpanda start` is meant to be driven.
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda
+  namespace: default
+  labels:
+    app: redpanda
+    phase: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda
+  template:
+    metadata:
+      labels:
+        app: redpanda
+        phase: "0"
+    spec:
+      containers:
+      - name: redpanda
+        image: redpandadata/redpanda:v26.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: broker
+          containerPort: 9092
+          protocol: TCP
+        - name: admin
+          containerPort: 9644
+          protocol: TCP
+        - name: schema-reg
+          containerPort: 8081
+          protocol: TCP
+        - name: proxy
+          containerPort: 8082
+          protocol: TCP
+        - name: rpc
+          containerPort: 33145
+          protocol: TCP
+        command:
+        - /usr/bin/rpk
+        args:
+        - redpanda
+        - start
+        # Seastar sizes itself to the whole host unless told otherwise, which on a laptop means it
+        # reserves far past the container limit and gets OOMKilled. --memory stays under the 1Gi
+        # limit to leave headroom for the process itself.
+        - --mode=dev-container
+        - --smp=1
+        - --memory=768M
+        - --reserve-memory=0M
+        - --default-log-level=info
+        # Single broker: nothing seeds this cluster but itself.
+        - --set
+        - redpanda.empty_seed_starts_cluster=true
+        # Advertised addresses must be the Service name — a client that resolves the broker by pod
+        # IP breaks the moment the pod is rescheduled.
+        - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+        - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+        - --rpc-addr=0.0.0.0:33145
+        - --advertise-rpc-addr=redpanda:33145
+        - --schema-registry-addr=0.0.0.0:8081
+        - --pandaproxy-addr=0.0.0.0:8082
+        - --advertise-pandaproxy-addr=redpanda:8082
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          tcpSocket:
+            port: broker
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /v1/status/ready
+            port: admin
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/redpanda/data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: redpanda-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  namespace: default
+  labels:
+    app: redpanda
+    phase: "0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: broker
+    port: 9092
+    targetPort: broker
+    protocol: TCP
+  - name: admin
+    port: 9644
+    targetPort: admin
+    protocol: TCP
+  - name: schema-reg
+    port: 8081
+    targetPort: schema-reg
+    protocol: TCP
+  - name: proxy
+    port: 8082
+    targetPort: proxy
+    protocol: TCP
+  - name: rpc
+    port: 33145
+    targetPort: rpc
+    protocol: TCP
+  selector:
+    app: redpanda

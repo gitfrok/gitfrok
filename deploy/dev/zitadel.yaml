@@ -1,0 +1,203 @@
+---
+# Zitadel identity service deployment for local Minikube dev environment
+# OIDC/OAuth2 provider. Image tag mirrors deploy/dev/versions.env (ADR-0023) — copied by hand;
+# nothing sources that file, and `:latest` is not a pin.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zitadel-pvc
+  namespace: default
+  labels:
+    app: zitadel
+    phase: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zitadel-config
+  namespace: default
+  labels:
+    app: zitadel
+    phase: "0"
+data:
+  # Runtime config. ExternalSecure with TLS.Enabled false is the "TLS terminates at the ingress"
+  # shape: Zitadel mints https:// URLs for the console and OIDC discovery but serves plaintext
+  # h2c to the ingress. Getting this pair wrong is what makes Zitadel emit http:// redirect URIs
+  # that then fail OIDC validation.
+  zitadel.yaml: |
+    # Zitadel minimal local dev configuration (T-0013 will extend)
+    Log:
+      Level: info
+    Port: 8080
+    ExternalDomain: zitadel.gitsaas.test
+    ExternalPort: 443
+    ExternalSecure: true
+    TLS:
+      Enabled: false
+    Database:
+      postgres:
+        Host: postgres
+        Port: 5432
+        Database: zitadel
+        MaxOpenConns: 15
+        MaxIdleConns: 5
+        # Zitadel owns its own database and role rather than sharing `gitfrok` with the app: its
+        # migrations create and alter schemas wholesale, and the app's RLS baseline should not be
+        # in reach of them. Admin creds are used once, by start-from-init, to create both.
+        User:
+          Username: zitadel
+          Password: zitadel
+          SSL:
+            Mode: disable
+        Admin:
+          Username: postgres
+          Password: postgres
+          SSL:
+            Mode: disable
+  # Setup steps, applied once by start-from-init. FirstInstance is only read from the --steps file,
+  # never from --config, which is why this is a separate key.
+  steps.yaml: |
+    FirstInstance:
+      InstanceName: Gitfrok
+      Org:
+        Name: Gitfrok Org
+        Human:
+          UserName: admin@gitsaas.test
+          Password: ChangeMe123!
+          PasswordChangeRequired: false
+          Email:
+            Address: admin@gitsaas.test
+            Verified: true
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zitadel
+  namespace: default
+  labels:
+    app: zitadel
+    phase: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zitadel
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: zitadel
+        phase: "0"
+    spec:
+      serviceAccountName: zitadel
+      initContainers:
+      # Zitadel requires database to be ready first
+      - name: db-wait
+        image: busybox:1.35
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z postgres 5432; do
+              echo "Waiting for PostgreSQL..."
+              sleep 2
+            done
+            echo "PostgreSQL is ready"
+      containers:
+      - name: zitadel
+        image: ghcr.io/zitadel/zitadel:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        # No `command:` — the image entrypoint is the zitadel binary, so these are its subcommand
+        # and flags. `ready` (the previous value) is the one-shot readiness *probe* subcommand: it
+        # checks a running instance and exits, so the pod crash-looped without ever serving.
+        # start-from-init runs first-boot setup (schema, FirstInstance) and then starts the server;
+        # it is idempotent, so restarts skip the setup steps.
+        args:
+        - start-from-init
+        - --config=/etc/zitadel/zitadel.yaml
+        - --steps=/etc/zitadel/steps.yaml
+        - --masterkey=$(ZITADEL_MASTERKEY)
+        # TLS terminates at the ingress; without this Zitadel refuses to serve plaintext.
+        - --tls-mode=external
+        env:
+        # Must be exactly 32 bytes — Zitadel refuses to boot otherwise. Dev-only value; a real
+        # deployment takes this from a secret manager, never from a manifest.
+        - name: ZITADEL_MASTERKEY
+          value: "gitfrok-dev-masterkey-0123456789"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /debug/healthz
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /debug/ready
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: config
+          mountPath: /etc/zitadel
+        - name: data
+          mountPath: /zitadel/data
+      volumes:
+      - name: config
+        configMap:
+          name: zitadel-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: zitadel-pvc
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zitadel
+  namespace: default
+  labels:
+    app: zitadel
+    phase: "0"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zitadel
+  namespace: default
+  labels:
+    app: zitadel
+    phase: "0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: zitadel

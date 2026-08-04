@@ -1,0 +1,125 @@
+---
+# Valkey 9.1 deployment for local Minikube dev environment (replaces Redis)
+# Image tag mirrors deploy/dev/versions.env (ADR-0023) — copied by hand; nothing sources that file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-pvc
+  namespace: default
+  labels:
+    app: valkey
+    phase: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: default
+  labels:
+    app: valkey
+    phase: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+        phase: "0"
+    spec:
+      containers:
+      - name: valkey
+        image: valkey/valkey:9.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: cache
+          containerPort: 6379
+          protocol: TCP
+        command:
+          - valkey-server
+          - /etc/valkey/valkey.conf
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+        livenessProbe:
+          tcpSocket:
+            port: cache
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - valkey-cli ping | grep -q PONG
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: config
+          mountPath: /etc/valkey
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: valkey-pvc
+      - name: config
+        configMap:
+          name: valkey-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkey-config
+  namespace: default
+  labels:
+    app: valkey
+    phase: "0"
+data:
+  valkey.conf: |
+    # Valkey local dev configuration
+    dir /data
+    dbfilename dump.rdb
+    save 900 1
+    save 300 10
+    save 60 10000
+    appendonly yes
+    appendfsync everysec
+    loglevel notice
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: default
+  labels:
+    app: valkey
+    phase: "0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: cache
+    port: 6379
+    targetPort: cache
+    protocol: TCP
+  selector:
+    app: valkey

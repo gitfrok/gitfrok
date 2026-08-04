@@ -1,0 +1,165 @@
+---
+# SeaweedFS 4.40 deployment for local Minikube dev environment
+# S3-compatible blob storage (git storage tier reference, ADR-0016)
+# Image tag mirrors deploy/dev/versions.env (ADR-0023) — copied by hand; nothing sources that file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seaweedfs-pvc
+  namespace: default
+  labels:
+    app: seaweedfs
+    phase: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+  namespace: default
+  labels:
+    app: seaweedfs
+    phase: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+        phase: "0"
+    spec:
+      containers:
+      - name: seaweedfs
+        image: chrislusf/seaweedfs:4.40
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: master
+          containerPort: 9333
+          protocol: TCP
+        - name: filer
+          containerPort: 8888
+          protocol: TCP
+        - name: s3
+          containerPort: 8333
+          protocol: TCP
+        args:
+          - all
+          - -s3
+          - -s3.config=/etc/seaweedfs/s3_config.json
+          - -dir=/data
+          - -master.port=9333
+          - -filer.port=8888
+          - -s3.port=8333
+        env:
+        - name: WEED_MASTER_VOLUME_GROWTH_COPY_1
+          value: "1"
+        - name: WEED_MASTER_VOLUME_GROWTH_COPY_2
+          value: "2"
+        - name: WEED_FILER_BUCKETS_FOLDER
+          value: /data/buckets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          tcpSocket:
+            port: master
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: master
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: config
+          mountPath: /etc/seaweedfs
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: seaweedfs-pvc
+      - name: config
+        configMap:
+          name: seaweedfs-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seaweedfs-config
+  namespace: default
+  labels:
+    app: seaweedfs
+    phase: "0"
+data:
+  s3_config.json: |
+    {
+      "identities": [
+        {
+          "name": "anonymous",
+          "credentials": [
+            {
+              "accessKey": "minioadmin",
+              "secretKey": "minioadmin"
+            }
+          ],
+          "actions": [
+            "Read",
+            "Write",
+            "List"
+          ]
+        }
+      ],
+      "buckets": []
+    }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+  namespace: default
+  labels:
+    app: seaweedfs
+    phase: "0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: master
+    port: 9333
+    targetPort: master
+    protocol: TCP
+  - name: filer
+    port: 8888
+    targetPort: filer
+    protocol: TCP
+  - name: s3
+    port: 8333
+    targetPort: s3
+    protocol: TCP
+  selector:
+    app: seaweedfs
+
+# There is deliberately no `s3.gitsaas.test` Service here. Service names must be RFC 1035 DNS
+# labels, so a dotted name is rejected by the API server — and it would not have produced that
+# hostname anyway: in-cluster DNS is always <service>.<namespace>.svc.cluster.local. The
+# s3.gitsaas.test host is routed by ingress.yaml; in-cluster clients use seaweedfs:8333.
