@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `000c945` on 2026-08-06.**
+> **Synced from governance pin `6c7cbdd` on 2026-08-06.**
 
 ## The four phases
 
@@ -141,6 +141,7 @@ From `governance/docs/roadmap/README.md` and the phase-0 plan:
 | **0031** | Merge enforcement split into `main-integrity` + `main-review` |
 | **0032** | `buf lint` + `buf breaking` gate `contracts/`; the 13 `ENUM_VALUE_PREFIX` violations are renamed **before** the baseline is taken |
 | **0033** | Live bare repos stay on **block volumes** — SeaweedFS-FUSE's `rename()` is not atomic, which git needs for every ref update |
+| **0034** | *(Proposed)* image pins are fully-qualified, resolvable, **patch-level** tags; no `:latest`. A floor is not a pin — `redpanda:v26.1` was never published |
 
 ## What "Done" means
 

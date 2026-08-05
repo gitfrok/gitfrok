@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `000c945` on 2026-08-06.**
+> **Synced from governance pin `6c7cbdd` on 2026-08-06.**
 
 ## Where to start
 
@@ -35,7 +35,7 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │   ├── policies/                     OPA/Rego policy-as-code
 │   ├── scripts/                      check-docs.sh (the docs gate)
 │   └── docs/
-│       ├── adr/                      0001…0033 + README index — decisions, immutable once Accepted
+│       ├── adr/                      0001…0034 + README index — decisions, immutable once Accepted
 │       ├── bench/T-0007/            storage benchmark evidence (raw JSON + reading)
 │       ├── product/PRD.md            product requirements (PR-#); restates ADRs, never decides
 │       ├── specs/                    SPEC-0001…SPEC-0011 + _template.md
