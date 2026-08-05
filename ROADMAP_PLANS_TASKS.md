@@ -5,7 +5,7 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `130b824` on 2026-08-06.**
+> **Synced from governance pin `ce6ac6c` on 2026-08-06.**
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -19,7 +19,7 @@ must satisfy `governance/docs/process/definition-of-done.md`.
 
 | Phase | Theme | Tasks | State |
 |---|---|---|---|
-| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | in progress — 4 of 10 Done; EP-0 closed 2026-08-04 |
+| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | in progress — 5 of 10 Done; EP-0 closed 2026-08-04, EP-9 2026-08-06 |
 | 1 | MVP (GitHub-lite) | T-0010 – T-0018 (9) | not started |
 | 2 | Unified security & governance (the wedge) | none yet | backlog says *to be expanded* |
 | 3 | BYO & commercial | none yet | backlog says *to be expanded* |
@@ -131,7 +131,7 @@ against `docs/backlog/README.md`. **Owner is `unassigned` on every task** — no
 | T-0007 | Storage benchmark | Todo | EP-3 | super-repo → governance | chore | 0020, 0023, 0016 |
 | T-0008 | In-process bus + module `api` | **Done** | EP-0 | backend | chore | 0025, 0022 |
 | T-0009 | Architecture fitness functions | **Done** | EP-0 | backend (+ super-repo) | chore | 0026, 0025, 0022, 0030 |
-| T-0020 | Contract schema gate | Todo — ready to start | EP-9 | governance → backend → bff → webfrontend → super-repo | chore | **0032 (governing)**, 0022, 0027, 0031 |
+| T-0020 | Contract schema gate | **Done** | EP-9 | governance → backend → bff → webfrontend → super-repo | chore | **0032 (governing)**, 0022, 0027, 0031 |
 
 **EP-0 closed 2026-08-04** — all four of its tasks Done. T-0002's AC5 was the last item: the gates
 now *block* rather than merely run. ADR-0031 split `main` enforcement into `main-integrity` (no
@@ -149,15 +149,29 @@ recorded in T-0002 and the backlog, not by editing the decision.
 Remaining follow-up: the two rulesets are five per-repo copies, because org-level rulesets need
 GitHub Team. `make rulesets-check` keeps them honest.
 
-#### T-0020 — the gate `ci-gates.md` always claimed
-Added 2026-08-06 under a **new epic, EP-9**, not a reopened EP-0. `governance/docs/process/ci-gates.md`
-has marked "contract schema (additive / breaking-check)" required in four repos all along, but `buf`
-runs in no CI in any repo and `buf lint` on `contracts/` is red — 13 `ENUM_VALUE_PREFIX` violations
-in `proto/agent/v1/agent.proto`. It sits in Phase 0 because the phase-0 exit criteria require CI
-green on *contract* tests. **ADR-0032 Accepted 2026-08-06 — ready to start.** It settles the 13
-names as a **rename before the `buf breaking` baseline is taken** (invariant 10 permits it: a rename
-keeps the number and type), not a path-scoped exemption. Nothing is enforced yet — `buf` still runs
-in no CI and `buf lint` is still red — because acceptance decides the shape and T-0020 builds it.
+#### T-0020 — the gate `ci-gates.md` always claimed (Done 2026-08-06)
+Filed and finished 2026-08-06 under a **new epic, EP-9**, not a reopened EP-0.
+`governance/docs/process/ci-gates.md` had marked "contract schema (additive / breaking-check)"
+required in four repos all along while `buf` ran in no CI anywhere and `buf lint` on `contracts/` was
+red — 13 `ENUM_VALUE_PREFIX` violations in `proto/agent/v1/agent.proto`. Phase 0, because the
+phase-0 exit criteria require CI green on *contract* tests.
+
+**What is enforced now.** ADR-0032 settled the 13 names as a **rename before the `buf breaking`
+baseline was taken** — invariant 10 permits it, since a rename keeps the number and type — rather
+than a path-scoped exemption. `buf lint` and `buf breaking` (baseline: tip of `main`, category
+`FILE`) are required in governance CI, and the super-repo's `make codegen-check` requires every
+consumer's generated tree to match its pinned contracts. Both ride inside already-required check
+contexts, so they block rather than merely run.
+
+**AC5 was amended during implementation, not quietly ticked.** It asked for codegen freshness in each
+consumer's own CI, which cannot exist while every `buf.gen.yaml` reads `../governance/contracts` — a
+sibling checkout present only in this composition. Per-consumer gating stays blocked on the
+ADR-0027/0028 generated-type publishing follow-up; the trade accepted in exchange is that a
+hand-edited `gen/` is caught at the pin bump rather than in the consumer's own PR.
+
+**`ci-gates.md`'s rows were corrected too**, since the four-repo shape was unbuildable: lint and
+breaking belong to governance, generated-code freshness to the super-repo. Every ✓ in that table now
+maps to a check that runs.
 
 #### T-0003 — the one with work already merged
 `deploy/dev/` (manifests, ingress, hello fixture), `scripts/dev-up.sh`, `scripts/smoke-dev.sh` and

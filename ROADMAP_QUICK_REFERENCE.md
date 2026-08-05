@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `130b824` on 2026-08-06.**
+> **Synced from governance pin `ce6ac6c` on 2026-08-06.**
 
 ## The four phases
 
@@ -12,7 +12,7 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │ PHASE 0 — Foundations                          IN PROGRESS       │
 │ scaffolding · dev env · tenancy/RLS · PDP · audit · storage bench│
-│ 10 tasks: T-0001…T-0009 + T-0020  —  4 Done, 6 Todo             │
+│ 10 tasks: T-0001…T-0009 + T-0020  —  5 Done, 5 Todo             │
 │ Exit: tenant-scoped, policy-checked, audited request end-to-end  │
 │       in Minikube; boundary/arch tests in CI; benchmark decided  │
 └──────────────────────────────────────────────────────────────────┘
@@ -56,10 +56,15 @@ Status is each task file's own `Status:` field.
 | T-0007 | Storage benchmark | 📝 Todo ⚠️ gates Phase 1 | EP-3 |
 | T-0008 | In-process bus + module `api` | ✅ **Done** | EP-0 |
 | T-0009 | Architecture fitness functions | ✅ **Done** | EP-0 |
-| T-0020 | Contract schema gate (`buf lint`/`breaking`) | 📝 Todo — ready to start | EP-9 |
+| T-0020 | Contract schema gate (`buf lint`/`breaking`) | ✅ **Done** | EP-9 |
 
 **EP-0 (scaffolding & process) closed 2026-08-04** — all four tasks Done. The merge gates now block
 rather than merely run (ADR-0031), and since 2026-08-05 four-eyes review binds owners too.
+
+**EP-9 (contract gates) closed 2026-08-06** — T-0020 Done. `buf lint` + `buf breaking` are required
+in governance, and the super-repo requires generated code to match its pinned contracts. AC5 was
+amended: per-consumer codegen gating needs the ADR-0027/0028 generated-type publishing follow-up,
+so it is gated at the composition boundary instead.
 
 **T-0003 caveat:** its manifests and scripts are merged on super-repo `main` (`deploy/dev/`,
 `scripts/dev-up.sh`, `scripts/smoke-dev.sh`), but nothing has run on a cluster, so every AC is

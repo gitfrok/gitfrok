@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `130b824` on 2026-08-06.**
+> **Synced from governance pin `ce6ac6c` on 2026-08-06.**
 
 ## Where to start
 
@@ -86,7 +86,7 @@ Every status below is the task file's own `Status:` field.
 
 | Phase | Tasks | Done | Todo |
 |---|---|---|---|
-| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0008, T-0009 | T-0003, T-0004, T-0005, T-0006, T-0007, T-0020 |
+| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0008, T-0009, T-0020 | T-0003, T-0004, T-0005, T-0006, T-0007 |
 | 1 — MVP | T-0010…T-0018 (9) | — | all nine |
 | 2 — the wedge | none defined | — | backlog: *to be expanded* |
 | 3 — BYO | none defined | — | backlog: *to be expanded* |
@@ -107,12 +107,12 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 - **T-0004 (tenancy + RLS)** — depends on T-0003. The RLS baseline in `deploy/dev/postgres.yaml`
   creates a non-superuser `gitfrok_app` role because RLS never binds a superuser; consumers must use
   it or the policy is inert.
-- **T-0020 (contract schema gate, EP-9)** — **ready to start; ADR-0032 Accepted 2026-08-06.** `buf`
-  still runs in no CI in any repo, and `buf lint` on `contracts/` is still red: 13
-  `ENUM_VALUE_PREFIX` violations in `proto/agent/v1/agent.proto`. The decision is settled — rename
-  those names before the `buf breaking` baseline is taken — but nothing is enforced until T-0020
-  lands. It is a five-repo wave in ADR-0027 order: governance → backend, bff → webfrontend →
-  super-repo pin.
+- **T-0020 (contract schema gate, EP-9) — Done 2026-08-06.** `buf lint` + `buf breaking` (baseline:
+  tip of `main`, category `FILE`) are required in governance CI; `make codegen-check` requires every
+  consumer's generated tree to match its pinned contracts. Both ride inside already-required check
+  contexts, so they block. AC5 was amended: per-consumer codegen gating needs the ADR-0027/0028
+  generated-type publishing follow-up, so the check sits at the composition boundary and a
+  hand-edited `gen/` is caught at the pin bump rather than in the consumer's own PR.
 
 ### Known governance gaps
 
@@ -121,9 +121,11 @@ Items 1–4 are tracked in PRD §12 — not invented here. Item 5 is observed in
 1. No Phase-1/2/3 plan files — later phases are sequenced only by what individual task files state,
    and only T-0018 states dependencies (PRD §12.2 open item 1).
 2. Phase-2 and Phase-3 requirements (`PR-13`…`PR-23`) have no epics, specs or tasks yet (PRD §12.1).
-3. `process/ci-gates.md` marks "contract schema (additive / breaking-check)" required in four repos
-   and no such check exists — `buf` runs in no CI anywhere and `buf lint` on `contracts/` is red
-   (PRD §12.2 open item 3). ADR-0032 settles the shape; the drift closes when **T-0020** lands.
+3. Per-consumer codegen gating is still impossible: each consumer's `buf.gen.yaml` reads
+   `../governance/contracts`, which exists only in this composition, so freshness is gated in the
+   super-repo instead. Needs the generated-type publishing follow-up in ADR-0027/0028. *(The older
+   gap here — a contract-schema check required in four repos that existed in none — was resolved by
+   ADR-0032 + T-0020 on 2026-08-06, and `ci-gates.md`'s rows corrected with it.)*
 4. `plans/phase-0-foundations.md` lists nine workstreams and predates T-0020, so one Phase-0 task is
    sequenced only by its own file (PRD §12.2 open item 4).
 5. `ZITADEL_IMAGE` is pinned to `:latest`, which is not a pin — `check-dev-images.sh` warns on it.
@@ -141,6 +143,7 @@ Items 1–4 are tracked in PRD §12 — not invented here. Item 5 is observed in
 `definition-of-done.md` (what Done means). Human gates: Proposed ADRs, spec approval, pin bumps.
 
 **Enforcement** — `make verify` (dep direction, version floors, dev image pins), `make lint-shell`,
+`make codegen-check` (generated trees match the pinned contracts, T-0020),
 per-submodule CI, `scripts/apply-rulesets.sh check` (ADR-0031 drift), `governance/scripts/check-docs.sh`.
 
 **Dev environment** — `deploy/dev/README.md` is the honest account of what works and what is
