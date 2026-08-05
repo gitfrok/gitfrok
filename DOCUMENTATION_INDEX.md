@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `0b3b9a9` on 2026-08-05.**
+> **Synced from governance pin `0f40df9` on 2026-08-06.**
 
 ## Where to start
 
