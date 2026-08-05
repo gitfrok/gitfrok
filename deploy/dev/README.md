@@ -238,28 +238,45 @@ as UID 65534 with a read-only root filesystem and all capabilities dropped.
 
 ## What is not done yet
 
-Against T-0003's acceptance criteria:
+Against T-0003's acceptance criteria — **first real cluster run: 2026-08-06**, rootless podman
+driver (`minikube start --driver=podman --container-runtime=containerd`), profile `minikube`:
 
 | AC | State |
 |---|---|
-| AC1 — `make dev-up` starts Minikube with `ingress` + `ingress-dns` | **implemented, unverified** — `scripts/dev-up.sh` does exactly this; never run against a real Minikube |
-| AC2 — all services come up from these manifests using `versions.env` tags | **implemented, unverified** — enforced twice (`check-dev-images.sh` on the manifests, `smoke-dev.sh` on running pods); "come up" itself is untested |
-| AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **implemented, unverified, one manual step** — `dev-up` creates the secret and `ingress.yaml` routes the hosts, but host DNS needs root and is not automated |
-| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds** — nothing here uses either; the scripts avoid bash 4+ constructs so they run on macOS's bash 3.2 |
+| AC1 — `make dev-up` starts Minikube with `ingress` + `ingress-dns` | **partially verified** — `dev-up.sh` ran end to end and enabled both addons (they were `disabled` beforehand, so that half is a real test). Its *cluster-create* path was skipped: the cluster already existed, and the script converges rather than recreating. Verifying the create path needs a profile `dev-up` makes itself. |
+| AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
+| AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified in substance, not by the specified path** — ingress serves the mkcert wildcard for `hello.gitsaas.test` and returns the fixture: `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`). That was reached through `kubectl port-forward`, because under **rootless** podman the node IP is unroutable from the host — `ping 192.168.49.2` is 100% loss, and `smoke-dev.sh`'s `--resolve` fallback times out (`rc=28`). No host-DNS or `/etc/hosts` entry can fix that; it needs a rootful driver or KVM. |
+| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds, Linux now demonstrated** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. The scripts ran on Linux for real; `macOS` remains unverified, and the bash-3.2 claim was re-checked by grep (no `declare -A`, `mapfile`, `readarray`, or `${var,,}`). |
 
-Every AC above says *unverified* for the same reason: no cluster has ever run this. That is the
-single thing standing between T-0003 and Done, and it needs a machine with `minikube`, `kubectl` and
-`mkcert` — not more code.
+### The seven defects the first run found
+
+Each was invisible to review and to `check-dev-images.sh`, because nothing had executed:
+
+| # | Defect | How it failed |
+|---|---|---|
+| 1 | postgres PVC mounted at `/var/lib/postgresql/data` | pg18 stores data in major-version subdirectories and **exits** rather than ignore that mount: *"there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)"*. Fixed to a single mount one level up (docker-library/postgres#1259). |
+| 2 | `redpandadata/redpanda:v26.1` | never published — the registry answers `not found`. The v26.1 **series** exists (v26.1.2…v26.1.14) but Redpanda tags patch releases only, so there is no floating minor tag to pin. Now `docker.redpanda.com/redpandadata/redpanda:v26.2.1`. |
+| 3 | seaweedfs `args: [all, …]` | `weed: unknown subcommand "all"`. The set is `master\|volume\|filer\|s3\|server`; combined mode is `server`, and `-filer` must be asked for explicitly or nothing serves `filer.gitsaas.test:8888`. |
+| 4 | zitadel `--tls-mode=external` | `Error: unknown flag`. The flag is `--tlsMode` — camelCase. |
+| 5 | seaweedfs readiness `path: /status` | 404s on the master (*"volume id status not found"*), so the pod never became Ready and the rollout blocked forever. `/cluster/status` is the health endpoint and returns `{"IsLeader":true,…}`. |
+| 6 | zitadel `Port` config | Kubernetes injects `<SVC>_PORT=tcp://<ip>:<port>` for every Service in the namespace. The Service is named `zitadel`, Zitadel's config reader consumes `ZITADEL_`-prefixed env vars, so it received `ZITADEL_PORT=tcp://10.97.6.84:8080` where it wanted a `uint16`. Fixed with `enableServiceLinks: false`. **Only visible after #4** — the unknown-flag error killed it before config parsing. |
+| 7 | RWO PVCs with the default `RollingUpdate` | the replacement pod starts while the old one still holds the volume: redpanda died with *"failed to lock pidfile. already locked"*, and the rollout deadlocks — the old pod will not terminate until the new is Ready, and the new cannot be Ready until the old lets go. `strategy: Recreate` added to postgres, valkey, redpanda and seaweedfs (zitadel already had it). Redpanda's *first* rollout squeaked through, which is worse than a clean failure because it hides the bug. |
+
+One script change came with them: `dev-up.sh` called `mkcert -install` under `set -e`. That step writes
+the **system** trust store and needs root, so on a host without passwordless sudo it aborted the whole
+bring-up before applying a single manifest — over a step no acceptance criterion depends on
+(`smoke-dev.sh` validates with `--cacert` against `rootCA.pem`). It now warns and continues when the CA
+exists, matching how the script already treats host DNS: print the root-requiring step, don't do it.
 
 Also outstanding:
 
-- **run it**, then flip T-0003's ACs in `governance/` — a separate PR from any super-repo change
-  (invariant 23)
+- **AC1's create path and AC3's specified path need a different host** — a rootful Docker/podman
+  driver or KVM. Everything else about this environment is now demonstrated rather than asserted.
 - ADR-0024 says the same Minikube flow is used in CI; nothing wires that yet, and super-repo CI has
   `contents: read` with no cluster. `check-dev-images.sh` is the only part of this that CI gates.
 - `ZITADEL_IMAGE` is `:latest` — warned by `check-dev-images.sh`, still not a pin
-- Postgres `PGDATA` (see [Persistent Storage](#persistent-storage)) — the one unverified item that
-  silently destroys data rather than failing loudly
+- The scripts default to profile `gitfrok`; a cluster created by hand as `minikube` needs
+  `MINIKUBE_PROFILE=minikube`, or `make dev-smoke` fails against a context that does not exist
 - the unused Zitadel PVC; `namespace: default` hardcoded in all 24 objects, so two stacks cannot
   coexist; Valkey has no `maxmemory`; SeaweedFS's S3 endpoint is open
 - per-OS Minikube driver docs (an ADR-0024 follow-up)

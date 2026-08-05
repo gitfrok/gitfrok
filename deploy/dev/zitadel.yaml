@@ -98,6 +98,12 @@ spec:
         app: zitadel
         phase: "0"
     spec:
+      # Kubernetes injects <SVC>_PORT=tcp://<clusterIP>:<port> for every Service in the namespace.
+      # The Service here is named `zitadel`, so pods get ZITADEL_PORT=tcp://10.x.x.x:8080 — and
+      # Zitadel's own config reader consumes ZITADEL_-prefixed env vars, so that URL lands on config
+      # key `Port` and boot fails with "'Port' cannot parse value as 'uint16'". Nothing in this pod
+      # needs service-link env vars; every address it uses is a DNS name from its ConfigMap.
+      enableServiceLinks: false
       serviceAccountName: zitadel
       initContainers:
       # Zitadel requires database to be ready first
@@ -131,7 +137,9 @@ spec:
         - --steps=/etc/zitadel/steps.yaml
         - --masterkey=$(ZITADEL_MASTERKEY)
         # TLS terminates at the ingress; without this Zitadel refuses to serve plaintext.
-        - --tls-mode=external
+        # camelCase is not a typo — the flag is --tlsMode; --tls-mode makes Zitadel exit with
+        # "unknown flag" before it logs anything else.
+        - --tlsMode=external
         env:
         # Must be exactly 32 bytes — Zitadel refuses to boot otherwise. Dev-only value; a real
         # deployment takes this from a secret manager, never from a manifest.

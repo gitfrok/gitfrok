@@ -87,7 +87,21 @@ done
 # on exit. A committed private key is not a secret, and a gitignore entry is one `git add -f` away
 # from being wrong.
 step "mkcert wildcard certificate for $WILDCARD (AC3)"
-mkcert -install
+# `mkcert -install` puts the CA in the SYSTEM trust store, which needs root. That is a convenience
+# for browsers and for bare `curl`; the cluster never needs it, and neither does smoke-dev.sh, which
+# validates explicitly with --cacert against $(mkcert -CAROOT)/rootCA.pem. So a failure here must not
+# abort the bring-up — the same reasoning this script already applies to host DNS, which it prints
+# instead of doing. Aborting was over-strict: on a host without passwordless sudo it stopped the
+# cluster from coming up at all over a step no acceptance criterion depends on.
+if ! mkcert -install >/dev/null 2>&1; then
+  if [ -f "$(mkcert -CAROOT)/rootCA.pem" ]; then
+    printf '  note: mkcert -install could not write the system trust store (needs root).\n'
+    printf '        The CA exists, so the cluster and "make dev-smoke" are unaffected.\n'
+    printf '        For browser trust, run: mkcert -install\n'
+  else
+    die "mkcert has no CA at $(mkcert -CAROOT) and 'mkcert -install' failed — run 'mkcert -install' by hand"
+  fi
+fi
 tlsdir=$(mktemp -d)
 trap 'rm -rf "$tlsdir"' EXIT
 mkcert -cert-file "$tlsdir/tls.crt" -key-file "$tlsdir/tls.key" "$WILDCARD" >/dev/null
