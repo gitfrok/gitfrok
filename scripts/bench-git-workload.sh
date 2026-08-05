@@ -40,7 +40,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
 done
-[ -n "$target" ] && [ -n "$label" ] || usage
+if [ -z "$target" ] || [ -z "$label" ]; then usage; fi
 
 command -v git >/dev/null || { echo "git not installed" >&2; exit 1; }
 # busybox date has no %N, so a coreutils date is a hard requirement: without sub-second resolution
