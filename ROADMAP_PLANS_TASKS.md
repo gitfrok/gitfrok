@@ -5,7 +5,7 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `661a77c` on 2026-08-06.**
+> **Synced from governance pin `879f1c8` on 2026-08-06.**
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -19,7 +19,7 @@ must satisfy `governance/docs/process/definition-of-done.md`.
 
 | Phase | Theme | Tasks | State |
 |---|---|---|---|
-| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | in progress — 5 of 10 Done; EP-0 closed 2026-08-04, EP-9 2026-08-06 |
+| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | in progress — 6 of 10 Done; EP-0 closed 2026-08-04, EP-9 + EP-3 2026-08-06 |
 | 1 | MVP (GitHub-lite) | T-0010 – T-0018 (9) | not started |
 | 2 | Unified security & governance (the wedge) | none yet | backlog says *to be expanded* |
 | 3 | BYO & commercial | none yet | backlog says *to be expanded* |
@@ -129,7 +129,7 @@ against `docs/backlog/README.md`. **Owner is `unassigned` on every task** — no
 | T-0004 | Tenancy + RLS baseline | Todo | EP-2 | backend | SPEC-0001 | 0003, 0022, 0007 |
 | T-0005 | PDP skeleton (OPA) | Todo | EP-2 | governance → backend → bff | SPEC-0002 | 0006, 0022 |
 | T-0006 | Append-only audit log | Todo | EP-2 | governance → backend | SPEC-0003 | 0007, 0022 |
-| T-0007 | Storage benchmark | **In review** | EP-3 | super-repo → governance | chore | 0020, 0023, 0016, **0033 (Proposed)** |
+| T-0007 | Storage benchmark | **Done** | EP-3 | super-repo → governance | chore | 0020, 0023, 0016, **0033 (governing)** |
 | T-0008 | In-process bus + module `api` | **Done** | EP-0 | backend | chore | 0025, 0022 |
 | T-0009 | Architecture fitness functions | **Done** | EP-0 | backend (+ super-repo) | chore | 0026, 0025, 0022, 0030 |
 | T-0020 | Contract schema gate | **Done** | EP-9 | governance → backend → bff → webfrontend → super-repo | chore | **0032 (governing)**, 0022, 0027, 0031 |
@@ -174,7 +174,7 @@ hand-edited `gen/` is caught at the pin bump rather than in the consumer's own P
 breaking belong to governance, generated-code freshness to the super-repo. Every ✓ in that table now
 maps to a check that runs.
 
-#### T-0007 — measured, and the answer was a correctness one (In review 2026-08-06)
+#### T-0007 — measured, and the answer was a correctness one (Done 2026-08-06)
 The benchmark ran: `make bench-storage` in the super-repo, both arms on one physical disk so the delta
 isolates the storage path rather than the device. **SeaweedFS-FUSE is disqualified for live bare repos,
 on `rename()` atomicity rather than on speed.** Git commits every ref update by renaming
@@ -187,10 +187,12 @@ Performance was not the deciding factor: ~12% slower on push and clone, ~2× on 
 lower concurrent-push throughput. FUSE *passed* O_EXCL locking, fsync, durability across a remount,
 contended-push semantics and `fsck`.
 
-So **ADR-0016 needs no amendment** and invariant 7 stands as written; **ADR-0033 is Proposed** and
-T-0007 is `In review` until it is Accepted (ADR-0001 makes PR review the decision gate). Evidence and
-its limits — one workstation, single-node filer, so the latency *ratios* want a cluster re-run after
-T-0003 while the correctness verdict does not — are in `governance/docs/bench/T-0007/`.
+So **ADR-0016 needed no amendment**, and **ADR-0033 is Accepted** (2026-08-06) — which also discharged
+invariant 7's escape clause: the rule already read "block volumes", and the benchmark it was waiting on
+concluded the same way. Reopening it now requires demonstrating atomic `rename()` under concurrent
+readers, not a faster FUSE client. Evidence and its limits — one workstation, single-node filer, so the
+latency *ratios* want a cluster re-run after T-0003 while the correctness verdict does not — are in
+`governance/docs/bench/T-0007/`.
 
 #### T-0003 — the one with work already merged
 `deploy/dev/` (manifests, ingress, hello fixture), `scripts/dev-up.sh`, `scripts/smoke-dev.sh` and
@@ -245,9 +247,9 @@ T-0007                      parallel; GATES Phase-1 git-storage design
 you see quoted elsewhere is inference, not governance — writing
 `governance/docs/plans/phase-1-mvp.md` is the fix, and it is tracked as PRD §12.2 open item 1.
 
-**Known bottleneck (measured 2026-08-06):** T-0007 gates T-0010. The result does **not** amend
-ADR-0016 — ADR-0033 (Proposed) confirms block volumes for live bare repos, so T-0010's storage
-assumption stands. The gate lifts when ADR-0033 is Accepted.
+**Bottleneck cleared (2026-08-06):** T-0007 gated T-0010 and is now Done. The result does **not** amend
+ADR-0016 — ADR-0033 (Accepted) confirms block volumes for live bare repos, so T-0010's storage
+assumption stands and it is free to start.
 
 ---
 
@@ -283,7 +285,7 @@ green; and the task file plus backlog are updated.
 | 0030 | Extraction-trigger budgets for the modular monolith |
 | 0031 | Split merge enforcement — bind admins to checks |
 | 0032 | Gate the contract schema — lint + breaking checks on `contracts/` |
-| 0033 | Live bare repos stay on block volumes — SeaweedFS-FUSE fails git's rename contract (**Proposed**) |
+| 0033 | Live bare repos stay on block volumes — SeaweedFS-FUSE fails git's rename contract |
 
 ADR-0001 is the SoT decision, **not** the AGDD framework — AGDD is ADR-0028. The full index with
 statuses is `governance/docs/adr/README.md`.
