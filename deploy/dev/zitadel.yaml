@@ -108,7 +108,7 @@ spec:
       initContainers:
       # Zitadel requires database to be ready first
       - name: db-wait
-        image: busybox:1.35
+        image: docker.io/library/busybox:1.35.0
         command:
           - sh
           - -c
@@ -120,7 +120,7 @@ spec:
             echo "PostgreSQL is ready"
       containers:
       - name: zitadel
-        image: ghcr.io/zitadel/zitadel:latest
+        image: ghcr.io/zitadel/zitadel:v4.16.2
         imagePullPolicy: IfNotPresent
         ports:
         - name: http

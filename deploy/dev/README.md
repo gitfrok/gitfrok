@@ -274,7 +274,10 @@ Also outstanding:
   driver or KVM. Everything else about this environment is now demonstrated rather than asserted.
 - ADR-0024 says the same Minikube flow is used in CI; nothing wires that yet, and super-repo CI has
   `contents: read` with no cluster. `check-dev-images.sh` is the only part of this that CI gates.
-- `ZITADEL_IMAGE` is `:latest` — warned by `check-dev-images.sh`, still not a pin
+- ~~`ZITADEL_IMAGE` is `:latest`~~ **closed 2026-08-06 (ADR-0034)**: pinned to `v4.16.2`, the version
+  this cluster resolved, and `:latest` is now a hard failure rather than a warning. Every pin is
+  fully qualified with its registry, and `CHECK_IMAGE_RESOLVE=1` asserts each one resolves — the check
+  that would have caught `redpanda:v26.1` for one registry request instead of a cluster run
 - The scripts default to profile `gitfrok`; a cluster created by hand as `minikube` needs
   `MINIKUBE_PROFILE=minikube`. `smoke-dev.sh` now says so in one line instead of reporting six
   dead deployments — every query in it is `2>/dev/null || true`, so a nonexistent context used to be

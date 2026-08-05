@@ -49,7 +49,10 @@ echo "minikube, kubectl, mkcert present"
 # Checked before anything is applied: bringing up a cluster from tags that no longer match the
 # recorded ones is worse than not bringing it up. Same script CI runs via `make verify`.
 step "Asserting manifest image tags match $VERSIONS"
-./scripts/check-dev-images.sh || die "image tags drifted from $VERSIONS (above)"
+# Resolution enabled here (ADR-0034): this script is about to pull these images anyway, so learning
+# that a tag does not exist costs one registry query instead of an ErrImagePull loop and a confused
+# ten minutes. A rate-limited registry reports inconclusive, not failure.
+CHECK_IMAGE_RESOLVE=1 ./scripts/check-dev-images.sh || die "image tags drifted from $VERSIONS (above)"
 
 # ---------------------------------------------------------------------------- cluster
 step "Minikube profile '$PROFILE'"
