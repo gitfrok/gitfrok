@@ -76,9 +76,9 @@ by T-0009, not scheduled.
 
 ## PLANS — execution strategy
 
-`governance/docs/plans/` contains **only** `phase-0-foundations.md`. There is no Phase-1, Phase-2 or
-Phase-3 plan file; PRD §12.2 open item 1 records this, and notes the consequence — later phases are
-sequenced only by whatever individual task files state.
+`governance/docs/plans/` holds **one plan file**, `phase-0-foundations.md`, plus its `README.md`
+index. There is no Phase-1, Phase-2 or Phase-3 plan; PRD §12.2 open item 1 records this, and notes
+the consequence — later phases are sequenced only by whatever individual task files state.
 
 ### Plan: Phase 0 — Foundations
 
@@ -152,8 +152,9 @@ with `minikube`/`kubectl`/`mkcert` is what remains.
 
 ### Phase 1 — MVP (9 tasks)
 
-Every Phase-1 task is `Todo`. Task files label the epic `1 / MVP`; the backlog groups them into
-EP-4…EP-8, shown here.
+Every Phase-1 task is `Todo`. Eight of the nine task files label the epic `1 / MVP` and leave the
+grouping to the backlog, which splits them into EP-4…EP-8 as shown here; T-0018 is the exception —
+its own field already reads `1 / EP-8 Migration`.
 
 | Task | Title | Epic | Repo(s) | Spec | ADRs |
 |---|---|---|---|---|---|

@@ -17,7 +17,7 @@
 | know how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md` |
 | see phase intent and exit criteria | `governance/docs/roadmap/README.md` |
 | see epics grouping tasks | `governance/docs/backlog/README.md` |
-| see Phase-0 sequencing | `governance/docs/plans/phase-0-foundations.md` (the only plan file that exists) |
+| see Phase-0 sequencing | `governance/docs/plans/phase-0-foundations.md` (the only phase with a plan) |
 | run the dev cluster | `deploy/dev/README.md`, then `make dev-up && make dev-smoke` |
 | a roadmap overview | `ROADMAP_QUICK_REFERENCE.md` (short) · `ROADMAP_PLANS_TASKS.md` (full) |
 
@@ -39,7 +39,7 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │       ├── product/PRD.md            product requirements (PR-#); restates ADRs, never decides
 │       ├── specs/                    SPEC-0001…SPEC-0011 + _template.md
 │       ├── roadmap/README.md         four phases + exit criteria
-│       ├── plans/                    phase-0-foundations.md  ← no phase-1/2/3 plan yet
+│       ├── plans/                    README.md + phase-0-foundations.md  ← no phase-1/2/3 plan yet
 │       ├── backlog/README.md         epics EP-0…EP-8
 │       ├── tasks/                    T-0001…T-0018 + README + _template.md
 │       ├── process/                  agdd.md · agentic-sdlc.md · definition-of-done.md
