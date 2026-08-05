@@ -9,3 +9,8 @@
 # own contents; .qoder/ ships none, and such a file would not survive its wipe-and-regenerate anyway,
 # so the pattern belongs here.
 .qoder/
+
+# Default output of scripts/bench-storage.sh (T-0007). Runs are archived under
+# governance/docs/bench/ with the result doc that interprets them; a stray local run should not
+# look like tracked evidence.
+/bench-results/
