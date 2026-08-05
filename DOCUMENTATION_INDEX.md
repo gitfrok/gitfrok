@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `879f1c8` on 2026-08-06.**
+> **Synced from governance pin `000c945` on 2026-08-06.**
 
 ## Where to start
 
@@ -100,9 +100,12 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 
 ### Current focus and blockers
 
-- **T-0003 (Minikube dev env)** — manifests and scripts are merged on `main`, but nothing has run on
-  a cluster, so all four ACs are *implemented, unverified* and the task is correctly `Todo`. Next
-  step: `make dev-up && make dev-smoke` on a machine with `minikube`/`kubectl`/`mkcert`.
+- **T-0003 (Minikube dev env) — In progress; first cluster run 2026-08-06.** **AC2 and AC4 verified**
+  (six deployments Available, six images from `versions.env`); AC1's addon half verified, create path
+  not exercised; **AC3 verified in substance only** — 200 with the cert validated against the mkcert
+  CA, reached via `port-forward` because the rootless node IP is unroutable. Cost **seven manifest
+  fixes**; three of five services could not previously start. Remaining work needs a rootful driver or
+  KVM, and macOS for macOS.
 - **T-0007 (storage benchmark) — Done 2026-08-06; EP-3 closed.** **ADR-0033 Accepted**: live bare repos
   stay on block volumes because SeaweedFS-FUSE's `rename()` is not atomic and git needs it for every ref
   update (36/428 concurrent ref reads missed a ref that always existed; block 0/229; zero rename errors,
