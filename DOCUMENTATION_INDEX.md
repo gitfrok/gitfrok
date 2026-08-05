@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `0f40df9` on 2026-08-06.**
+> **Synced from governance pin `19819f3` on 2026-08-06.**
 
 ## Where to start
 
@@ -35,13 +35,13 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │   ├── policies/                     OPA/Rego policy-as-code
 │   ├── scripts/                      check-docs.sh (the docs gate)
 │   └── docs/
-│       ├── adr/                      0001…0031 + README index — decisions, immutable once Accepted
+│       ├── adr/                      0001…0032 + README index — decisions, immutable once Accepted
 │       ├── product/PRD.md            product requirements (PR-#); restates ADRs, never decides
 │       ├── specs/                    SPEC-0001…SPEC-0011 + _template.md
 │       ├── roadmap/README.md         four phases + exit criteria
 │       ├── plans/                    README.md + phase-0-foundations.md  ← no phase-1/2/3 plan yet
-│       ├── backlog/README.md         epics EP-0…EP-8
-│       ├── tasks/                    T-0001…T-0018 + README + _template.md
+│       ├── backlog/README.md         epics EP-0…EP-9
+│       ├── tasks/                    T-0001…T-0018, T-0020 + README + _template.md
 │       ├── process/                  agdd.md · agentic-sdlc.md · definition-of-done.md
 │       └── agents/                   invariants.md (25) · context.md
 │
@@ -86,7 +86,7 @@ Every status below is the task file's own `Status:` field.
 
 | Phase | Tasks | Done | Todo |
 |---|---|---|---|
-| 0 — Foundations | T-0001…T-0009 (9) | T-0001, T-0002, T-0008, T-0009 | T-0003, T-0004, T-0005, T-0006, T-0007 |
+| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0008, T-0009 | T-0003, T-0004, T-0005, T-0006, T-0007, T-0020 |
 | 1 — MVP | T-0010…T-0018 (9) | — | all nine |
 | 2 — the wedge | none defined | — | backlog: *to be expanded* |
 | 3 — BYO | none defined | — | backlog: *to be expanded* |
@@ -107,6 +107,10 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 - **T-0004 (tenancy + RLS)** — depends on T-0003. The RLS baseline in `deploy/dev/postgres.yaml`
   creates a non-superuser `gitfrok_app` role because RLS never binds a superuser; consumers must use
   it or the policy is inert.
+- **T-0020 (contract schema gate, EP-9)** — **blocked on ADR-0032, which is `Proposed`.** `buf` runs
+  in no CI in any repo, and `buf lint` on `contracts/` is red: 13 `ENUM_VALUE_PREFIX` violations in
+  `proto/agent/v1/agent.proto`. The ADR settles whether those names are renamed before the
+  `buf breaking` baseline is set or grandfathered by path — after the baseline, the choice is fixed.
 
 ### Known governance gaps
 
@@ -116,6 +120,11 @@ Tracked in PRD §12, not invented here:
    and only T-0018 states dependencies (PRD §12.2 open item 1).
 2. Phase-2 and Phase-3 requirements (`PR-13`…`PR-23`) have no epics, specs or tasks yet (PRD §12.1).
 3. `ZITADEL_IMAGE` is pinned to `:latest`, which is not a pin — `check-dev-images.sh` warns on it.
+
+Two more are visible in the tree rather than in PRD §12: `plans/phase-0-foundations.md` still lists
+nine workstreams and predates T-0020; and `process/ci-gates.md` marks the contract-schema check
+required in four repos while attributing it to no task — which is what ADR-0032 and T-0020 exist to
+close.
 
 ## Documents by purpose
 
