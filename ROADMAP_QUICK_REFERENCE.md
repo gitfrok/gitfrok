@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `879f1c8` on 2026-08-06.**
+> **Synced from governance pin `000c945` on 2026-08-06.**
 
 ## The four phases
 
@@ -49,7 +49,7 @@ Status is each task file's own `Status:` field.
 |---|---|---|---|
 | T-0001 | Scaffold super-repo + submodules | ✅ **Done** | EP-0 |
 | T-0002 | Boundary/arch enforcement in CI | ✅ **Done** | EP-0 |
-| T-0003 | Minikube dev environment | 📝 Todo | EP-1 |
+| T-0003 | Minikube dev environment | 🔧 **In progress** — AC2+AC4 verified | EP-1 |
 | T-0004 | Tenancy + RLS baseline | 📝 Todo | EP-2 |
 | T-0005 | PDP skeleton (OPA) | 📝 Todo | EP-2 |
 | T-0006 | Append-only audit log | 📝 Todo | EP-2 |
@@ -66,10 +66,12 @@ in governance, and the super-repo requires generated code to match its pinned co
 amended: per-consumer codegen gating needs the ADR-0027/0028 generated-type publishing follow-up,
 so it is gated at the composition boundary instead.
 
-**T-0003 caveat:** its manifests and scripts are merged on super-repo `main` (`deploy/dev/`,
-`scripts/dev-up.sh`, `scripts/smoke-dev.sh`), but nothing has run on a cluster, so every AC is
-*implemented, unverified* and the task is correctly still `Todo`. `deploy/dev/README.md` has the
-AC-by-AC state.
+**T-0003 update (2026-08-06):** it has now run on a real cluster. **AC2 and AC4 verified**; AC1's
+addon half verified, its cluster-create path not exercised; **AC3 verified in substance only** — 200
+with the certificate validated against the mkcert CA, but via `port-forward`, because under rootless
+podman the node IP is unroutable from the host. Getting there took **seven manifest fixes**: as
+written, three of the five services could not start. What is left needs a rootful driver or KVM, and a
+macOS for macOS — not more code. AC-by-AC state: `deploy/dev/README.md`.
 
 ## Phase 0 sequencing
 
