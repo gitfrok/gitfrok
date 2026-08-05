@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `661a77c` on 2026-08-06.**
+> **Synced from governance pin `879f1c8` on 2026-08-06.**
 
 ## Where to start
 
@@ -87,7 +87,7 @@ Every status below is the task file's own `Status:` field.
 
 | Phase | Tasks | Done | Todo |
 |---|---|---|---|
-| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0008, T-0009, T-0020 | T-0003, T-0004, T-0005, T-0006, T-0007 |
+| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0007, T-0008, T-0009, T-0020 | T-0003, T-0004, T-0005, T-0006 |
 | 1 — MVP | T-0010…T-0018 (9) | — | all nine |
 | 2 — the wedge | none defined | — | backlog: *to be expanded* |
 | 3 — BYO | none defined | — | backlog: *to be expanded* |
@@ -103,11 +103,13 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 - **T-0003 (Minikube dev env)** — manifests and scripts are merged on `main`, but nothing has run on
   a cluster, so all four ACs are *implemented, unverified* and the task is correctly `Todo`. Next
   step: `make dev-up && make dev-smoke` on a machine with `minikube`/`kubectl`/`mkcert`.
-- **T-0007 (storage benchmark) — In review 2026-08-06.** Measured; **ADR-0033 Proposed**: live bare
-  repos stay on block volumes because SeaweedFS-FUSE's `rename()` is not atomic and git needs it for
-  every ref update (36/428 concurrent ref reads missed a ref that always existed; block 0/229; zero
-  rename errors, so rename works but is not atomic). **ADR-0016 needs no amendment.** Gates T-0010
-  until the ADR is Accepted. Evidence: `governance/docs/bench/T-0007/`; harness `make bench-storage`.
+- **T-0007 (storage benchmark) — Done 2026-08-06; EP-3 closed.** **ADR-0033 Accepted**: live bare repos
+  stay on block volumes because SeaweedFS-FUSE's `rename()` is not atomic and git needs it for every ref
+  update (36/428 concurrent ref reads missed a ref that always existed; block 0/229; zero rename errors,
+  so rename works but is not atomic). **ADR-0016 was not amended** and invariant 7's escape clause is
+  discharged. The T-0010 gate is lifted. Evidence: `governance/docs/bench/T-0007/`; harness
+  `make bench-storage`. Non-blocking follow-up: re-measure the latency ratios on a real cluster once
+  T-0003 is verified — the correctness verdict does not need it.
 - **T-0004 (tenancy + RLS)** — depends on T-0003. The RLS baseline in `deploy/dev/postgres.yaml`
   creates a non-superuser `gitfrok_app` role because RLS never binds a superuser; consumers must use
   it or the policy is inert.
