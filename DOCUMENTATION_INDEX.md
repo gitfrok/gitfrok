@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `19819f3` on 2026-08-06.**
+> **Synced from governance pin `e5d5723` on 2026-08-06.**
 
 ## Where to start
 
@@ -107,10 +107,12 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 - **T-0004 (tenancy + RLS)** — depends on T-0003. The RLS baseline in `deploy/dev/postgres.yaml`
   creates a non-superuser `gitfrok_app` role because RLS never binds a superuser; consumers must use
   it or the policy is inert.
-- **T-0020 (contract schema gate, EP-9)** — **blocked on ADR-0032, which is `Proposed`.** `buf` runs
-  in no CI in any repo, and `buf lint` on `contracts/` is red: 13 `ENUM_VALUE_PREFIX` violations in
-  `proto/agent/v1/agent.proto`. The ADR settles whether those names are renamed before the
-  `buf breaking` baseline is set or grandfathered by path — after the baseline, the choice is fixed.
+- **T-0020 (contract schema gate, EP-9)** — **ready to start; ADR-0032 Accepted 2026-08-06.** `buf`
+  still runs in no CI in any repo, and `buf lint` on `contracts/` is still red: 13
+  `ENUM_VALUE_PREFIX` violations in `proto/agent/v1/agent.proto`. The decision is settled — rename
+  those names before the `buf breaking` baseline is taken — but nothing is enforced until T-0020
+  lands. It is a five-repo wave in ADR-0027 order: governance → backend, bff → webfrontend →
+  super-repo pin.
 
 ### Known governance gaps
 

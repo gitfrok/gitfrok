@@ -5,7 +5,7 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `19819f3` on 2026-08-06.**
+> **Synced from governance pin `e5d5723` on 2026-08-06.**
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -130,7 +130,7 @@ against `docs/backlog/README.md`. **Owner is `unassigned` on every task** — no
 | T-0007 | Storage benchmark | Todo | EP-3 | super-repo → governance | chore | 0020, 0023, 0016 |
 | T-0008 | In-process bus + module `api` | **Done** | EP-0 | backend | chore | 0025, 0022 |
 | T-0009 | Architecture fitness functions | **Done** | EP-0 | backend (+ super-repo) | chore | 0026, 0025, 0022, 0030 |
-| T-0020 | Contract schema gate | Todo ⚠️ blocked on ADR-0032 | EP-9 | governance → backend → bff → webfrontend → super-repo | chore | **0032 (governing)**, 0022, 0027, 0031 |
+| T-0020 | Contract schema gate | Todo — ready to start | EP-9 | governance → backend → bff → webfrontend → super-repo | chore | **0032 (governing)**, 0022, 0027, 0031 |
 
 **EP-0 closed 2026-08-04** — all four of its tasks Done. T-0002's AC5 was the last item: the gates
 now *block* rather than merely run. ADR-0031 split `main` enforcement into `main-integrity` (no
@@ -153,10 +153,10 @@ Added 2026-08-06 under a **new epic, EP-9**, not a reopened EP-0. `governance/do
 has marked "contract schema (additive / breaking-check)" required in four repos all along, but `buf`
 runs in no CI in any repo and `buf lint` on `contracts/` is red — 13 `ENUM_VALUE_PREFIX` violations
 in `proto/agent/v1/agent.proto`. It sits in Phase 0 because the phase-0 exit criteria require CI
-green on *contract* tests. **Blocked until ADR-0032 is Accepted:** that ADR decides whether the 13
-names are renamed before the `buf breaking` baseline is set — invariant 10 permits it, since a
-rename keeps the number and type — or grandfathered by path. The choice cannot be deferred past the
-baseline.
+green on *contract* tests. **ADR-0032 Accepted 2026-08-06 — ready to start.** It settles the 13
+names as a **rename before the `buf breaking` baseline is taken** (invariant 10 permits it: a rename
+keeps the number and type), not a path-scoped exemption. Nothing is enforced yet — `buf` still runs
+in no CI and `buf lint` is still red — because acceptance decides the shape and T-0020 builds it.
 
 #### T-0003 — the one with work already merged
 `deploy/dev/` (manifests, ingress, hello fixture), `scripts/dev-up.sh`, `scripts/smoke-dev.sh` and
@@ -246,7 +246,7 @@ green; and the task file plus backlog are updated.
 | 0029 | Imported history — attested provenance |
 | 0030 | Extraction-trigger budgets for the modular monolith |
 | 0031 | Split merge enforcement — bind admins to checks |
-| 0032 | Gate the contract schema — lint + breaking checks on `contracts/` (**Proposed**) |
+| 0032 | Gate the contract schema — lint + breaking checks on `contracts/` |
 
 ADR-0001 is the SoT decision, **not** the AGDD framework — AGDD is ADR-0028. The full index with
 statuses is `governance/docs/adr/README.md`.
