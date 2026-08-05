@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `3431762` on 2026-08-06.**
+> **Synced from governance pin `275984f` on 2026-08-06.**
 
 ## The four phases
 
@@ -12,7 +12,7 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │ PHASE 0 — Foundations                          IN PROGRESS       │
 │ scaffolding · dev env · tenancy/RLS · PDP · audit · storage bench│
-│ 10 tasks: T-0001…T-0009 + T-0020  —  7 Done, 3 Todo             │
+│ 10 tasks: T-0001…T-0009 + T-0020  —  8 Done, 2 Todo             │
 │ Exit: tenant-scoped, policy-checked, audited request end-to-end  │
 │       in Minikube; boundary/arch tests in CI; benchmark decided  │
 └──────────────────────────────────────────────────────────────────┘
@@ -52,7 +52,7 @@ Status is each task file's own `Status:` field.
 | T-0003 | Minikube dev environment | 🔧 **In progress** — AC2+AC4 verified | EP-1 |
 | T-0004 | Tenancy + RLS baseline | ✅ **Done** | EP-2 |
 | T-0005 | PDP skeleton (OPA) | 📝 Todo | EP-2 |
-| T-0006 | Append-only audit log | 📝 Todo | EP-2 |
+| T-0006 | Append-only audit log | ✅ **Done** | EP-2 |
 | T-0007 | Storage benchmark | ✅ **Done** — ADR-0033 Accepted | EP-3 |
 | T-0008 | In-process bus + module `api` | ✅ **Done** | EP-0 |
 | T-0009 | Architecture fitness functions | ✅ **Done** | EP-0 |

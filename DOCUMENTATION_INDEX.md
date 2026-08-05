@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `3431762` on 2026-08-06.**
+> **Synced from governance pin `275984f` on 2026-08-06.**
 
 ## Where to start
 
@@ -87,7 +87,7 @@ Every status below is the task file's own `Status:` field.
 
 | Phase | Tasks | Done | Todo |
 |---|---|---|---|
-| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0004, T-0007, T-0008, T-0009, T-0020 | T-0003, T-0005, T-0006 |
+| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0004, T-0006, T-0007, T-0008, T-0009, T-0020 | T-0003, T-0005 |
 | 1 — MVP | T-0010…T-0018 (9) | — | all nine |
 | 2 — the wedge | none defined | — | backlog: *to be expanded* |
 | 3 — BYO | none defined | — | backlog: *to be expanded* |
@@ -126,6 +126,12 @@ review | Done` per task and nothing finer, so any percentage would be invented.
   generated-type publishing follow-up, so the check sits at the composition boundary and a
   hand-edited `gen/` is caught at the pin bump rather than in the consumer's own PR.
 
+- **T-0006 (audit log) — Done 2026-08-06.** Append-only enforced by the database (the app role has
+  INSERT and SELECT only; triggers reject mutation even for the owner), SHA-256 chain over a
+  length-prefixed canonical form, four tamper modes caught and reported distinctly. **One limit is
+  tested, not hidden:** truncating the head of a chain is undetectable without an anchor outside the
+  database, which ADR-0007 does not decide.
+
 ### Known governance gaps
 
 Items 1–3 are tracked in PRD §12 — not invented here. Item 4 is observed in the tree and said so:
@@ -138,8 +144,13 @@ Items 1–3 are tracked in PRD §12 — not invented here. Item 4 is observed in
    super-repo instead. Needs the generated-type publishing follow-up in ADR-0027/0028. *(The older
    gap here — a contract-schema check required in four repos that existed in none — was resolved by
    ADR-0032 + T-0020 on 2026-08-06, and `ci-gates.md`'s rows corrected with it.)*
-4. `ZITADEL_IMAGE` is pinned to `:latest`, which is not a pin — `check-dev-images.sh` warns on it.
-   This one is observed in the tree, not a PRD §12 item.
+4. **Backend integration tests do not run in CI.** T-0004's isolation proofs and T-0006's tamper
+   proofs both skip without `TEST_DATABASE_URL`, so two tasks' central claims rest on evidence that
+   exists only in a local run. A Postgres service container in backend CI would close it. Observed in
+   the tree, not a PRD §12 item — and now the largest of these gaps.
+5. **Nothing applies the migrations.** `platform/db/migrations` and `modules/audit/.../migrations`
+   are hand-applied to the dev cluster; `deploy/dev/postgres.yaml` still creates the tenancy schema
+   independently. Two sources of schema truth, across two schemas.
 
 *(The phase-0 plan gap closed 2026-08-06: it now carries T-0020 as workstream 10 and attributes each
 half of its CI exit line to a workstream. PRD §12.2 item 4 resolved with it.)*

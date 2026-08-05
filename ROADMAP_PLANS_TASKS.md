@@ -5,7 +5,7 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `3431762` on 2026-08-06.**
+> **Synced from governance pin `275984f` on 2026-08-06.**
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -19,7 +19,7 @@ must satisfy `governance/docs/process/definition-of-done.md`.
 
 | Phase | Theme | Tasks | State |
 |---|---|---|---|
-| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | in progress — 7 of 10 Done; EP-0 closed 2026-08-04, EP-9 + EP-3 2026-08-06 |
+| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | in progress — 8 of 10 Done; EP-0 closed 2026-08-04, EP-9 + EP-3 2026-08-06 |
 | 1 | MVP (GitHub-lite) | T-0010 – T-0018 (9) | not started |
 | 2 | Unified security & governance (the wedge) | none yet | backlog says *to be expanded* |
 | 3 | BYO & commercial | none yet | backlog says *to be expanded* |
@@ -128,7 +128,7 @@ against `docs/backlog/README.md`. **Owner is `unassigned` on every task** — no
 | T-0003 | Minikube dev environment | **In progress** — AC2+AC4 verified | EP-1 | super-repo (`Makefile`, `deploy/dev/`) | chore | 0024, 0023 |
 | T-0004 | Tenancy + RLS baseline | **Done** | EP-2 | backend | SPEC-0001 | 0003, 0022, 0007 |
 | T-0005 | PDP skeleton (OPA) | Todo | EP-2 | governance → backend → bff | SPEC-0002 | 0006, 0022 |
-| T-0006 | Append-only audit log | Todo | EP-2 | governance → backend | SPEC-0003 | 0007, 0022 |
+| T-0006 | Append-only audit log | **Done** | EP-2 | governance → backend | SPEC-0003 | 0007, 0022 |
 | T-0007 | Storage benchmark | **Done** | EP-3 | super-repo → governance | chore | 0020, 0023, 0016, **0033 (governing)** |
 | T-0008 | In-process bus + module `api` | **Done** | EP-0 | backend | chore | 0025, 0022 |
 | T-0009 | Architecture fitness functions | **Done** | EP-0 | backend (+ super-repo) | chore | 0026, 0025, 0022, 0030 |
