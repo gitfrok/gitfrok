@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `f48014a` on 2026-08-06.**
+> **Synced from governance pin `3431762` on 2026-08-06.**
 
 ## Where to start
 
@@ -87,7 +87,7 @@ Every status below is the task file's own `Status:` field.
 
 | Phase | Tasks | Done | Todo |
 |---|---|---|---|
-| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0007, T-0008, T-0009, T-0020 | T-0003, T-0004, T-0005, T-0006 |
+| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0004, T-0007, T-0008, T-0009, T-0020 | T-0003, T-0005, T-0006 |
 | 1 — MVP | T-0010…T-0018 (9) | — | all nine |
 | 2 — the wedge | none defined | — | backlog: *to be expanded* |
 | 3 — BYO | none defined | — | backlog: *to be expanded* |
@@ -113,9 +113,12 @@ review | Done` per task and nothing finer, so any percentage would be invented.
   discharged. The T-0010 gate is lifted. Evidence: `governance/docs/bench/T-0007/`; harness
   `make bench-storage`. Non-blocking follow-up: re-measure the latency ratios on a real cluster once
   T-0003 is verified — the correctness verdict does not need it.
-- **T-0004 (tenancy + RLS)** — depends on T-0003. The RLS baseline in `deploy/dev/postgres.yaml`
-  creates a non-superuser `gitfrok_app` role because RLS never binds a superuser; consumers must use
-  it or the policy is inert.
+- **T-0004 (tenancy + RLS) — Done 2026-08-06.** All four SPEC-0001 criteria verified against a real
+  Postgres with RLS enforced. `platform/db` wraps `pgxpool` so no unscoped query exists, scopes each
+  transaction with `SET LOCAL app.tenant_id`, and **refuses a SUPERUSER/BYPASSRLS role** — without
+  that guard every isolation test would pass against a database enforcing nothing. Two limits are
+  recorded in the task: AC3 cannot see a cross-tenant UPDATE/DELETE (RLS makes those rows invisible,
+  so nothing errors), and the audit routing key is provisional until **T-0006** adopts or renames it.
 - **T-0020 (contract schema gate, EP-9) — Done 2026-08-06.** `buf lint` + `buf breaking` (baseline:
   tip of `main`, category `FILE`) are required in governance CI; `make codegen-check` requires every
   consumer's generated tree to match its pinned contracts. Both ride inside already-required check
