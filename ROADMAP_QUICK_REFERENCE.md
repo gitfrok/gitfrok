@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `19819f3` on 2026-08-06.**
+> **Synced from governance pin `e5d5723` on 2026-08-06.**
 
 ## The four phases
 
@@ -56,7 +56,7 @@ Status is each task file's own `Status:` field.
 | T-0007 | Storage benchmark | 📝 Todo ⚠️ gates Phase 1 | EP-3 |
 | T-0008 | In-process bus + module `api` | ✅ **Done** | EP-0 |
 | T-0009 | Architecture fitness functions | ✅ **Done** | EP-0 |
-| T-0020 | Contract schema gate (`buf lint`/`breaking`) | 📝 Todo ⚠️ blocked on ADR-0032 | EP-9 |
+| T-0020 | Contract schema gate (`buf lint`/`breaking`) | 📝 Todo — ready to start | EP-9 |
 
 **EP-0 (scaffolding & process) closed 2026-08-04** — all four tasks Done. The merge gates now block
 rather than merely run (ADR-0031), and since 2026-08-05 four-eyes review binds owners too.
@@ -126,7 +126,7 @@ From `governance/docs/roadmap/README.md` and the phase-0 plan:
 | **0028** | AGDD is the delivery framework |
 | **0029** | Imported history is `ATTESTED_IMPORT` — never audit, never satisfies a merge policy |
 | **0031** | Merge enforcement split into `main-integrity` + `main-review` |
-| **0032** | *(Proposed)* `buf lint` + `buf breaking` gate `contracts/`; settles the 13 `ENUM_VALUE_PREFIX` violations before the baseline is set |
+| **0032** | `buf lint` + `buf breaking` gate `contracts/`; the 13 `ENUM_VALUE_PREFIX` violations are renamed **before** the baseline is taken |
 
 ## What "Done" means
 
