@@ -5,7 +5,7 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `e5d5723` on 2026-08-06.**
+> **Synced from governance pin `130b824` on 2026-08-06.**
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -101,7 +101,8 @@ storage tasks.
 
 **The plan predates T-0020** and still lists nine workstreams. The task is Phase-0 all the same —
 the exit criteria below require CI green on *contract* tests — but its sequencing is stated in its
-own task file, not here, until `phase-0-foundations.md` is updated.
+own task file, not here, until `phase-0-foundations.md` is updated. Tracked as PRD §12.2 open
+item 4.
 
 **Risks** (the plan's own): version availability, since ADR-0023 floors sit near the knowledge
 boundary — verify at setup; and a benchmark result that forces a storage redesign, which is exactly
