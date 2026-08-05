@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-smoke update-pins verify lint-shell codegen codegen-check rulesets rulesets-apply rulesets-check
+.PHONY: bootstrap submodules dev-up dev-smoke update-pins verify lint-shell codegen codegen-check bench-storage rulesets rulesets-apply rulesets-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23)
@@ -9,6 +9,8 @@ verify: ## super-repo fitness gates: dependency direction + version floors + dev
 lint-shell: ## shellcheck the fitness scripts (T-0009); CI gates this on every PR
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed: https://shellcheck.net"; exit 1; }
 	@shellcheck scripts/*.sh && echo "shellcheck: OK"
+bench-storage: ## T-0007: benchmark git on SeaweedFS-FUSE vs a block-backed dir + probe POSIX semantics
+	@./scripts/bench-storage.sh
 rulesets: ## show what the ADR-0031 merge-enforcement rulesets would do (read-only)
 	@./scripts/apply-rulesets.sh plan
 rulesets-apply: ## apply the ADR-0031 rulesets to all repos + drop legacy protection (needs an admin token)
