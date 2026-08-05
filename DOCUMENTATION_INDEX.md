@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `7938b5d` on 2026-08-06.**
+> **Synced from governance pin `661a77c` on 2026-08-06.**
 
 ## Where to start
 
@@ -35,7 +35,8 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │   ├── policies/                     OPA/Rego policy-as-code
 │   ├── scripts/                      check-docs.sh (the docs gate)
 │   └── docs/
-│       ├── adr/                      0001…0032 + README index — decisions, immutable once Accepted
+│       ├── adr/                      0001…0033 + README index — decisions, immutable once Accepted
+│       ├── bench/T-0007/            storage benchmark evidence (raw JSON + reading)
 │       ├── product/PRD.md            product requirements (PR-#); restates ADRs, never decides
 │       ├── specs/                    SPEC-0001…SPEC-0011 + _template.md
 │       ├── roadmap/README.md         four phases + exit criteria
@@ -102,8 +103,11 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 - **T-0003 (Minikube dev env)** — manifests and scripts are merged on `main`, but nothing has run on
   a cluster, so all four ACs are *implemented, unverified* and the task is correctly `Todo`. Next
   step: `make dev-up && make dev-smoke` on a machine with `minikube`/`kubectl`/`mkcert`.
-- **T-0007 (storage benchmark)** — gates T-0010 and the whole Phase-1 git-storage design; its result
-  may amend ADR-0016. Independent of everything else, so it can start now.
+- **T-0007 (storage benchmark) — In review 2026-08-06.** Measured; **ADR-0033 Proposed**: live bare
+  repos stay on block volumes because SeaweedFS-FUSE's `rename()` is not atomic and git needs it for
+  every ref update (36/428 concurrent ref reads missed a ref that always existed; block 0/229; zero
+  rename errors, so rename works but is not atomic). **ADR-0016 needs no amendment.** Gates T-0010
+  until the ADR is Accepted. Evidence: `governance/docs/bench/T-0007/`; harness `make bench-storage`.
 - **T-0004 (tenancy + RLS)** — depends on T-0003. The RLS baseline in `deploy/dev/postgres.yaml`
   creates a non-superuser `gitfrok_app` role because RLS never binds a superuser; consumers must use
   it or the policy is inert.
@@ -144,6 +148,7 @@ half of its CI exit line to a workstream. PRD §12.2 item 4 resolved with it.)*
 `definition-of-done.md` (what Done means). Human gates: Proposed ADRs, spec approval, pin bumps.
 
 **Enforcement** — `make verify` (dep direction, version floors, dev image pins), `make lint-shell`,
+`make bench-storage` (T-0007 storage probes; not a gate — an experiment),
 `make codegen-check` (generated trees match the pinned contracts, T-0020),
 per-submodule CI, `scripts/apply-rulesets.sh check` (ADR-0031 drift), `governance/scripts/check-docs.sh`.
 
