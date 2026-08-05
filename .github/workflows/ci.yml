@@ -39,3 +39,32 @@ jobs:
       # arrays, so the lint runs clean with no suppressions to maintain.
       - name: make lint-shell
         run: make lint-shell
+
+      # --- T-0020 AC5: codegen freshness (ADR-0032) -----------------------------------------------
+      # This is the one check that can only exist here. Each consumer's buf.gen.yaml reads
+      # ../governance/contracts, which is a sibling checkout only in this composition, so no
+      # standalone consumer CI run can generate anything. The toolchain below is the cost of
+      # checking it honestly rather than skipping it.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: webfrontend/package.json
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.72.0
+          github_token: ${{ github.token }}
+
+      # Pinned to the versions the consumers' go.mod already resolve, so the gate compares like with
+      # like — a newer plugin emitting different-but-valid output would look like drift.
+      - name: codegen plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.35.2
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+          npm ci --prefix webfrontend
+
+      - name: make codegen-check
+        run: make codegen-check

@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-smoke update-pins verify lint-shell codegen rulesets rulesets-apply rulesets-check
+.PHONY: bootstrap submodules dev-up dev-smoke update-pins verify lint-shell codegen codegen-check rulesets rulesets-apply rulesets-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23)
@@ -15,6 +15,8 @@ rulesets-apply: ## apply the ADR-0031 rulesets to all repos + drop legacy protec
 	@./scripts/apply-rulesets.sh apply
 rulesets-check: ## fail if any repo drifted from ADR-0031 (T-0002 AC5); not in CI — needs admin scope
 	@./scripts/apply-rulesets.sh check
+codegen-check: ## fail if any consumer's gen/ drifted from the pinned contracts (T-0020, ADR-0032)
+	@./scripts/check-codegen-fresh.sh
 codegen: ## regenerate Go (backend, bff) + TS (webfrontend) from governance/contracts (ADR-0022)
 	@cd backend && buf generate
 	@cd bff && buf generate
