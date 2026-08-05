@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `7938b5d` on 2026-08-06.**
+> **Synced from governance pin `661a77c` on 2026-08-06.**
 
 ## The four phases
 
@@ -53,7 +53,7 @@ Status is each task file's own `Status:` field.
 | T-0004 | Tenancy + RLS baseline | 📝 Todo | EP-2 |
 | T-0005 | PDP skeleton (OPA) | 📝 Todo | EP-2 |
 | T-0006 | Append-only audit log | 📝 Todo | EP-2 |
-| T-0007 | Storage benchmark | 📝 Todo ⚠️ gates Phase 1 | EP-3 |
+| T-0007 | Storage benchmark | 🔍 **In review** — measured; ADR-0033 Proposed | EP-3 |
 | T-0008 | In-process bus + module `api` | ✅ **Done** | EP-0 |
 | T-0009 | Architecture fitness functions | ✅ **Done** | EP-0 |
 | T-0020 | Contract schema gate (`buf lint`/`breaking`) | ✅ **Done** | EP-9 |
@@ -95,7 +95,9 @@ Phase-1 dependency in governance is T-0018's:
 T-0018 (import) requires  T-0010 (Git-RPC) · T-0006 (audit log) · T-0016 (MR + approval)
 ```
 
-Plus the cross-phase gate: **T-0007 → T-0010**, and the benchmark result may amend ADR-0016.
+Plus the cross-phase gate: **T-0007 → T-0010**. The benchmark ran on 2026-08-06 and ADR-0016 needs
+**no** amendment — ADR-0033 (Proposed) confirms block volumes, so T-0010 is unblocked as soon as that
+ADR is Accepted.
 
 Everything else is unsequenced. Writing `governance/docs/plans/phase-1-mvp.md` is tracked as PRD
 §12.2 open item 1 — until it exists, do not treat any other Phase-1 ordering as authoritative.
@@ -119,7 +121,8 @@ From `governance/docs/roadmap/README.md` and the phase-0 plan:
 - [ ] all 10 Phase-0 tasks Done (per `definition-of-done.md`)
 - [ ] CI green on unit + contract + boundary + policy/isolation + fitness-function tests
 - [ ] `make dev-up` brings the stack up on `*.gitsaas.test`
-- [ ] storage benchmark (T-0007) decided; any ADR-0016 amendment recorded
+- [ ] storage benchmark (T-0007) decided; any ADR-0016 amendment recorded — *measured 2026-08-06;
+      awaiting the ADR-0033 decision, which proposes no amendment*
 
 ## Key ADRs
 
@@ -135,6 +138,7 @@ From `governance/docs/roadmap/README.md` and the phase-0 plan:
 | **0029** | Imported history is `ATTESTED_IMPORT` — never audit, never satisfies a merge policy |
 | **0031** | Merge enforcement split into `main-integrity` + `main-review` |
 | **0032** | `buf lint` + `buf breaking` gate `contracts/`; the 13 `ENUM_VALUE_PREFIX` violations are renamed **before** the baseline is taken |
+| **0033** | *(Proposed)* live bare repos stay on **block volumes** — SeaweedFS-FUSE's `rename()` is not atomic, which git needs for every ref update |
 
 ## What "Done" means
 
