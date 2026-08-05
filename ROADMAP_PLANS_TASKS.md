@@ -5,7 +5,7 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `ce6ac6c` on 2026-08-06.**
+> **Synced from governance pin `7938b5d` on 2026-08-06.**
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -95,21 +95,22 @@ Workstreams and sequencing exactly as `phase-0-foundations.md` orders them:
 | 7 | Storage benchmark | T-0007 | parallelizable; **gates** the Phase-1 git-storage design |
 | 8 | In-process bus + module `api` | T-0008 | depends on T-0001; the modular-monolith seam (ADR-0025) |
 | 9 | Architecture fitness functions | T-0009 | depends on T-0002; proves extraction-readiness (ADR-0026) |
+| 10 | Contract schema gates | T-0020 | depends on T-0001 (contracts + codegen wired); added 2026-08-06, hence last in the list rather than in dependency order |
 
 **Critical path:** T-0001 → T-0003 → T-0004. T-0007 runs alongside and must finish before Phase-1
-storage tasks.
-
-**The plan predates T-0020** and still lists nine workstreams. The task is Phase-0 all the same —
-the exit criteria below require CI green on *contract* tests — but its sequencing is stated in its
-own task file, not here, until `phase-0-foundations.md` is updated. Tracked as PRD §12.2 open
-item 4.
+storage tasks. T-0020 is off the critical path — nothing in Phase 0 waits on it — but Phase 0 cannot
+exit without it.
 
 **Risks** (the plan's own): version availability, since ADR-0023 floors sit near the knowledge
 boundary — verify at setup; and a benchmark result that forces a storage redesign, which is exactly
 why T-0007 is in Phase 0 rather than later.
 
-**Exit criteria:** all Phase-0 tasks Done; CI green on unit + contract + boundary + policy/isolation
-+ fitness-function tests; `make dev-up` brings the stack up on `*.gitsaas.test`.
+**Exit criteria:** all **ten** Phase-0 tasks Done; CI green on unit + contract + boundary +
+policy/isolation + fitness-function tests; `make dev-up` brings the stack up on `*.gitsaas.test`.
+The plan now attributes each half of that CI line to a workstream, because "runs green" reads as
+already satisfied and is not: boundary + fitness → T-0002/T-0009 (done); contract → T-0020 (done);
+unit + policy/isolation → T-0004/T-0005/T-0006 (open); `make dev-up` → T-0003 (open, never run on a
+cluster).
 
 ---
 

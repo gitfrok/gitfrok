@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `ce6ac6c` on 2026-08-06.**
+> **Synced from governance pin `7938b5d` on 2026-08-06.**
 
 ## The four phases
 
@@ -79,9 +79,12 @@ From `governance/docs/plans/phase-0-foundations.md` — the only phase with a pl
 critical path:  T-0001 ──▶ T-0003 ──▶ T-0004
 
 parallel:       T-0001 ──▶ T-0002 ──▶ T-0009
-                T-0001 ──▶ T-0005, T-0006, T-0008
+                T-0001 ──▶ T-0005, T-0006, T-0008, T-0020
                 T-0007  (independent) ⚠️ must finish before Phase-1 storage work
 ```
+
+T-0020 is off the critical path — nothing in Phase 0 waits on it — but Phase 0 cannot exit without
+it: it owns the *contract* half of the CI exit criterion.
 
 ## Phase 1 sequencing — mostly undefined
 
