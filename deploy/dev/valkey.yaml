@@ -27,6 +27,12 @@ metadata:
     phase: "0"
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate: this pod mounts a ReadWriteOnce PVC, so a rolling
+  # update would start the replacement while the old one still holds the volume. The two then
+  # fight over on-disk locks and the rollout deadlocks — the old pod will not terminate until the
+  # new one is Ready, and the new one cannot become Ready until the old one lets go.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: valkey

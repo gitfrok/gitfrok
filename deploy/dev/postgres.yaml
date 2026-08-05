@@ -81,6 +81,12 @@ metadata:
     phase: "0"
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate: this pod mounts a ReadWriteOnce PVC, so a rolling
+  # update would start the replacement while the old one still holds the volume. The two then
+  # fight over on-disk locks and the rollout deadlocks — the old pod will not terminate until the
+  # new one is Ready, and the new one cannot become Ready until the old one lets go.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: postgres
@@ -134,7 +140,11 @@ spec:
           failureThreshold: 3
         volumeMounts:
         - name: data
-          mountPath: /var/lib/postgresql/data
+          # postgres:18 stores data in major-version-specific subdirectories and REFUSES to start if
+          # a volume is mounted at /var/lib/postgresql/data — it reports that path as an "unused
+          # mount/volume" and exits rather than silently ignoring data you thought was persisted. The
+          # image's own guidance for 18+ is a single mount one level up (docker-library/postgres#1259).
+          mountPath: /var/lib/postgresql
           subPath: postgres
         - name: init
           mountPath: /docker-entrypoint-initdb.d

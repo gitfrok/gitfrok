@@ -28,6 +28,12 @@ metadata:
     phase: "0"
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate: this pod mounts a ReadWriteOnce PVC, so a rolling
+  # update would start the replacement while the old one still holds the volume. The two then
+  # fight over on-disk locks and the rollout deadlocks — the old pod will not terminate until the
+  # new one is Ready, and the new one cannot become Ready until the old one lets go.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: seaweedfs
@@ -52,7 +58,11 @@ spec:
           containerPort: 8333
           protocol: TCP
         args:
-          - all
+          # `server` (not `all` — no such subcommand in 4.40: it is master|volume|filer|s3|server)
+          # runs master + volume in one process; -filer and -s3 add the two gateways this dev env
+          # routes to, filer.gitsaas.test:8888 and s3.gitsaas.test:8333.
+          - server
+          - -filer
           - -s3
           - -s3.config=/etc/seaweedfs/s3_config.json
           - -dir=/data
@@ -82,7 +92,11 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /status
+            # /status 404s on the master ("volume id status not found" — it falls through to a
+            # volume-id lookup). /cluster/status is the master's health endpoint and returns
+            # {"IsLeader":true,...}. With the wrong path the pod never becomes Ready and the
+            # rollout blocks forever, which is how this manifest looked "applied but broken".
+            path: /cluster/status
             port: master
           initialDelaySeconds: 10
           periodSeconds: 5

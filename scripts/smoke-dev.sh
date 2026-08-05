@@ -30,6 +30,21 @@ for cmd in kubectl curl mkcert minikube; do
   command -v "$cmd" >/dev/null || { echo "smoke: FAIL — $cmd not installed"; exit 1; }
 done
 
+# A missing context is not a broken cluster, and this script used to be unable to tell the two apart.
+# Every query below is `... 2>/dev/null || true`, and `kubectl --context <nonexistent>` errors rather
+# than returning data — so pointing at a context that does not exist produced six "no available
+# replica" failures and an unreadable verdict. Observed for real: a cluster created by hand as profile
+# 'minikube' reported all six deployments down under this script's default profile of 'gitfrok'.
+# Checked once, up front, so the failure names the actual problem.
+if ! kubectl config get-contexts -o name 2>/dev/null | grep -qx "$PROFILE"; then
+  echo "smoke: FAIL — no kubectl context named '$PROFILE', so there is nothing to smoke-test."
+  have=$(kubectl config get-contexts -o name 2>/dev/null | tr '\n' ' ')
+  echo "  contexts on this machine: ${have:-none}"
+  echo "  fix: scripts/dev-up.sh creates profile '$PROFILE', or target an existing cluster with"
+  echo "       MINIKUBE_PROFILE=<name> make dev-smoke"
+  exit 1
+fi
+
 set -a
 # shellcheck disable=SC1091  # data file, not a script — nothing for shellcheck to follow
 . ./deploy/dev/versions.env
