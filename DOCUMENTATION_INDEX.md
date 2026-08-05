@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `e5d5723` on 2026-08-06.**
+> **Synced from governance pin `130b824` on 2026-08-06.**
 
 ## Where to start
 
@@ -116,17 +116,18 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 
 ### Known governance gaps
 
-Tracked in PRD §12, not invented here:
+Items 1–4 are tracked in PRD §12 — not invented here. Item 5 is observed in the tree and said so:
 
 1. No Phase-1/2/3 plan files — later phases are sequenced only by what individual task files state,
    and only T-0018 states dependencies (PRD §12.2 open item 1).
 2. Phase-2 and Phase-3 requirements (`PR-13`…`PR-23`) have no epics, specs or tasks yet (PRD §12.1).
-3. `ZITADEL_IMAGE` is pinned to `:latest`, which is not a pin — `check-dev-images.sh` warns on it.
-
-Two more are visible in the tree rather than in PRD §12: `plans/phase-0-foundations.md` still lists
-nine workstreams and predates T-0020; and `process/ci-gates.md` marks the contract-schema check
-required in four repos while attributing it to no task — which is what ADR-0032 and T-0020 exist to
-close.
+3. `process/ci-gates.md` marks "contract schema (additive / breaking-check)" required in four repos
+   and no such check exists — `buf` runs in no CI anywhere and `buf lint` on `contracts/` is red
+   (PRD §12.2 open item 3). ADR-0032 settles the shape; the drift closes when **T-0020** lands.
+4. `plans/phase-0-foundations.md` lists nine workstreams and predates T-0020, so one Phase-0 task is
+   sequenced only by its own file (PRD §12.2 open item 4).
+5. `ZITADEL_IMAGE` is pinned to `:latest`, which is not a pin — `check-dev-images.sh` warns on it.
+   This one is observed in the tree, not a PRD §12 item.
 
 ## Documents by purpose
 

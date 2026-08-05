@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `e5d5723` on 2026-08-06.**
+> **Synced from governance pin `130b824` on 2026-08-06.**
 
 ## The four phases
 
