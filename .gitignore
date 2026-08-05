@@ -1,0 +1,11 @@
+# Super-repo ignores. Source lives in the submodules; this repo holds pins, orchestration scripts and
+# dev manifests, so there was nothing generated to ignore until now. Checked-in agent config
+# (.claude/settings.json, .cursor/rules/, opencode.json) is deliberate and stays tracked.
+
+# Qoder's generated repo wiki: ~1.7 MB of Markdown re-derived from the submodules and rewritten
+# wholesale on each run. Committing it would park a stale copy of the Source of Truth inside the repo
+# that defers to governance for every decision (invariant 21), and it would show up as churn in every
+# diff that touches a submodule. .mimocode/ solves the same problem with a .gitignore that hides its
+# own contents; .qoder/ ships none, and such a file would not survive its wipe-and-regenerate anyway,
+# so the pattern belongs here.
+.qoder/
