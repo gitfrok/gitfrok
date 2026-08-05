@@ -47,12 +47,15 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │
 ├── backend/                          Go modular monolith (submodule) — depends on governance
 │   ├── cmd/{controlplane,dataplane}-app/
-│   ├── modules/repository/           bounded context
+│   ├── modules/{repository,codesearch}/   bounded contexts — codesearch consumes repository
+│   │                                 via its api/ + the bus, never its internal/ (T-0008 AC2)
+│   ├── internal/arch/                fitness functions: boundary · graph · triggers (T-0002, T-0009)
 │   └── platform/                     bus, ids, telemetry
 │
 ├── bff/                              Go BFF, aggregation only (submodule) — governance + backend
 ├── webfrontend/                      Astro + React SSR (submodule) — governance + bff
-│                                     scripts/check-boundaries.sh = TS half of invariant 22
+│                                     scripts/check-boundaries.sh = TS half of invariant 22,
+│                                     run by its CI gate (required on main since 2026-08-05)
 │
 ├── deploy/dev/                       Minikube dev environment (T-0003, ADR-0024)
 │   ├── postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml
