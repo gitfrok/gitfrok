@@ -5,7 +5,7 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `6c7cbdd` on 2026-08-06.**
+> **Synced from governance pin `f48014a` on 2026-08-06.**
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -297,7 +297,7 @@ green; and the task file plus backlog are updated.
 | 0031 | Split merge enforcement — bind admins to checks |
 | 0032 | Gate the contract schema — lint + breaking checks on `contracts/` |
 | 0033 | Live bare repos stay on block volumes — SeaweedFS-FUSE fails git's rename contract |
-| 0034 | Image pins are fully-qualified, resolvable, patch-level tags (**Proposed**) |
+| 0034 | Image pins are fully-qualified, resolvable, patch-level tags |
 
 ADR-0001 is the SoT decision, **not** the AGDD framework — AGDD is ADR-0028. The full index with
 statuses is `governance/docs/adr/README.md`.

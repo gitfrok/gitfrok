@@ -41,7 +41,7 @@ spec:
       containers:
       - name: hello
         # Image tag mirrors deploy/dev/versions.env (BUSYBOX_IMAGE) — dev-up.sh asserts the match.
-        image: busybox:1.35
+        image: docker.io/library/busybox:1.35.0
         imagePullPolicy: IfNotPresent
         # -f foreground (the container must not daemonize), -v log requests, -h document root.
         command:

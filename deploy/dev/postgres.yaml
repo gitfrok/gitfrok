@@ -98,7 +98,7 @@ spec:
     spec:
       containers:
       - name: postgres
-        image: postgres:18
+        image: docker.io/library/postgres:18.4
         imagePullPolicy: IfNotPresent
         ports:
         - name: db
@@ -140,7 +140,7 @@ spec:
           failureThreshold: 3
         volumeMounts:
         - name: data
-          # postgres:18 stores data in major-version-specific subdirectories and REFUSES to start if
+          # docker.io/library/postgres:18.4 stores data in major-version-specific subdirectories and REFUSES to start if
           # a volume is mounted at /var/lib/postgresql/data — it reports that path as an "unused
           # mount/volume" and exits rather than silently ignoring data you thought was persisted. The
           # image's own guidance for 18+ is a single mount one level up (docker-library/postgres#1259).
