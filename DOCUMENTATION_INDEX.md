@@ -4,7 +4,7 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `ce6ac6c` on 2026-08-06.**
+> **Synced from governance pin `7938b5d` on 2026-08-06.**
 
 ## Where to start
 
@@ -17,7 +17,7 @@
 | know how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md` |
 | see phase intent and exit criteria | `governance/docs/roadmap/README.md` |
 | see epics grouping tasks | `governance/docs/backlog/README.md` |
-| see Phase-0 sequencing | `governance/docs/plans/phase-0-foundations.md` (the only phase with a plan) |
+| see Phase-0 sequencing | `governance/docs/plans/phase-0-foundations.md` — all ten workstreams (the only phase with a plan) |
 | run the dev cluster | `deploy/dev/README.md`, then `make dev-up && make dev-smoke` |
 | a roadmap overview | `ROADMAP_QUICK_REFERENCE.md` (short) · `ROADMAP_PLANS_TASKS.md` (full) |
 
@@ -116,7 +116,7 @@ review | Done` per task and nothing finer, so any percentage would be invented.
 
 ### Known governance gaps
 
-Items 1–4 are tracked in PRD §12 — not invented here. Item 5 is observed in the tree and said so:
+Items 1–3 are tracked in PRD §12 — not invented here. Item 4 is observed in the tree and said so:
 
 1. No Phase-1/2/3 plan files — later phases are sequenced only by what individual task files state,
    and only T-0018 states dependencies (PRD §12.2 open item 1).
@@ -126,10 +126,11 @@ Items 1–4 are tracked in PRD §12 — not invented here. Item 5 is observed in
    super-repo instead. Needs the generated-type publishing follow-up in ADR-0027/0028. *(The older
    gap here — a contract-schema check required in four repos that existed in none — was resolved by
    ADR-0032 + T-0020 on 2026-08-06, and `ci-gates.md`'s rows corrected with it.)*
-4. `plans/phase-0-foundations.md` lists nine workstreams and predates T-0020, so one Phase-0 task is
-   sequenced only by its own file (PRD §12.2 open item 4).
-5. `ZITADEL_IMAGE` is pinned to `:latest`, which is not a pin — `check-dev-images.sh` warns on it.
+4. `ZITADEL_IMAGE` is pinned to `:latest`, which is not a pin — `check-dev-images.sh` warns on it.
    This one is observed in the tree, not a PRD §12 item.
+
+*(The phase-0 plan gap closed 2026-08-06: it now carries T-0020 as workstream 10 and attributes each
+half of its CI exit line to a workstream. PRD §12.2 item 4 resolved with it.)*
 
 ## Documents by purpose
 
