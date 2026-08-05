@@ -276,7 +276,9 @@ Also outstanding:
   `contents: read` with no cluster. `check-dev-images.sh` is the only part of this that CI gates.
 - `ZITADEL_IMAGE` is `:latest` — warned by `check-dev-images.sh`, still not a pin
 - The scripts default to profile `gitfrok`; a cluster created by hand as `minikube` needs
-  `MINIKUBE_PROFILE=minikube`, or `make dev-smoke` fails against a context that does not exist
+  `MINIKUBE_PROFILE=minikube`. `smoke-dev.sh` now says so in one line instead of reporting six
+  dead deployments — every query in it is `2>/dev/null || true`, so a nonexistent context used to be
+  indistinguishable from a cluster whose services had all failed
 - the unused Zitadel PVC; `namespace: default` hardcoded in all 24 objects, so two stacks cannot
   coexist; Valkey has no `maxmemory`; SeaweedFS's S3 endpoint is open
 - per-OS Minikube driver docs (an ADR-0024 follow-up)
