@@ -33,7 +33,7 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │   ├── AGENTS.md · CLAUDE.md         agent entry points — canonical
 │   ├── contracts/                    protobuf: gRPC services + events (additive-only within v1)
 │   ├── policies/                     OPA/Rego policy-as-code
-│   ├── scripts/                      check-docs.sh (the docs gate)
+│   ├── scripts/                      check-docs.sh · check-contracts.sh · check-policies.sh
 │   └── docs/
 │       ├── adr/                      0001…0034 + README index — decisions, immutable once Accepted
 │       ├── bench/T-0007/            storage benchmark evidence (raw JSON + reading)
@@ -70,6 +70,9 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │   ├── check-dep-direction.sh        fitness: one-way dependency direction (invariant 22)
 │   ├── check-version-floors.sh       fitness: ADR-0023 toolchain floors
 │   ├── check-dev-images.sh           fitness: manifests match versions.env
+│   ├── check-codegen-fresh.sh        fitness: each consumer's gen/ matches its pin (T-0020)
+│   ├── check-policy-composition.sh   fitness: the real authz path across repos (T-0005)
+│   ├── testdata/policy-composition/  the two harness programs that check runs
 │   ├── apply-rulesets.sh             ADR-0031 merge rulesets — plan | apply | check
 │   ├── dev-up.sh                     Minikube + addons + mkcert TLS + apply + wait
 │   └── smoke-dev.sh                  T-0003 integration test (AC2 + AC3)
@@ -87,7 +90,7 @@ Every status below is the task file's own `Status:` field.
 
 | Phase | Tasks | Done | Todo |
 |---|---|---|---|
-| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0004, T-0006, T-0007, T-0008, T-0009, T-0020 | T-0003, T-0005 |
+| 0 — Foundations | T-0001…T-0009 + T-0020 (10) | T-0001, T-0002, T-0004, T-0005, T-0006, T-0007, T-0008, T-0009, T-0020 | T-0003 |
 | 1 — MVP | T-0010…T-0018 (9) | — | all nine |
 | 2 — the wedge | none defined | — | backlog: *to be expanded* |
 | 3 — BYO | none defined | — | backlog: *to be expanded* |
@@ -170,6 +173,12 @@ half of its CI exit line to a workstream. PRD §12.2 item 4 resolved with it.)*
 `make bench-storage` (T-0007 storage probes; not a gate — an experiment),
 `make codegen-check` (generated trees match the pinned contracts, T-0020),
 per-submodule CI, `scripts/apply-rulesets.sh check` (ADR-0031 drift), `governance/scripts/check-docs.sh`.
+
+**Two gates live only in the super-repo**, because each spans repos that cannot see one another:
+`check-codegen-fresh.sh` (T-0020 — every consumer's `gen/` follows from the pinned contracts) and
+`check-policy-composition.sh` (T-0005 — the real authorization path, bff PEP → gRPC → backend PDP →
+`governance/policies`). Each repo is green in isolation while the composition is broken; these are
+where that is caught.
 
 **Dev environment** — `deploy/dev/README.md` is the honest account of what works and what is
 unverified; `ADR-0024` is the decision behind it.

@@ -109,7 +109,7 @@ why T-0007 is in Phase 0 rather than later.
 policy/isolation + fitness-function tests; `make dev-up` brings the stack up on `*.gitsaas.test`.
 The plan now attributes each half of that CI line to a workstream, because "runs green" reads as
 already satisfied and is not: boundary + fitness → T-0002/T-0009 (done); contract → T-0020 (done);
-unit + policy/isolation → T-0004/T-0005/T-0006 (open); `make dev-up` → T-0003 (in progress — it has
+unit + policy/isolation → T-0004/T-0005/T-0006 (**done 2026-08-06**); `make dev-up` → T-0003 (in progress — it has
 now run on a cluster; AC2 and AC4 verified, AC1's create path and AC3's DNS path still open).
 
 ---
@@ -127,7 +127,7 @@ against `docs/backlog/README.md`. **Owner is `unassigned` on every task** — no
 | T-0002 | Boundary/arch enforcement in CI | **Done** | EP-0 | backend + bff + super-repo | chore | 0022, 0025, 0026, 0027, 0031 |
 | T-0003 | Minikube dev environment | **In progress** — AC2+AC4 verified | EP-1 | super-repo (`Makefile`, `deploy/dev/`) | chore | 0024, 0023 |
 | T-0004 | Tenancy + RLS baseline | **Done** | EP-2 | backend | SPEC-0001 | 0003, 0022, 0007 |
-| T-0005 | PDP skeleton (OPA) | Todo | EP-2 | governance → backend → bff | SPEC-0002 | 0006, 0022 |
+| T-0005 | PDP skeleton (OPA) | **Done** | EP-2 | governance → backend → bff | SPEC-0002 | 0006, 0022 |
 | T-0006 | Append-only audit log | **Done** | EP-2 | governance → backend | SPEC-0003 | 0007, 0022 |
 | T-0007 | Storage benchmark | **Done** | EP-3 | super-repo → governance | chore | 0020, 0023, 0016, **0033 (governing)** |
 | T-0008 | In-process bus + module `api` | **Done** | EP-0 | backend | chore | 0025, 0022 |

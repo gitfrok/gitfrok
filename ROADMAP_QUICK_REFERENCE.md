@@ -4,7 +4,7 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `275984f` on 2026-08-06.**
+> **Synced from governance pin `1c1d55c` on 2026-08-06.**
 
 ## The four phases
 
@@ -12,7 +12,7 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │ PHASE 0 — Foundations                          IN PROGRESS       │
 │ scaffolding · dev env · tenancy/RLS · PDP · audit · storage bench│
-│ 10 tasks: T-0001…T-0009 + T-0020  —  8 Done, 2 Todo             │
+│ 10 tasks: T-0001…T-0009 + T-0020  —  9 Done, 1 in progress      │
 │ Exit: tenant-scoped, policy-checked, audited request end-to-end  │
 │       in Minikube; boundary/arch tests in CI; benchmark decided  │
 └──────────────────────────────────────────────────────────────────┘
@@ -51,7 +51,7 @@ Status is each task file's own `Status:` field.
 | T-0002 | Boundary/arch enforcement in CI | ✅ **Done** | EP-0 |
 | T-0003 | Minikube dev environment | 🔧 **In progress** — AC2+AC4 verified | EP-1 |
 | T-0004 | Tenancy + RLS baseline | ✅ **Done** | EP-2 |
-| T-0005 | PDP skeleton (OPA) | 📝 Todo | EP-2 |
+| T-0005 | PDP skeleton (OPA) | ✅ **Done** | EP-2 |
 | T-0006 | Append-only audit log | ✅ **Done** | EP-2 |
 | T-0007 | Storage benchmark | ✅ **Done** — ADR-0033 Accepted | EP-3 |
 | T-0008 | In-process bus + module `api` | ✅ **Done** | EP-0 |
@@ -60,6 +60,14 @@ Status is each task file's own `Status:` field.
 
 **EP-0 (scaffolding & process) closed 2026-08-04** — all four tasks Done. The merge gates now block
 rather than merely run (ADR-0031), and since 2026-08-05 four-eyes review binds owners too.
+
+**EP-2 (tenancy & governance base) closed 2026-08-06** — T-0005 Done. The PDP landed across all four
+repos in dependency order: the deny-by-default OPA bundle and `contracts/proto/policy/v1` in
+governance, the embedded PDP module in backend, the PEP with a revision-invalidated decision cache in
+bff, and pins plus a composition gate in the super-repo. Two things worth carrying: cache
+invalidation is by **bundle revision, not by clock**, so the TTL only bounds how long a *revoked
+role* keeps working; and AC4's inline-permission-check fitness function is a **tripwire, not a
+proof** — authorization logic has no import signature the way every other boundary rule does.
 
 **EP-9 (contract gates) closed 2026-08-06** — T-0020 Done. `buf lint` + `buf breaking` are required
 in governance, and the super-repo requires generated code to match its pinned contracts. AC5 was
@@ -120,9 +128,15 @@ Everything else is unsequenced. Writing `governance/docs/plans/phase-1-mvp.md` i
 
 From `governance/docs/roadmap/README.md` and the phase-0 plan:
 
-- [ ] all 10 Phase-0 tasks Done (per `definition-of-done.md`)
-- [ ] CI green on unit + contract + boundary + policy/isolation + fitness-function tests
-- [ ] `make dev-up` brings the stack up on `*.gitsaas.test`
+- [ ] all 10 Phase-0 tasks Done (per `definition-of-done.md`) — **9 of 10**; only T-0003 is open
+- [x] CI green on unit + contract + boundary + policy/isolation + fitness-function tests —
+      *completed 2026-08-06 by T-0005, which supplied the policy half: `opa test` plus a
+      deny-by-default assertion in governance, the PDP adapter and inline-authz fitness function in
+      backend, the PEP in bff, and a cross-repo composition gate in the super-repo*
+- [ ] `make dev-up` brings the stack up on `*.gitsaas.test` — **the only criterion still open.**
+      Needs a host with a rootful container driver or KVM (see T-0003), plus one manifest change
+      that can be made anywhere: `deploy/dev` mounts no policy bundle, and the data plane now exits
+      without `GITFROK_POLICY_BUNDLE_DIR`
 - [x] storage benchmark (T-0007) decided; any ADR-0016 amendment recorded — *decided 2026-08-06 via
       ADR-0033 (Accepted): block volumes; ADR-0016 not amended*
 
