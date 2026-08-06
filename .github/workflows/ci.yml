@@ -43,6 +43,24 @@ jobs:
       # The fitness scripts are the gates; nothing was gating them. T-0002 deferred this because
       # the scripts relied on word splitting (SC2086); T-0009 replaced that with NUL-delimited
       # arrays, so the lint runs clean with no suppressions to maintain.
+      #
+      # Pinned, for the same reason buf and OPA are: an unpinned linter is a gate whose verdict
+      # depends on the day. It was unpinned until T-0005, and that cost a red run — a finding the
+      # runner's preinstalled shellcheck reported and a newer local one no longer does. Whichever
+      # of the two is "right" matters less than the two agreeing, because a gate a developer cannot
+      # reproduce locally is one they learn to push and see.
+      # Installed into a user-writable directory rather than /usr/local/bin, so the step needs no
+      # sudo and shadows the runner's preinstalled copy by PATH order alone.
+      - name: pin shellcheck to v0.11.0
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJf - --strip-components=1 -C "$HOME/.local/bin" "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/shellcheck" --version
+
       - name: make lint-shell
         run: make lint-shell
 

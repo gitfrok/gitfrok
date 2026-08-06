@@ -60,7 +60,12 @@ workdir=$(mktemp -d)
 server_pid=""
 
 cleanup() {
-  [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+  # Spelled out rather than `[ -n "$pid" ] && kill ... || true`: in that form the `|| true` binds to
+  # the whole chain, so it also fires when the guard is false. It happens to be harmless here, which
+  # is exactly why it is the kind of line that gets copied somewhere it is not.
+  if [ -n "$server_pid" ]; then
+    kill "$server_pid" 2>/dev/null || true
+  fi
   rm -rf "$PDPD_DIR" "$PEPC_DIR" "$workdir"
 }
 trap cleanup EXIT
