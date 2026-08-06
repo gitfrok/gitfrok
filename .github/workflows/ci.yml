@@ -43,6 +43,24 @@ jobs:
       # The fitness scripts are the gates; nothing was gating them. T-0002 deferred this because
       # the scripts relied on word splitting (SC2086); T-0009 replaced that with NUL-delimited
       # arrays, so the lint runs clean with no suppressions to maintain.
+      #
+      # Pinned, for the same reason buf and OPA are: an unpinned linter is a gate whose verdict
+      # depends on the day. It was unpinned until T-0005, and that cost a red run — a finding the
+      # runner's preinstalled shellcheck reported and a newer local one no longer does. Whichever
+      # of the two is "right" matters less than the two agreeing, because a gate a developer cannot
+      # reproduce locally is one they learn to push and see.
+      # Installed into a user-writable directory rather than /usr/local/bin, so the step needs no
+      # sudo and shadows the runner's preinstalled copy by PATH order alone.
+      - name: pin shellcheck to v0.11.0
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJf - --strip-components=1 -C "$HOME/.local/bin" "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/shellcheck" --version
+
       - name: make lint-shell
         run: make lint-shell
 
@@ -64,8 +82,16 @@ jobs:
           version: 1.72.0
           github_token: ${{ github.token }}
 
-      # Pinned to the versions the consumers' go.mod already resolve, so the gate compares like with
-      # like — a newer plugin emitting different-but-valid output would look like drift.
+      # Pinned so the gate compares like with like — a newer plugin emitting different-but-valid
+      # output would look like drift.
+      #
+      # These are *generator* versions, and they are deliberately not tied to the protobuf runtime a
+      # consumer's go.mod resolves. They used to be described as tracking it, and T-0005 made that
+      # description false: OPA v1.19.0 pulls backend's runtime to protobuf 1.36.11 via MVS, while bff
+      # stays at 1.35.2. Coupling the two would mean an unrelated dependency bump in one consumer
+      # silently rewrote the generated code in all three. protobuf-go guarantees a newer runtime
+      # accepts older generated code, so the generator pin is free to stay still — and it must,
+      # because it is the thing this check holds constant.
       - name: codegen plugins
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.35.2
@@ -74,3 +100,12 @@ jobs:
 
       - name: make codegen-check
         run: make codegen-check
+
+      # --- T-0005: the authorization path across repos (SPEC-0002) --------------------------------
+      # The other check that can only exist here. governance authors the Rego, backend evaluates it,
+      # bff asks over gRPC, and each consumer generates its own copy of the policy contract — so all
+      # three are green in isolation while none can see the other two. This runs the real path and
+      # asserts the verdicts, the bundle revision surviving every hop, and that no denied request
+      # reached the data. Same reasoning as the codegen row above (ADR-0032's precedent).
+      - name: make policy-check
+        run: make policy-check
