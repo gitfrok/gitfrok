@@ -80,7 +80,15 @@ else
   # reasoning as the host-DNS step at the bottom, which also prints instead of doing.
   instances_max=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo unknown)
   if [ "$instances_max" != unknown ]; then
-    instances_used=$(find /proc/*/fd -lname 'anon_inode:inotify' 2>/dev/null | wc -l)
+    # `-type l` + `readlink`, not `find -lname`. `-lname` is a GNU findutils extension that BusyBox
+    # find rejects outright, and this sits in a command substitution in a pipeline under
+    # `set -euo pipefail` — so on a non-GNU *Linux* userland (Alpine, where /proc exists so this block
+    # is entered) the failure killed the whole script instantly, with no `die` message at all. macOS
+    # was never affected: no /proc means `instances_max` is already "unknown" and this is skipped.
+    # `-exec … +` and `-type l` are both POSIX. The trailing `|| true` is the belt to that braces: a
+    # preflight that cannot count must degrade to a useless check, never to an unexplained exit.
+    instances_used=$(find /proc/*/fd -type l -exec readlink {} + 2>/dev/null |
+      grep -c inotify || true)
     if [ "$((instances_max - instances_used))" -lt 64 ]; then
       die "not enough inotify instances to boot the node: fs.inotify.max_user_instances=$instances_max
   with ~$instances_used already in use, leaving $((instances_max - instances_used)) free. The node's

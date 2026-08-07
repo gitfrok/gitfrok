@@ -153,6 +153,21 @@ toomanyrequests: You have reached your unauthenticated pull rate limit.
 ```
 
 so it appears to sit behind Docker Hub and inherit exactly the limit ADR-0034 was trying to avoid.
+
+A rate-limit error alone would be thin evidence — it could be transient. Two things make it structural,
+and they are the reason to trust this rather than the error message:
+
+```
+$ dig +short docker.redpanda.com
+vectorized.docker.scarf.sh.                     # a Docker-Hub-fronting proxy
+
+$ curl -sSI https://docker.redpanda.com/v2/redpandadata/redpanda/manifests/v26.2.1
+www-authenticate: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",…
+```
+
+The vendor endpoint delegates authentication to Docker Hub's own registry, so pulls through it are
+Docker Hub pulls with an extra hop. ADR-0034's premise — that these are two independent distribution
+channels with different limits — does not hold for this image.
 The practical consequence is that ADR-0034's own **rule 4 — resolvability is checked, not assumed** —
 could not be satisfied there: `check-dev-images.sh` reported `?? inconclusive` for every run. On
 `docker.io` the same tag reports `ok resolves`. A pin that can be verified beats a pin from a
@@ -170,6 +185,12 @@ the tag:
 application_bootstrap.cc:656 - Incompatible downgrade detected!
 My version 18, feature table 19 indicates that all nodes in cluster were previously >= that version
 ```
+
+Quoted verbatim from `kubectl logs` of the crash-looping pod, which was running **v26.1.15** — the
+`:656` is that build's line number. Review flagged it as wrong on the grounds that the call sits at
+line 626 in **v26.2.1**'s source, which is a different build: the process that logged this was the
+26.1.15 binary refusing to start, not the 26.2.1 one. Noting the check and why it does not apply, so
+nobody re-opens it.
 
 Redpanda records a feature-table version in its data directory and **refuses to start** against data
 written by a newer release. Consequences worth knowing before someone tries this again:
@@ -407,12 +428,27 @@ That busybox also rejects `find -printf` corroborates the finding but is not evi
 implements. The container proves the *replacements* work without GNU extensions, which is a real and
 useful thing to prove, and is not the same as proving macOS behaviour.
 
-Two known limits that survive, neither a new defect:
+### The audit is not complete, and this list is the honest version
 
-- `bench-git-workload.sh` requires GNU `date`'s `%N` and exits with a clear message without it. So it
-  is macOS-*parseable*, not macOS-*runnable*.
-- `sort -z` (removed from `dev-up.sh` anyway) is a GNU extension that FreeBSD-derived `sort` accepts,
-  so whether macOS's does cannot be determined from Linux. Recorded as unverified, not as a bug.
+Three rounds of review each found something the previous round's audit had claimed to cover. So this
+section no longer claims completeness. What follows is a register of constructs whose macOS behaviour is
+**unverified**, kept as a list rather than as a verdict:
+
+| Construct | Where | Status |
+|---|---|---|
+| `seq` | `bench-git-workload.sh`, `bench-storage.sh`, `governance/scripts/check-policy-composition.sh` (14 uses) | **unverified.** Reported as absent from stock macOS (Darwin ships `jot`); I cannot confirm that from Linux, and *the bash-3.2 container cannot either — busybox ships `seq`*. Not rewritten on an unverifiable claim. If it is absent, `for x in $(seq …)` runs **zero** iterations under `set -e` rather than failing, which is the silent-wrong-answer shape that matters. |
+| `date +%N` | `bench-git-workload.sh` | **known limit**, self-guarded — the script exits with a clear message without GNU `date`. macOS-*parseable*, not macOS-*runnable*. |
+| `sort -z` | removed from `dev-up.sh` | **unverified** — a GNU extension that FreeBSD-derived `sort` accepts. Removed anyway because it was cosmetic. |
+
+Two defects were found *and fixed*: `find -printf` (governance `check-docs.sh`) and `stat -f -c`
+(`bench-storage.sh`). A third, `find -lname` in this repo's `dev-up.sh`, was fixed on the same day and
+is **not** a macOS bug — macOS has no `/proc`, so the block is skipped entirely. It was a *non-GNU
+Linux* bug: BusyBox rejects `-lname`, and inside a pipeline under `set -euo pipefail` that killed the
+whole script with no message. Replaced with POSIX `-type l -exec readlink {} +` and a `|| true`, which
+returns the identical count (116 on the dev host) and survives BusyBox.
+
+**The only thing that will settle macOS is running these scripts on a Mac.** Everything above is
+inference from a Linux host and a busybox container, and busybox is not a BSD userland.
 
 ### The two defects the create-path attempt found (2026-08-08)
 
