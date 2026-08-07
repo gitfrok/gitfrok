@@ -320,7 +320,7 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 | AC1 — `make dev-up` starts Minikube with `ingress` + `ingress-dns` | **still partially verified** — the addon half is a real test (both were `disabled` beforehand). The *cluster-create* path was **attempted for real on 2026-08-08** against a fresh profile and **failed on a host limit, after finding two defects in this script** (below). It remains unverified, but it is no longer unexercised: what blocks it is now named and one `sysctl` wide. |
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
 | AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified in substance, not by the specified path** — ingress serves the mkcert wildcard for `hello.gitsaas.test` and returns the fixture: `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`). That was reached through `kubectl port-forward`, because under **rootless** podman the node IP is unroutable from the host — `ping 192.168.49.2` is 100% loss, and `smoke-dev.sh`'s `--resolve` fallback times out (`rc=28`). No host-DNS or `/etc/hosts` entry can fix that; it needs a rootful driver or KVM. |
-| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds; Linux demonstrated, and the macOS half is now tested rather than grepped** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. On 2026-08-08 all 15 scripts across the four repos were parsed under **bash 3.2.57** (the version macOS ships) and five fitness scripts were *executed* under it, all passing. A GNU-only-flag audit — the thing no prior check looked for — **found a real macOS-fatal defect**: `governance/scripts/check-docs.sh` used `find -printf`, which BSD find lacks, so that gate aborted entirely on macOS. Fixed there. `sort -z` here in `dev-up.sh` was dropped as a precaution but is **not** claimed as a defect (FreeBSD-derived sort accepts it; unverifiable from Linux). **Running on an actual Mac remains untested** — what changed is that everything reachable without one now is. |
+| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds; Linux demonstrated, and the macOS half is now tested rather than grepped** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. On 2026-08-08 all 15 scripts across the four repos were parsed under **bash 3.2.57** (the version macOS ships) and five fitness scripts were *executed* under it, all passing. A GNU-only-flag audit found **two** macOS-fatal defects: `governance/scripts/check-docs.sh` used `find -printf` (fixed in governance — BSD find lacks it, so that gate aborted entirely), and `bench-storage.sh` used `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, so its RAM-disk guard was **silently inert on macOS** — fixed here, portably, and now it refuses to run rather than guess. `sort -z` in `dev-up.sh` was dropped as a precaution but is **not** claimed as a defect (FreeBSD-derived sort accepts it; unverifiable from Linux). See [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not) — the short version is that **no script has run on a Mac**, and the bash-3.2 container is not a BSD userland. |
 
 ### The seven defects the first run found
 
@@ -341,6 +341,35 @@ the **system** trust store and needs root, so on a host without passwordless sud
 bring-up before applying a single manifest — over a step no acceptance criterion depends on
 (`smoke-dev.sh` validates with `--cacert` against `rootCA.pem`). It now warns and continues when the CA
 exists, matching how the script already treats host DNS: print the root-requiring step, don't do it.
+
+### What is verified about macOS, and what is not
+
+AC4 says "works on macOS and Linux". Its evidence used to be a grep for bash-4 features, which tests
+the **shell** and ignores the **userland**. macOS has both an old bash (3.2.57) and a BSD userland, and
+both audits below were needed. Stated precisely, because the previous record read as more complete than
+it was:
+
+| Claim | Status | How |
+|---|---|---|
+| No OrbStack, no Docker Compose anywhere | **verified** | every mention in the tree is a prohibition |
+| No bash-4 *syntax* | **verified** | all 15 scripts across the four repos pass `bash -n` under bash 3.2.57 |
+| No bash-4 *behaviour* in the fitness gates | **verified** | `check-dep-direction`, `check-version-floors`, `check-dev-images`, webfrontend's `check-boundaries`, governance's `check-docs` all *executed* under bash 3.2.57 and pass |
+| No GNU-only tool flags | **two defects found and fixed** | audit of `grep -P`, `readlink -f`, `find -printf`, `date -d`, `stat -c`, `base64 -w`, `xargs -d`, `tac`, `sha256sum`, `sed -i`, `sort -z` |
+| The scripts run on a Mac | **NOT VERIFIED** | no macOS host available |
+
+**The bash 3.2 container is not a BSD userland**, and this matters for how much the tests above prove.
+It is Alpine + busybox — an independent minimal reimplementation with no lineage to Darwin's tools.
+That busybox also rejects `find -printf` corroborates the finding but is not evidence *about* BSD; the
+`-printf` conclusion rests on it being a documented GNU extension that no BSD-family `find(1)`
+implements. The container proves the *replacements* work without GNU extensions, which is a real and
+useful thing to prove, and is not the same as proving macOS behaviour.
+
+Two known limits that survive, neither a new defect:
+
+- `bench-git-workload.sh` requires GNU `date`'s `%N` and exits with a clear message without it. So it
+  is macOS-*parseable*, not macOS-*runnable*.
+- `sort -z` (removed from `dev-up.sh` anyway) is a GNU extension that FreeBSD-derived `sort` accepts,
+  so whether macOS's does cannot be determined from Linux. Recorded as unverified, not as a bug.
 
 ### The two defects the create-path attempt found (2026-08-08)
 
