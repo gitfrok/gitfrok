@@ -21,7 +21,7 @@ Kubernetes manifests for the local Minikube dev environment per ADR-0024.
 Local Services (Minikube + ingress-dns)
 ├── postgres:5432          — PostgreSQL 18 (tenancy + RLS, T-0004)
 ├── valkey:6379            — Valkey 9.1 (replaces Redis, ADR-0023)
-├── redpanda:9092          — Redpanda v26.1 (event broker)
+├── redpanda:9092          — Redpanda v26.2 (event broker; ADR-0023 floor is 26.1)
 │   ├── :8081              — Schema Registry
 │   ├── :8082              — PandaProxy (HTTP proxy)
 │   ├── :9644              — Admin API (readiness)
@@ -46,7 +46,7 @@ asserts that correspondence rather than trusting this table.
 |------|---------|-------|-------|
 | `postgres.yaml` | PostgreSQL 18 | `postgres:18.4` | applied, Available |
 | `valkey.yaml` | Valkey 9.1 | `valkey/valkey:9.1.1` | applied, Available |
-| `redpanda.yaml` | Redpanda v26.2 | `redpandadata/redpanda:v26.2.1` | applied, Available |
+| `redpanda.yaml` | Redpanda v26.2 | `docker.io/redpandadata/redpanda:v26.2.1` | applied, Available |
 | `seaweedfs.yaml` | SeaweedFS 4.40 | `chrislusf/seaweedfs:4.40` | applied, Available |
 | `zitadel.yaml` | Zitadel | `ghcr.io/zitadel/zitadel:v4.16.2` | applied, Available |
 | `hello.yaml` | smoke-test fixture | `busybox:1.35.0` | applied, Available; serves 200 over TLS |
@@ -136,6 +136,70 @@ walks the directory. All three agree, including on an *allow* case (`reader` + `
 `*_test.rego` is excluded, matching the loader's own filter in
 `backend/modules/policy/internal/adapters/opa/pdp.go`: those are governance's tests *of* the policy,
 they reference rules that exist only to be tested, and including them can fail compilation.
+
+## Why Redpanda is pinned on docker.io
+
+`REDPANDA_IMAGE` moved from `docker.redpanda.com/redpandadata/redpanda:v26.2.1` to
+`docker.io/redpandadata/redpanda:v26.2.1`. Same tag, same version — different registry, and it cuts
+against what ADR-0034 assumed, so the reason is recorded here rather than left to a diff.
+
+ADR-0034 preferred the vendor's own distribution point, noting that `redpandadata/redpanda` on Docker
+Hub "is a mirror subject to Docker Hub's rate limits and retention". That reasoning is sound in
+general and turned out to be **backwards for this image**: `docker.redpanda.com` answers an
+unauthenticated manifest query with
+
+```
+toomanyrequests: You have reached your unauthenticated pull rate limit.
+```
+
+so it appears to sit behind Docker Hub and inherit exactly the limit ADR-0034 was trying to avoid.
+
+A rate-limit error alone would be thin evidence — it could be transient. Two things make it structural,
+and they are the reason to trust this rather than the error message:
+
+```
+$ dig +short docker.redpanda.com
+vectorized.docker.scarf.sh.                     # a Docker-Hub-fronting proxy
+
+$ curl -sSI https://docker.redpanda.com/v2/redpandadata/redpanda/manifests/v26.2.1
+www-authenticate: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",…
+```
+
+The vendor endpoint delegates authentication to Docker Hub's own registry, so pulls through it are
+Docker Hub pulls with an extra hop. ADR-0034's premise — that these are two independent distribution
+channels with different limits — does not hold for this image.
+The practical consequence is that ADR-0034's own **rule 4 — resolvability is checked, not assumed** —
+could not be satisfied there: `check-dev-images.sh` reported `?? inconclusive` for every run. On
+`docker.io` the same tag reports `ok resolves`. A pin that can be verified beats a pin from a
+preferred registry that cannot, which is the spirit of the ADR even where it contradicts its example.
+
+The mirror's retention risk is unchanged and real; the resolvability probe is what turns a deleted or
+retagged upstream into a red build instead of a deploy-time 404.
+
+### Redpanda refuses downgrades — clearing the PVC is the only way down
+
+Found on 2026-08-08 while briefly pinning to `v26.1.15`. The pod crash-looped, and the cause was not
+the tag:
+
+```
+application_bootstrap.cc:656 - Incompatible downgrade detected!
+My version 18, feature table 19 indicates that all nodes in cluster were previously >= that version
+```
+
+Quoted verbatim from `kubectl logs` of the crash-looping pod, which was running **v26.1.15** — the
+`:656` is that build's line number. Review flagged it as wrong on the grounds that the call sits at
+line 626 in **v26.2.1**'s source, which is a different build: the process that logged this was the
+26.1.15 binary refusing to start, not the 26.2.1 one. Noting the check and why it does not apply, so
+nobody re-opens it.
+
+Redpanda records a feature-table version in its data directory and **refuses to start** against data
+written by a newer release. Consequences worth knowing before someone tries this again:
+
+- Moving a Redpanda pin **down** a minor requires deleting `redpanda-pvc`. There is no in-place path,
+  and the failure is a crash loop rather than a clear startup refusal in the rollout output.
+- Moving **up** is fine — `v26.1.15 → v26.2.1` rolled out with the existing volume untouched.
+- In this dev cluster the PVC holds no application data (nothing consumes the broker yet — there is no
+  dataplane), so clearing it costs nothing. That will stop being true once something produces to it.
 
 ## Resource Allocation (Minikube Local Dev)
 
@@ -320,7 +384,7 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 | AC1 — `make dev-up` starts Minikube with `ingress` + `ingress-dns` | **still partially verified** — the addon half is a real test (both were `disabled` beforehand). The *cluster-create* path was **attempted for real on 2026-08-08** against a fresh profile and **failed on a host limit, after finding two defects in this script** (below). It remains unverified, but it is no longer unexercised: what blocks it is now named and one `sysctl` wide. |
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
 | AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified in substance, not by the specified path** — ingress serves the mkcert wildcard for `hello.gitsaas.test` and returns the fixture: `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`). That was reached through `kubectl port-forward`, because under **rootless** podman the node IP is unroutable from the host — `ping 192.168.49.2` is 100% loss, and `smoke-dev.sh`'s `--resolve` fallback times out (`rc=28`). No host-DNS or `/etc/hosts` entry can fix that; it needs a rootful driver or KVM. |
-| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds, Linux now demonstrated** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. The scripts ran on Linux for real; `macOS` remains unverified, and the bash-3.2 claim was re-checked by grep (no `declare -A`, `mapfile`, `readarray`, or `${var,,}`). |
+| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds; Linux demonstrated, and the macOS half is now tested rather than grepped** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. On 2026-08-08 all 15 scripts across the four repos were parsed under **bash 3.2.57** (the version macOS ships) and five fitness scripts were *executed* under it, all passing. A GNU-only-flag audit found **two** macOS-fatal defects: `governance/scripts/check-docs.sh` used `find -printf` (fixed in governance — BSD find lacks it, so that gate aborted entirely), and `bench-storage.sh` used `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, so its RAM-disk guard was **silently inert on macOS** — fixed here, portably, and now it refuses to run rather than guess. `sort -z` in `dev-up.sh` was dropped as a precaution but is **not** claimed as a defect (FreeBSD-derived sort accepts it; unverifiable from Linux). See [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not) — the short version is that **no script has run on a Mac**, and the bash-3.2 container is not a BSD userland. |
 
 ### The seven defects the first run found
 
@@ -329,7 +393,7 @@ Each was invisible to review and to `check-dev-images.sh`, because nothing had e
 | # | Defect | How it failed |
 |---|---|---|
 | 1 | postgres PVC mounted at `/var/lib/postgresql/data` | pg18 stores data in major-version subdirectories and **exits** rather than ignore that mount: *"there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)"*. Fixed to a single mount one level up (docker-library/postgres#1259). |
-| 2 | `redpandadata/redpanda:v26.1` | never published — the registry answers `not found`. The v26.1 **series** exists (v26.1.2…v26.1.14) but Redpanda tags patch releases only, so there is no floating minor tag to pin. Now `docker.redpanda.com/redpandadata/redpanda:v26.2.1`. |
+| 2 | `redpandadata/redpanda:v26.1` | never published — the registry answers `not found`. The v26.1 **series** exists (v26.1.2…v26.1.14) but Redpanda tags patch releases only, so there is no floating minor tag to pin. Now `docker.io/redpandadata/redpanda:v26.2.1` — see [Why Redpanda is pinned on docker.io](#why-redpanda-is-pinned-on-dockerio). |
 | 3 | seaweedfs `args: [all, …]` | `weed: unknown subcommand "all"`. The set is `master\|volume\|filer\|s3\|server`; combined mode is `server`, and `-filer` must be asked for explicitly or nothing serves `filer.gitsaas.test:8888`. |
 | 4 | zitadel `--tls-mode=external` | `Error: unknown flag`. The flag is `--tlsMode` — camelCase. |
 | 5 | seaweedfs readiness `path: /status` | 404s on the master (*"volume id status not found"*), so the pod never became Ready and the rollout blocked forever. `/cluster/status` is the health endpoint and returns `{"IsLeader":true,…}`. |
@@ -341,6 +405,50 @@ the **system** trust store and needs root, so on a host without passwordless sud
 bring-up before applying a single manifest — over a step no acceptance criterion depends on
 (`smoke-dev.sh` validates with `--cacert` against `rootCA.pem`). It now warns and continues when the CA
 exists, matching how the script already treats host DNS: print the root-requiring step, don't do it.
+
+### What is verified about macOS, and what is not
+
+AC4 says "works on macOS and Linux". Its evidence used to be a grep for bash-4 features, which tests
+the **shell** and ignores the **userland**. macOS has both an old bash (3.2.57) and a BSD userland, and
+both audits below were needed. Stated precisely, because the previous record read as more complete than
+it was:
+
+| Claim | Status | How |
+|---|---|---|
+| No OrbStack, no Docker Compose anywhere | **verified** | every mention in the tree is a prohibition |
+| No bash-4 *syntax* | **verified** | all 15 scripts across the four repos pass `bash -n` under bash 3.2.57 |
+| No bash-4 *behaviour* in the fitness gates | **verified** | `check-dep-direction`, `check-version-floors`, `check-dev-images`, webfrontend's `check-boundaries`, governance's `check-docs` all *executed* under bash 3.2.57 and pass |
+| No GNU-only tool flags | **two defects found and fixed** | audit of `grep -P`, `readlink -f`, `find -printf`, `date -d`, `stat -c`, `base64 -w`, `xargs -d`, `tac`, `sha256sum`, `sed -i`, `sort -z` |
+| The scripts run on a Mac | **NOT VERIFIED** | no macOS host available |
+
+**The bash 3.2 container is not a BSD userland**, and this matters for how much the tests above prove.
+It is Alpine + busybox — an independent minimal reimplementation with no lineage to Darwin's tools.
+That busybox also rejects `find -printf` corroborates the finding but is not evidence *about* BSD; the
+`-printf` conclusion rests on it being a documented GNU extension that no BSD-family `find(1)`
+implements. The container proves the *replacements* work without GNU extensions, which is a real and
+useful thing to prove, and is not the same as proving macOS behaviour.
+
+### The audit is not complete, and this list is the honest version
+
+Three rounds of review each found something the previous round's audit had claimed to cover. So this
+section no longer claims completeness. What follows is a register of constructs whose macOS behaviour is
+**unverified**, kept as a list rather than as a verdict:
+
+| Construct | Where | Status |
+|---|---|---|
+| `seq` | `bench-git-workload.sh`, `bench-storage.sh`, `governance/scripts/check-policy-composition.sh` (14 uses) | **unverified.** Reported as absent from stock macOS (Darwin ships `jot`); I cannot confirm that from Linux, and *the bash-3.2 container cannot either — busybox ships `seq`*. Not rewritten on an unverifiable claim. If it is absent, `for x in $(seq …)` runs **zero** iterations under `set -e` rather than failing, which is the silent-wrong-answer shape that matters. |
+| `date +%N` | `bench-git-workload.sh` | **known limit**, self-guarded — the script exits with a clear message without GNU `date`. macOS-*parseable*, not macOS-*runnable*. |
+| `sort -z` | removed from `dev-up.sh` | **unverified** — a GNU extension that FreeBSD-derived `sort` accepts. Removed anyway because it was cosmetic. |
+
+Two defects were found *and fixed*: `find -printf` (governance `check-docs.sh`) and `stat -f -c`
+(`bench-storage.sh`). A third, `find -lname` in this repo's `dev-up.sh`, was fixed on the same day and
+is **not** a macOS bug — macOS has no `/proc`, so the block is skipped entirely. It was a *non-GNU
+Linux* bug: BusyBox rejects `-lname`, and inside a pipeline under `set -euo pipefail` that killed the
+whole script with no message. Replaced with POSIX `-type l -exec readlink {} +` and a `|| true`, which
+returns the identical count (116 on the dev host) and survives BusyBox.
+
+**The only thing that will settle macOS is running these scripts on a Mac.** Everything above is
+inference from a Linux host and a busybox container, and busybox is not a BSD userland.
 
 ### The two defects the create-path attempt found (2026-08-08)
 

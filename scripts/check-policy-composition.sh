@@ -24,6 +24,17 @@
 # its own generated contract, then removed. They are not committed inside backend/ or bff/ because
 # they are not part of what either repo ships.
 set -euo pipefail
+
+# count_to replaces `seq`, which is not guaranteed to exist: stock macOS ships `jot` instead, and
+# T-0003 AC4 requires these scripts to work there. The failure mode is what makes this worth avoiding
+# rather than documenting — with `seq` missing, `for i in $(seq 1 N)` iterates **zero** times under
+# `set -e` instead of failing, so a benchmark or a wait-loop silently does nothing and reports success.
+# This is POSIX shell arithmetic and depends on no external command.
+count_to() { # count_to <n> — print 1..n, one per line
+  local i=1
+  while [ "$i" -le "$1" ]; do printf '%s\n' "$i"; i=$((i + 1)); done
+}
+
 cd "$(dirname "$0")/.."
 
 fail=0
@@ -99,7 +110,7 @@ server_pid=$!
 
 # The server writes its address once it is listening, so this waits on readiness rather than on a
 # fixed sleep — the difference between a check and a flaky check.
-for _ in $(seq 1 100); do
+for _ in $(count_to 100); do
   [ -s "$addr_file" ] && break
   if ! kill -0 "$server_pid" 2>/dev/null; then
     report "the PDP exited before it could serve:"

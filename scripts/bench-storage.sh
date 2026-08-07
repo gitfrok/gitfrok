@@ -20,6 +20,17 @@
 #
 # Requires podman (rootless is fine) and /dev/fuse. Writes results under --out.
 set -euo pipefail
+
+# count_to replaces `seq`, which is not guaranteed to exist: stock macOS ships `jot` instead, and
+# T-0003 AC4 requires these scripts to work there. The failure mode is what makes this worth avoiding
+# rather than documenting — with `seq` missing, `for i in $(seq 1 N)` iterates **zero** times under
+# `set -e` instead of failing, so a benchmark or a wait-loop silently does nothing and reports success.
+# This is POSIX shell arithmetic and depends on no external command.
+count_to() { # count_to <n> — print 1..n, one per line
+  local i=1
+  while [ "$i" -le "$1" ]; do printf '%s\n' "$i"; i=$((i + 1)); done
+}
+
 cd "$(dirname "$0")/.."
 
 SEAWEEDFS_IMAGE=$(awk -F= '/^SEAWEEDFS_IMAGE=/{print $2}' deploy/dev/versions.env)
@@ -63,9 +74,49 @@ command -v podman >/dev/null || { echo "podman not installed"; exit 1; }
 scratch=${BENCH_SCRATCH:-$HOME/.cache/gitfrok-bench}
 mkdir -p "$scratch/block" "$scratch/seaweed-data" "$out"
 
-fstype=$(stat -f -c %T "$scratch" 2>/dev/null || echo unknown)
-if [ "$fstype" = "tmpfs" ] || [ "$fstype" = "ramfs" ]; then
-  echo "refusing to run: scratch $scratch is $fstype (RAM). Set BENCH_SCRATCH to a real disk."
+# Filesystem type, portably — and it must be *known*, not assumed.
+#
+# This was `stat -f -c %T "$scratch" 2>/dev/null || echo unknown`. Both `-c` and the combined `-f`
+# filesystem mode are GNU coreutils syntax; BSD `stat` (so macOS, T-0003 AC4) has neither. There the
+# call failed, the redirect swallowed the error, `fstype` became "unknown", and the guard below waved
+# it through — so the one check standing between this benchmark and a flattering tmpfs number was
+# inert on exactly the platform nobody had run it on. A silent fallback to "unknown" is worse than no
+# check, because the output looks equally authoritative either way (T-0007's verdict fed ADR-0033).
+detect_fstype() { # detect_fstype <path>  -> prints type, non-zero if undeterminable
+  local path="$1" out mp
+  # GNU coreutils.
+  if out=$(stat -f -c %T "$path" 2>/dev/null) && [ -n "$out" ]; then
+    printf '%s\n' "$out"; return 0
+  fi
+  # No GNU stat. `df -P` names the mount point, then `mount` names that mount's type — in one of two
+  # formats, so both are matched:
+  #   BSD/macOS:  /dev/disk1s5 on / (apfs, local, journaled)
+  #   Linux:      /dev/nvme0n1p3 on /home type btrfs (rw,relatime)
+  # Mount points containing spaces or regex metacharacters defeat this; that is a documented limit
+  # rather than a silent one, because the caller refuses to run when detection fails.
+  mp=$(df -P "$path" 2>/dev/null | awk 'NR==2 {print $NF}')
+  [ -n "$mp" ] || return 1
+  out=$(mount 2>/dev/null | sed -n \
+    -e "s|^.* on ${mp} type \([^ ]*\) .*|\1|p" \
+    -e "s|^.* on ${mp} (\([^,)]*\).*|\1|p" | head -1)
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+if fstype=$(detect_fstype "$scratch"); then
+  case "$fstype" in
+    tmpfs|ramfs|devtmpfs)
+      echo "refusing to run: scratch $scratch is $fstype (RAM). Set BENCH_SCRATCH to a real disk."
+      exit 1 ;;
+  esac
+elif [ "${BENCH_ALLOW_UNKNOWN_FS:-0}" = "1" ]; then
+  fstype="unknown (BENCH_ALLOW_UNKNOWN_FS=1)"
+else
+  echo "refusing to run: cannot determine the filesystem type of $scratch, so the RAM-disk guard"
+  echo "cannot be applied. Benchmarking a 'block volume' that is really tmpfs produces a flattering"
+  echo "number for the wrong reason, which is what this guard exists to prevent."
+  echo "Point BENCH_SCRATCH at a path on a filesystem this can identify, or set"
+  echo "BENCH_ALLOW_UNKNOWN_FS=1 to proceed and have the result recorded as unverified."
   exit 1
 fi
 
@@ -116,7 +167,7 @@ podman exec -d "$container" sh -c \
 # store the master needs noticeably longer, and a fixed sleep would either flake or waste time.
 # The path carries a query because the filer's bare "/" is not a reliable 2xx.
 filer_up=false
-for _ in $(seq 1 60); do
+for _ in $(count_to 60); do
   if podman exec "$container" wget -qO- 'http://127.0.0.1:8888/?limit=1' >/dev/null 2>&1; then filer_up=true; break; fi
   sleep 1
 done
@@ -127,7 +178,7 @@ podman exec -d "$container" sh -c \
   'weed mount -filer=127.0.0.1:8888 -dir=/mnt/seaweed -filer.path=/ >/var/log/weed-mount.log 2>&1'
 
 mount_up=false
-for _ in $(seq 1 60); do
+for _ in $(count_to 60); do
   if podman exec "$container" sh -c 'echo probe > /mnt/seaweed/.probe 2>/dev/null && rm -f /mnt/seaweed/.probe'; then
     mount_up=true; break
   fi
@@ -163,7 +214,7 @@ podman exec "$container" sh -c 'umount /mnt/seaweed' >/dev/null 2>&1 || true
 podman exec -d "$container" sh -c \
   'weed mount -filer=127.0.0.1:8888 -dir=/mnt/seaweed -filer.path=/ >>/var/log/weed-mount.log 2>&1'
 remount_ok=false
-for _ in $(seq 1 60); do
+for _ in $(count_to 60); do
   if podman exec "$container" sh -c 'test -d /mnt/seaweed/bench' >/dev/null 2>&1; then remount_ok=true; break; fi
   sleep 1
 done
