@@ -22,6 +22,15 @@ TLS_SECRET=gitsaas-tls
 WILDCARD='*.gitsaas.test'
 VERSIONS=deploy/dev/versions.env
 
+# The OPA bundle governance owns and the data plane loads. POLICY_SRC is a path into the governance
+# submodule — read, never written — and POLICY_ENV/POLICY_MOUNT are the contract a dataplane
+# manifest has to honour once one exists (backend/cmd/dataplane-app reads POLICY_ENV and exits
+# without it). Named here rather than inline so the manifest and the script cannot drift.
+POLICY_SRC=governance/policies
+POLICY_CM=gitfrok-policy-bundle
+POLICY_MOUNT=/etc/gitfrok/policy
+POLICY_ENV=GITFROK_POLICY_BUNDLE_DIR
+
 # Pin every kubectl call to this profile's context. Without --context a stray `kubectl config
 # use-context` elsewhere could point these applies at a completely different cluster.
 KUBECTL=(kubectl --context "$PROFILE")
@@ -59,6 +68,46 @@ step "Minikube profile '$PROFILE'"
 if minikube status -p "$PROFILE" >/dev/null 2>&1; then
   echo "already running — leaving CPU/memory sizing untouched"
 else
+  # inotify headroom, checked only on the create path because a running cluster has already paid
+  # this cost. The node runs systemd as PID 1, and systemd allocates its own inotify instances; if
+  # the per-user ceiling is already consumed by a desktop session it gets none and exits during
+  # `prepare kic ssh` with "Failed to allocate manager object: Too many open files". minikube then
+  # retries, and the retry fails on a *different* error (see the volume cleanup below), so the
+  # message that reaches the operator names neither inotify nor the real cause. Fedora ships 128,
+  # which a GUI login can nearly exhaust on its own — this is not an exotic misconfiguration.
+  #
+  # Checked, not fixed: raising it is `sysctl`, which needs root and outlives this script. Same
+  # reasoning as the host-DNS step at the bottom, which also prints instead of doing.
+  instances_max=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo unknown)
+  if [ "$instances_max" != unknown ]; then
+    instances_used=$(find /proc/*/fd -lname 'anon_inode:inotify' 2>/dev/null | wc -l)
+    if [ "$((instances_max - instances_used))" -lt 64 ]; then
+      die "not enough inotify instances to boot the node: fs.inotify.max_user_instances=$instances_max
+  with ~$instances_used already in use, leaving $((instances_max - instances_used)) free. The node's
+  systemd needs its own, and fails with 'Too many open files' if it cannot get them.
+
+  Raise it (needs root; persists across reboots):
+    printf 'fs.inotify.max_user_instances=512\nfs.inotify.max_user_watches=524288\n' |
+      sudo tee /etc/sysctl.d/99-minikube-inotify.conf >/dev/null
+    sudo sysctl --system
+
+  Or for this boot only:  sudo sysctl -w fs.inotify.max_user_instances=512"
+    fi
+    echo "inotify: $((instances_max - instances_used)) of $instances_max instances free"
+  fi
+
+  # Clear a half-created profile before creating one. minikube's own in-run retry deletes the
+  # failed *container* but leaves the podman *volume*, so attempt two dies on "volume with name
+  # $PROFILE already exists" — a stale-state error that masks whatever actually broke attempt one.
+  # It also leaves the profile registered but unusable, which means every later run takes this
+  # branch and fails the same way. `minikube delete` is what removes both, so a re-run genuinely
+  # repairs a failed create, as the header of this script claims it does.
+  if minikube profile list -o json 2>/dev/null | grep -q "\"Name\":\"$PROFILE\"" ||
+     [ -d "$HOME/.minikube/machines/$PROFILE" ]; then
+    echo "profile exists but is not running — clearing it (container + volume) before recreating"
+    minikube delete -p "$PROFILE" || die "could not delete the stale '$PROFILE' profile"
+  fi
+
   start_args=(-p "$PROFILE" --cpus="$CPUS" --memory="$MEMORY" --addons=ingress --addons=ingress-dns)
   if [ -n "${MINIKUBE_DRIVER:-}" ]; then
     start_args+=(--driver="$MINIKUBE_DRIVER")
@@ -114,6 +163,68 @@ echo "issued by CA at $(mkcert -CAROOT)"
 "${KUBECTL[@]}" create secret tls "$TLS_SECRET" \
   --cert="$tlsdir/tls.crt" --key="$tlsdir/tls.key" -n "$NS" \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+
+# ---------------------------------------------------------------------- policy bundle
+# The OPA bundle the data plane loads via GITFROK_POLICY_BUNDLE_DIR (ADR-0006, invariant 2). It is
+# built here from the governance checkout rather than committed as a manifest, for the same reason
+# the TLS key above is generated rather than committed: governance is the bundle's only author
+# (invariants 13 and 21), and a copy of the rules under deploy/dev/ would be a second source of
+# truth that drifts. Note this is the opposite call from image tags, which deploy/dev/ deliberately
+# hardcodes and asserts ("assert, don't generate") — tags are a *pin* the super-repo owns, whereas
+# the policy is *content* another repo owns.
+step "Policy bundle ConfigMap '$POLICY_CM' from $POLICY_SRC"
+[ -f "$POLICY_SRC/.manifest" ] ||
+  die "no policy bundle at $POLICY_SRC/.manifest — run 'make bootstrap' to materialise the submodules"
+
+# Flat keys over a nested tree: ConfigMap keys cannot contain '/', and they do not need to. OPA
+# resolves policies by the `package` declaration inside each file, not by its path, so a flat
+# directory loads identically to the nested one — verified with `opa eval` against both layouts.
+#
+# Two traps this loop exists to avoid, both of which produce a bundle that *loads* and then denies
+# every request in the system:
+#
+#   1. `--from-file=<dir>` is NOT recursive. Pointed at $POLICY_SRC it picks up `.manifest` alone
+#      and silently misses every .rego under gitsaas/. The result passes the backend's startup
+#      check — the revision is present, so the bundle is valid — and then answers every query with
+#      an undefined decision. Confirmed in-cluster: a manifest-only bundle evaluates to `{}`.
+#      Fail-fast at boot cannot catch this, because nothing about it is malformed.
+#   2. A flat key namespace collides where a nested tree does not. Two files named authz.rego under
+#      different packages would silently overwrite each other, and the survivor is whichever the
+#      loop reached last.
+#
+# *_test.rego is excluded to match the loader's own filter (backend/modules/policy/.../opa/pdp.go):
+# they are governance's tests OF the policy, they reference rules that exist only to be tested, and
+# including them can fail compilation.
+# The bundle always has a .manifest, so cm_args is never expanded empty — which matters, because
+# under bash 3.2 (macOS, AC4) `"${arr[@]}"` on an empty array trips `set -u`. Seen keys are tracked
+# in a plain string for the same reason.
+cm_args=(--from-file=".manifest=$POLICY_SRC/.manifest")
+seen_keys=" "
+policy_count=0
+while IFS= read -r -d '' f; do
+  key=${f##*/}
+  case "$seen_keys" in
+    *" $key "*)
+      die "two policy files share the basename '$key' (second: $f).
+  ConfigMap keys are flat, so one would silently overwrite the other. Rename one in governance." ;;
+  esac
+  seen_keys="$seen_keys$key "
+  cm_args+=("--from-file=$key=$f")
+  policy_count=$((policy_count + 1))
+done < <(find "$POLICY_SRC" -name '*.rego' ! -name '*_test.rego' -print0 | sort -z)
+
+# Trap 1's guard. A bundle with a manifest and no rules is the failure this whole comment is about.
+[ "$policy_count" -gt 0 ] ||
+  die "found no .rego policies under $POLICY_SRC — a bundle with no rules denies every request"
+
+"${KUBECTL[@]}" create configmap "$POLICY_CM" -n "$NS" \
+  "${cm_args[@]}" \
+  --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+echo "revision $(sed -n 's/.*"revision"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "$POLICY_SRC/.manifest" | head -1), $policy_count policy file(s)"
+printf '  mount it at %s and set %s to that path.\n' "$POLICY_MOUNT" "$POLICY_ENV"
+printf '  No workload consumes it yet: deploy/dev/ has no dataplane manifest, and backend/ has no\n'
+printf '  Dockerfile to build one from. See deploy/dev/README.md ("Policy bundle").\n'
 
 # ---------------------------------------------------------------------------- workloads
 # Ingress last: it is the only object that depends on the Services and the TLS secret existing.
