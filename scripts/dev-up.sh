@@ -198,6 +198,25 @@ step "Addons: ingress + ingress-dns (ADR-0024)"
 minikube addons enable ingress -p "$PROFILE"
 minikube addons enable ingress-dns -p "$PROFILE"
 
+# nginx defaults `worker_processes` to the host CPU count, but the controller pod's cgroup caps
+# PIDs well below what that many workers plus their thread pools need. On a 12-CPU host the pod hit
+# `pthread_create() failed (11: Resource temporarily unavailable)` and nginx logged "worker process
+# exited with fatal code 2 and cannot be respawned". The surviving workers still completed the TCP
+# handshake but never answered, so requests hung until the client timed out — 4 of 6 probes returned
+# curl exit 28 while the other 2 answered normally. That reads as a network fault, not a resource
+# one, which is why it is worth pinning rather than leaving to the host's core count: the dev
+# cluster serves a handful of requests, so two workers is ample and makes behaviour identical on
+# every machine. ingress-nginx watches this ConfigMap and reloads nginx itself, so no restart here.
+step "Capping ingress-nginx worker processes"
+tries=0
+until "${KUBECTL[@]}" get configmap ingress-nginx-controller -n ingress-nginx >/dev/null 2>&1; do
+  tries=$((tries + 1))
+  [ "$tries" -lt 60 ] || die "ingress-nginx ConfigMap never appeared"
+  sleep 2
+done
+"${KUBECTL[@]}" patch configmap ingress-nginx-controller -n ingress-nginx \
+  --type merge -p '{"data":{"worker-processes":"2"}}'
+
 # `kubectl wait` errors out instead of waiting when nothing matches the selector yet, so poll for
 # the pod to exist before waiting on its condition.
 step "Waiting for the ingress-nginx controller"
