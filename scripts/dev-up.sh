@@ -211,7 +211,13 @@ while IFS= read -r -d '' f; do
   seen_keys="$seen_keys$key "
   cm_args+=("--from-file=$key=$f")
   policy_count=$((policy_count + 1))
-done < <(find "$POLICY_SRC" -name '*.rego' ! -name '*_test.rego' -print0 | sort -z)
+# No `sort` here on purpose. It was `| sort -z`, which is a GNU extension — FreeBSD-derived sort and
+# busybox both accept it, so I cannot show from a Linux host that macOS's rejects it, and it is not
+# claimed as a defect. It is dropped because it bought nothing: ConfigMap `data` is a map, so key
+# order carries no meaning, kubectl emits the keys sorted regardless, and duplicate basenames are
+# already a hard failure above. Removing an unportable dependency with no purpose beats keeping one
+# whose portability is an open question (T-0003 AC4).
+done < <(find "$POLICY_SRC" -name '*.rego' ! -name '*_test.rego' -print0)
 
 # Trap 1's guard. A bundle with a manifest and no rules is the failure this whole comment is about.
 [ "$policy_count" -gt 0 ] ||
