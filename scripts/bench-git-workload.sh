@@ -16,6 +16,17 @@
 # which is why it can be reached on a laptop while the latency numbers cannot.
 set -euo pipefail
 
+# count_to replaces `seq`, which is not guaranteed to exist: stock macOS ships `jot` instead, and
+# T-0003 AC4 requires these scripts to work there. The failure mode is what makes this worth avoiding
+# rather than documenting — with `seq` missing, `for i in $(seq 1 N)` iterates **zero** times under
+# `set -e` instead of failing, so a benchmark or a wait-loop silently does nothing and reports success.
+# This is POSIX shell arithmetic and depends on no external command.
+count_to() { # count_to <n> — print 1..n, one per line
+  local i=1
+  while [ "$i" -le "$1" ]; do printf '%s\n' "$i"; i=$((i + 1)); done
+}
+
+
 usage() {
   cat >&2 <<'USAGE'
 usage: bench-git-workload.sh --target DIR --label NAME [--repeats N] [--concurrency N] [--size-mb N]
@@ -81,8 +92,8 @@ commits=8
 seed=20260806
 
 echo "[$label] building fixture: ${files} files x ${per_file_kb}KB over ${commits} commits" >&2
-for c in $(seq 1 "$commits"); do
-  for f in $(seq 1 "$files"); do
+for c in $(count_to "$commits"); do
+  for f in $(count_to "$files"); do
     # Deterministic pseudo-random payload: awk PRNG with a per-(commit,file) seed. Compressible
     # enough to be realistic for source trees, varied enough that packs are not degenerate.
     awk -v s="$((seed + c * 100 + f))" -v kb="$per_file_kb" 'BEGIN{
@@ -106,7 +117,7 @@ fixture_bytes=$(du -sk "$fixture/.git" | awk '{print $1 * 1024}')
 # entirely, and re-using one repo would let sample N inherit sample N-1's page cache and packfiles.
 push_ms=() clone_ms=() gc_ms=() status_ms=()
 
-for r in $(seq 1 "$repeats"); do
+for r in $(count_to "$repeats"); do
   bare="$target/bench-$r.git"
   rm -rf "$bare"
   git init -q --bare -b main "$bare"
@@ -158,7 +169,7 @@ git -C "$fixture" push -q "$conc_bare" main
 
 t0=$(now_ms)
 conc_pids=()
-for w in $(seq 1 "$concurrency"); do
+for w in $(count_to "$concurrency"); do
   (
     git -C "$fixture" push -q "$conc_bare" "main:refs/heads/worker-$w" 2>/dev/null
   ) &
@@ -180,7 +191,7 @@ excl_dir="$target/probe-excl"
 rm -rf "$excl_dir"; mkdir -p "$excl_dir"
 excl_winners=0
 excl_pids=()
-for w in $(seq 1 "$concurrency"); do
+for w in $(count_to "$concurrency"); do
   (
     set -C
     if : > "$excl_dir/the.lock" 2>/dev/null; then exit 0; else exit 1; fi
@@ -199,14 +210,14 @@ rm -rf "$ren_dir"; mkdir -p "$ren_dir"
 a_val="AAAAAAAAAAAAAAAA" b_val="BBBBBBBBBBBBBBBB"
 printf '%s' "$a_val" > "$ren_dir/target"
 (
-  for _ in $(seq 1 60); do
+  for _ in $(count_to 60); do
     printf '%s' "$a_val" > "$ren_dir/tmp.a"; mv -f "$ren_dir/tmp.a" "$ren_dir/target"
     printf '%s' "$b_val" > "$ren_dir/tmp.b"; mv -f "$ren_dir/tmp.b" "$ren_dir/target"
   done
 ) &
 ren_writer=$!
 ren_torn=0 ren_failed=0 ren_reads=0
-for _ in $(seq 1 200); do
+for _ in $(count_to 200); do
   ren_reads=$((ren_reads + 1))
   got=$(cat "$ren_dir/target" 2>/dev/null || echo "READ_FAILED")
   case "$got" in
@@ -240,7 +251,7 @@ git -C "$ref_repo" update-ref refs/heads/race "$sha1"
 
 ref_writer_errors=0
 (
-  for _ in $(seq 1 80); do
+  for _ in $(count_to 80); do
     git -C "$ref_repo" update-ref refs/heads/race "$sha2" 2>>"$work/ref-writer.err" || echo x >> "$work/ref-writer.fail"
     git -C "$ref_repo" update-ref refs/heads/race "$sha1" 2>>"$work/ref-writer.err" || echo x >> "$work/ref-writer.fail"
   done
@@ -279,7 +290,7 @@ git -C "$fixture" push -q "$same_bare" main
 
 same_ok=0 same_rejected=0
 same_pids=()
-for w in $(seq 1 "$concurrency"); do
+for w in $(count_to "$concurrency"); do
   wt="$work/contend-$w"
   git clone -q "$same_bare" "$wt" 2>/dev/null
   git -C "$wt" config user.email bench@gitfrok.test
@@ -289,7 +300,7 @@ for w in $(seq 1 "$concurrency"); do
   GIT_AUTHOR_DATE="@$((1780000000 + w)) +0000" GIT_COMMITTER_DATE="@$((1780000000 + w)) +0000" \
     git -C "$wt" commit -q -m "contended $w"
 done
-for w in $(seq 1 "$concurrency"); do
+for w in $(count_to "$concurrency"); do
   ( git -C "$work/contend-$w" push -q origin main 2>/dev/null ) &
   same_pids+=("$!")
 done

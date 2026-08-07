@@ -20,6 +20,17 @@
 #
 # Requires podman (rootless is fine) and /dev/fuse. Writes results under --out.
 set -euo pipefail
+
+# count_to replaces `seq`, which is not guaranteed to exist: stock macOS ships `jot` instead, and
+# T-0003 AC4 requires these scripts to work there. The failure mode is what makes this worth avoiding
+# rather than documenting — with `seq` missing, `for i in $(seq 1 N)` iterates **zero** times under
+# `set -e` instead of failing, so a benchmark or a wait-loop silently does nothing and reports success.
+# This is POSIX shell arithmetic and depends on no external command.
+count_to() { # count_to <n> — print 1..n, one per line
+  local i=1
+  while [ "$i" -le "$1" ]; do printf '%s\n' "$i"; i=$((i + 1)); done
+}
+
 cd "$(dirname "$0")/.."
 
 SEAWEEDFS_IMAGE=$(awk -F= '/^SEAWEEDFS_IMAGE=/{print $2}' deploy/dev/versions.env)
@@ -156,7 +167,7 @@ podman exec -d "$container" sh -c \
 # store the master needs noticeably longer, and a fixed sleep would either flake or waste time.
 # The path carries a query because the filer's bare "/" is not a reliable 2xx.
 filer_up=false
-for _ in $(seq 1 60); do
+for _ in $(count_to 60); do
   if podman exec "$container" wget -qO- 'http://127.0.0.1:8888/?limit=1' >/dev/null 2>&1; then filer_up=true; break; fi
   sleep 1
 done
@@ -167,7 +178,7 @@ podman exec -d "$container" sh -c \
   'weed mount -filer=127.0.0.1:8888 -dir=/mnt/seaweed -filer.path=/ >/var/log/weed-mount.log 2>&1'
 
 mount_up=false
-for _ in $(seq 1 60); do
+for _ in $(count_to 60); do
   if podman exec "$container" sh -c 'echo probe > /mnt/seaweed/.probe 2>/dev/null && rm -f /mnt/seaweed/.probe'; then
     mount_up=true; break
   fi
@@ -203,7 +214,7 @@ podman exec "$container" sh -c 'umount /mnt/seaweed' >/dev/null 2>&1 || true
 podman exec -d "$container" sh -c \
   'weed mount -filer=127.0.0.1:8888 -dir=/mnt/seaweed -filer.path=/ >>/var/log/weed-mount.log 2>&1'
 remount_ok=false
-for _ in $(seq 1 60); do
+for _ in $(count_to 60); do
   if podman exec "$container" sh -c 'test -d /mnt/seaweed/bench' >/dev/null 2>&1; then remount_ok=true; break; fi
   sleep 1
 done
