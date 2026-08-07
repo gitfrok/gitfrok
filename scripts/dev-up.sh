@@ -13,6 +13,7 @@
 #        MINIKUBE_CPUS (default: 4)            MINIKUBE_MEMORY (default: 6144, in MiB)
 #        MINIKUBE_PORTS (default: 80:80,443:443 — see below; empty string disables)
 #        MINIKUBE_RUNTIME (default: containerd — see below)
+#        INGRESS_WORKER_PROCESSES (default: 2 — see below)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,6 +32,11 @@ MEMORY="${MINIKUBE_MEMORY:-6144}"
 # create path checks for that below rather than letting `minikube start` fail with a bind error that
 # names neither sysctl nor cause. Set MINIKUBE_PORTS='' to opt out (e.g. when something already owns
 # 80/443 on the host, or on a rootful driver where the node IP routes and this is unnecessary).
+#
+# `--ports` is a container-driver flag: minikube supports it on docker and podman only. A VM driver
+# (kvm2, virtualbox, qemu, hyperkit, vmware) routes the node IP from the host and so does not need
+# it, which is why the check below rejects the combination rather than silently dropping the flag —
+# on a VM driver, publishing is both unsupported and unnecessary.
 PORTS="${MINIKUBE_PORTS-80:80,443:443}"
 
 # The node's container runtime, stated rather than defaulted.
@@ -45,6 +51,17 @@ PORTS="${MINIKUBE_PORTS-80:80,443:443}"
 # minikube's own start-up notice says it will default to containerd from v1.39.0. Pinning it here means
 # this script behaves the same before and after that flip, instead of silently changing under us.
 RUNTIME="${MINIKUBE_RUNTIME:-containerd}"
+
+# nginx defaults `worker_processes` to the host CPU count, but the controller pod's cgroup caps PIDs
+# well below what that many workers plus their thread pools need. On a 12-CPU host the pod hit
+# `pthread_create() failed (11: Resource temporarily unavailable)` and nginx logged "worker process
+# exited with fatal code 2 and cannot be respawned". The surviving workers still completed the TCP
+# handshake but never answered, so requests hung until the client timed out — 4 of 6 probes returned
+# curl exit 28 while the other 2 answered normally. That reads as a network fault, not a resource
+# one, which is why it is worth pinning rather than leaving to the host's core count: the dev cluster
+# serves a handful of requests, so two workers is ample and makes behaviour identical on every
+# machine. Raise it if a workload here ever needs the concurrency.
+WORKER_PROCESSES="${INGRESS_WORKER_PROCESSES:-2}"
 NS=default
 TLS_SECRET=gitsaas-tls
 WILDCARD='*.gitsaas.test'
@@ -167,6 +184,17 @@ else
   # above exists: without it `minikube start` fails deep inside container creation with a bind error
   # that names the port and nothing else, and the operator has no way to know one sysctl fixes it.
   if [ -n "$PORTS" ]; then
+    # `--ports` is supported on the docker and podman drivers only. Rejected here rather than passed
+    # through, because minikube's own error for the combination names the flag without saying the
+    # driver is why — the same class of unhelpful failure the sysctl check below exists to prevent.
+    case "${MINIKUBE_DRIVER:-}" in
+      ''|docker|podman) ;;
+      *)
+        die "MINIKUBE_DRIVER=$MINIKUBE_DRIVER does not support --ports (docker and podman only).
+  A VM driver routes the node IP from the host, so publishing is unnecessary there:
+    MINIKUBE_PORTS='' $0"
+        ;;
+    esac
     unpriv_start=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null || echo unknown)
     # Only ports below the ceiling are a problem, and only when we are not root. Extract the *host*
     # side of each host:node pair — that is the side actually bound on this machine.
@@ -198,16 +226,13 @@ step "Addons: ingress + ingress-dns (ADR-0024)"
 minikube addons enable ingress -p "$PROFILE"
 minikube addons enable ingress-dns -p "$PROFILE"
 
-# nginx defaults `worker_processes` to the host CPU count, but the controller pod's cgroup caps
-# PIDs well below what that many workers plus their thread pools need. On a 12-CPU host the pod hit
-# `pthread_create() failed (11: Resource temporarily unavailable)` and nginx logged "worker process
-# exited with fatal code 2 and cannot be respawned". The surviving workers still completed the TCP
-# handshake but never answered, so requests hung until the client timed out — 4 of 6 probes returned
-# curl exit 28 while the other 2 answered normally. That reads as a network fault, not a resource
-# one, which is why it is worth pinning rather than leaving to the host's core count: the dev
-# cluster serves a handful of requests, so two workers is ample and makes behaviour identical on
-# every machine. ingress-nginx watches this ConfigMap and reloads nginx itself, so no restart here.
-step "Capping ingress-nginx worker processes"
+# See WORKER_PROCESSES at the top for why this is pinned rather than left to the host's core count.
+# ingress-nginx watches this ConfigMap and reloads nginx itself, so no restart is needed here —
+# verified by cycling the value on a live cluster: the controller logged "Backend successfully
+# reloaded", nginx.conf picked up the new count, and the pod's UID and restart count never changed.
+# Re-running `minikube addons enable ingress` does not clobber the key either; there is no
+# addon-manager reconciler in the minikube version this targets.
+step "Capping ingress-nginx worker processes at $WORKER_PROCESSES"
 tries=0
 until "${KUBECTL[@]}" get configmap ingress-nginx-controller -n ingress-nginx >/dev/null 2>&1; do
   tries=$((tries + 1))
@@ -215,7 +240,7 @@ until "${KUBECTL[@]}" get configmap ingress-nginx-controller -n ingress-nginx >/
   sleep 2
 done
 "${KUBECTL[@]}" patch configmap ingress-nginx-controller -n ingress-nginx \
-  --type merge -p '{"data":{"worker-processes":"2"}}'
+  --type merge -p "{\"data\":{\"worker-processes\":\"$WORKER_PROCESSES\"}}"
 
 # `kubectl wait` errors out instead of waiting when nothing matches the selector yet, so poll for
 # the pod to exist before waiting on its condition.
