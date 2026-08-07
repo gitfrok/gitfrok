@@ -18,7 +18,7 @@ jobs:
     steps:
       # Submodules are pinned commits (invariant 25); recursive checkout materialises exactly the
       # pins under review, which is what the dependency-direction scan needs to see.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -69,18 +69,40 @@ jobs:
       # ../governance/contracts, which is a sibling checkout only in this composition, so no
       # standalone consumer CI run can generate anything. The toolchain below is the cost of
       # checking it honestly rather than skipping it.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
+          # setup-go caches by default, and with no path given it looks for a go.sum at the
+          # repository root. A super-repo of pinned submodules has none, so every run so far logged
+          # a failed restore and cached nothing — a cache that silently does nothing is worse than
+          # no cache, because the log line reads like it worked. Both consumer modules are listed:
+          # codegen-check and policy-check below build backend and bff, and a key derived from only
+          # one of them would go stale without invalidating.
+          cache-dependency-path: |
+            backend/go.sum
+            bff/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: webfrontend/package.json
 
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          version: 1.72.0
-          github_token: ${{ github.token }}
+      # buf is installed directly rather than via bufbuild/buf-setup-action, which is the one action
+      # here with no node24 release to move to: its v1 line ends at v1.50.0 and every tag in it is
+      # still node20, so the runtime deprecation cannot be cleared by a version bump the way the
+      # three actions above cleared it. The pin is the part that matters (same argument as the
+      # codegen plugins below — this gate compares generated output against itself, so the generator
+      # must hold still), and a pinned download holds it without depending on an action's release
+      # cadence. Same shape as the shellcheck step above, for the same reason.
+      - name: pin buf to v1.72.0
+        env:
+          BUF_VERSION: v1.72.0
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/bufbuild/buf/releases/download/${BUF_VERSION}/buf-Linux-x86_64" \
+            -o "$HOME/.local/bin/buf"
+          chmod +x "$HOME/.local/bin/buf"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/buf" --version
 
       # Pinned so the gate compares like with like — a newer plugin emitting different-but-valid
       # output would look like drift.
