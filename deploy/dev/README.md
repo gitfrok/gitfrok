@@ -21,7 +21,7 @@ Kubernetes manifests for the local Minikube dev environment per ADR-0024.
 Local Services (Minikube + ingress-dns)
 ├── postgres:5432          — PostgreSQL 18 (tenancy + RLS, T-0004)
 ├── valkey:6379            — Valkey 9.1 (replaces Redis, ADR-0023)
-├── redpanda:9092          — Redpanda v26.1 (event broker)
+├── redpanda:9092          — Redpanda v26.2 (event broker; ADR-0023 floor is 26.1)
 │   ├── :8081              — Schema Registry
 │   ├── :8082              — PandaProxy (HTTP proxy)
 │   ├── :9644              — Admin API (readiness)
@@ -46,7 +46,7 @@ asserts that correspondence rather than trusting this table.
 |------|---------|-------|-------|
 | `postgres.yaml` | PostgreSQL 18 | `postgres:18.4` | applied, Available |
 | `valkey.yaml` | Valkey 9.1 | `valkey/valkey:9.1.1` | applied, Available |
-| `redpanda.yaml` | Redpanda v26.2 | `redpandadata/redpanda:v26.2.1` | applied, Available |
+| `redpanda.yaml` | Redpanda v26.2 | `docker.io/redpandadata/redpanda:v26.2.1` | applied, Available |
 | `seaweedfs.yaml` | SeaweedFS 4.40 | `chrislusf/seaweedfs:4.40` | applied, Available |
 | `zitadel.yaml` | Zitadel | `ghcr.io/zitadel/zitadel:v4.16.2` | applied, Available |
 | `hello.yaml` | smoke-test fixture | `busybox:1.35.0` | applied, Available; serves 200 over TLS |
@@ -136,6 +136,49 @@ walks the directory. All three agree, including on an *allow* case (`reader` + `
 `*_test.rego` is excluded, matching the loader's own filter in
 `backend/modules/policy/internal/adapters/opa/pdp.go`: those are governance's tests *of* the policy,
 they reference rules that exist only to be tested, and including them can fail compilation.
+
+## Why Redpanda is pinned on docker.io
+
+`REDPANDA_IMAGE` moved from `docker.redpanda.com/redpandadata/redpanda:v26.2.1` to
+`docker.io/redpandadata/redpanda:v26.2.1`. Same tag, same version — different registry, and it cuts
+against what ADR-0034 assumed, so the reason is recorded here rather than left to a diff.
+
+ADR-0034 preferred the vendor's own distribution point, noting that `redpandadata/redpanda` on Docker
+Hub "is a mirror subject to Docker Hub's rate limits and retention". That reasoning is sound in
+general and turned out to be **backwards for this image**: `docker.redpanda.com` answers an
+unauthenticated manifest query with
+
+```
+toomanyrequests: You have reached your unauthenticated pull rate limit.
+```
+
+so it appears to sit behind Docker Hub and inherit exactly the limit ADR-0034 was trying to avoid.
+The practical consequence is that ADR-0034's own **rule 4 — resolvability is checked, not assumed** —
+could not be satisfied there: `check-dev-images.sh` reported `?? inconclusive` for every run. On
+`docker.io` the same tag reports `ok resolves`. A pin that can be verified beats a pin from a
+preferred registry that cannot, which is the spirit of the ADR even where it contradicts its example.
+
+The mirror's retention risk is unchanged and real; the resolvability probe is what turns a deleted or
+retagged upstream into a red build instead of a deploy-time 404.
+
+### Redpanda refuses downgrades — clearing the PVC is the only way down
+
+Found on 2026-08-08 while briefly pinning to `v26.1.15`. The pod crash-looped, and the cause was not
+the tag:
+
+```
+application_bootstrap.cc:656 - Incompatible downgrade detected!
+My version 18, feature table 19 indicates that all nodes in cluster were previously >= that version
+```
+
+Redpanda records a feature-table version in its data directory and **refuses to start** against data
+written by a newer release. Consequences worth knowing before someone tries this again:
+
+- Moving a Redpanda pin **down** a minor requires deleting `redpanda-pvc`. There is no in-place path,
+  and the failure is a crash loop rather than a clear startup refusal in the rollout output.
+- Moving **up** is fine — `v26.1.15 → v26.2.1` rolled out with the existing volume untouched.
+- In this dev cluster the PVC holds no application data (nothing consumes the broker yet — there is no
+  dataplane), so clearing it costs nothing. That will stop being true once something produces to it.
 
 ## Resource Allocation (Minikube Local Dev)
 
@@ -329,7 +372,7 @@ Each was invisible to review and to `check-dev-images.sh`, because nothing had e
 | # | Defect | How it failed |
 |---|---|---|
 | 1 | postgres PVC mounted at `/var/lib/postgresql/data` | pg18 stores data in major-version subdirectories and **exits** rather than ignore that mount: *"there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)"*. Fixed to a single mount one level up (docker-library/postgres#1259). |
-| 2 | `redpandadata/redpanda:v26.1` | never published — the registry answers `not found`. The v26.1 **series** exists (v26.1.2…v26.1.14) but Redpanda tags patch releases only, so there is no floating minor tag to pin. Now `docker.redpanda.com/redpandadata/redpanda:v26.2.1`. |
+| 2 | `redpandadata/redpanda:v26.1` | never published — the registry answers `not found`. The v26.1 **series** exists (v26.1.2…v26.1.14) but Redpanda tags patch releases only, so there is no floating minor tag to pin. Now `docker.io/redpandadata/redpanda:v26.2.1` — see [Why Redpanda is pinned on docker.io](#why-redpanda-is-pinned-on-dockerio). |
 | 3 | seaweedfs `args: [all, …]` | `weed: unknown subcommand "all"`. The set is `master\|volume\|filer\|s3\|server`; combined mode is `server`, and `-filer` must be asked for explicitly or nothing serves `filer.gitsaas.test:8888`. |
 | 4 | zitadel `--tls-mode=external` | `Error: unknown flag`. The flag is `--tlsMode` — camelCase. |
 | 5 | seaweedfs readiness `path: /status` | 404s on the master (*"volume id status not found"*), so the pod never became Ready and the rollout blocked forever. `/cluster/status` is the health endpoint and returns `{"IsLeader":true,…}`. |
