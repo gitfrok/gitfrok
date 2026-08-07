@@ -381,9 +381,9 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 
 | AC | State |
 |---|---|
-| AC1 — `make dev-up` starts Minikube with `ingress` + `ingress-dns` | **still partially verified** — the addon half is a real test (both were `disabled` beforehand). The *cluster-create* path was **attempted for real on 2026-08-08** against a fresh profile and **failed on a host limit, after finding two defects in this script** (below). It remains unverified, but it is no longer unexercised: what blocks it is now named and one `sysctl` wide. |
+| AC1 — `make dev-up` starts Minikube with `ingress` + `ingress-dns` | **VERIFIED** — on 2026-08-08 the *cluster-create* path ran to completion for the first time, against a deleted-and-recreated `gitfrok` profile, and both addons came up. Getting there took the `fs.inotify.max_user_instances` raise the earlier attempt identified **plus a third defect that only a completed create could expose**: this script never passed `--container-runtime`, so minikube 1.35's *docker* default tried to start `dockerd` inside the node and failed (`Job for docker.service failed` → `StartHost failed`). The README had said `containerd` since the first bring-up; the script disagreed, and nothing caught it because the create path had never finished. Now pinned to `containerd`. |
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
-| AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified in substance, not by the specified path** — ingress serves the mkcert wildcard for `hello.gitsaas.test` and returns the fixture: `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`). That was reached through `kubectl port-forward`, because under **rootless** podman the node IP is unroutable from the host — `ping 192.168.49.2` is 100% loss, and `smoke-dev.sh`'s `--resolve` fallback times out (`rc=28`). No host-DNS or `/etc/hosts` entry can fix that; it needs a rootful driver or KVM. |
+| AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified over the real ingress path, under rootless podman, with no `port-forward`** — `GET https://hello.gitsaas.test/` returns `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`) and the hello fixture, hitting `127.0.0.1:443`. **The previous conclusion here was wrong and is retracted:** it said the rootless node IP being unroutable meant AC3 "needs a rootful driver or KVM". It needed the node's 80/443 *published to the host* — `minikube start --ports=80:80,443:443`, which the podman driver supports and this script now passes by default (`MINIKUBE_PORTS`). Binding those ports rootless also needs `net.ipv4.ip_unprivileged_port_start=0`; the create path checks for it and prints the fix. Still root-requiring, and still not automated: the **host DNS** half. Until `*.gitsaas.test` resolves to `127.0.0.1`, the 200 above is reached with `curl --resolve`. |
 | AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds; Linux demonstrated, and the macOS half is now tested rather than grepped** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. On 2026-08-08 all 15 scripts across the four repos were parsed under **bash 3.2.57** (the version macOS ships) and five fitness scripts were *executed* under it, all passing. A GNU-only-flag audit found **two** macOS-fatal defects: `governance/scripts/check-docs.sh` used `find -printf` (fixed in governance — BSD find lacks it, so that gate aborted entirely), and `bench-storage.sh` used `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, so its RAM-disk guard was **silently inert on macOS** — fixed here, portably, and now it refuses to run rather than guess. `sort -z` in `dev-up.sh` was dropped as a precaution but is **not** claimed as a defect (FreeBSD-derived sort accepts it; unverifiable from Linux). See [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not) — the short version is that **no script has run on a Mac**, and the bash-3.2 container is not a BSD userland. |
 
 ### The seven defects the first run found
@@ -464,13 +464,55 @@ why the first run's seven-fix sweep could not have caught them:
 Both were latent in a script that had "run end to end" once. The first run exercised the *converge*
 branch; nothing had ever exercised the *create* branch, and that is where both of these lived.
 
+### The create path completed (2026-08-08), and cost a third defect
+
+With `fs.inotify.max_user_instances=512` applied, `dev-up.sh` was pointed at a deleted `gitfrok`
+profile again. It failed a second time, on something only a create that gets *past* inotify can reach:
+
+| # | Defect | How it failed |
+|---|---|---|
+| 10 | **`dev-up.sh` never passed `--container-runtime`.** | minikube 1.35 defaults to **docker**, so provisioning installed and started `dockerd` inside the node — `Job for docker.service failed because the control process exited with error code`, then `StartHost failed`, then minikube's retry hit the stale-volume trap above and exited `GUEST_PROVISION`. This README has documented `--container-runtime=containerd` since the first bring-up; the script disagreed with it, and the existing cluster was containerd only because it had been created by hand from these docs. A disagreement between a script and its own README survived because the script's create branch had never once run to completion. Fixed: `MINIKUBE_RUNTIME`, defaulting to `containerd`. minikube's own notice says it flips to containerd at v1.39.0 — pinning it means this behaves identically either side of that. |
+
+The third attempt came up clean: node created, both addons enabled, mkcert wildcard installed, policy
+bundle published, all six deployments Available, `dev-up: OK`. **AC1 is verified.** Re-running it on
+the now-running cluster exits 0 and changes nothing, so the converge branch still converges.
+
+One more thing was fixed in passing: `minikube delete` only removes the podman volume while minikube
+still knows the profile exists. Once the registration is gone the volume is orphaned and *nothing*
+cleaned it, so the create failed with `volume with name gitfrok already exists` and no hint that a
+previous run was the cause. There is now an explicit orphan-volume sweep against podman and docker.
+
+### AC3 did not need a different host — it needed the ports published
+
+The previous record concluded that AC3's specified path required a rootful driver or KVM, on the
+evidence that the node IP is unroutable from the host under rootless podman (`ping 192.168.49.2` 100%
+loss, `--resolve` to it `rc=28`). **That conclusion was wrong.** The observation was right; the
+inference from it was not. The node's 80/443 can simply be published to the host —
+`minikube start --ports=80:80,443:443`, supported by the podman driver — and then ingress is reachable
+on `127.0.0.1` with no `port-forward` and no rootful anything:
+
+```
+GET https://hello.gitsaas.test/   http_code=200  ssl_verify_result=0  remote=127.0.0.1:443
+body: gitfrok dev cluster: hello over TLS
+```
+
+`dev-up.sh` now passes this by default via `MINIKUBE_PORTS`; set it empty to opt out. Binding 80/443
+as a non-root user needs `net.ipv4.ip_unprivileged_port_start=0`, so the create path checks that
+sysctl and dies with the fix rather than letting `minikube start` fail on an opaque bind error.
+
+`smoke-dev.sh` was pinning its `--resolve` fallback to the node IP alone, which is why it reported
+`rc=28` and fed the wrong conclusion. It now tries `127.0.0.1` first and the node IP second, and its
+message names which one worked.
+
+The lesson worth keeping: *"the node IP is unroutable"* is an observation. *"So this needs a different
+host"* was an inference, and it went into the record with the same confidence as the measurement.
+
 Also outstanding:
 
-- **AC1 needs one `sysctl`, then a re-run.** No longer "needs a different host": the create path's
-  blocker is a host limit with a named fix (`fs.inotify.max_user_instances=512`), not the driver.
-  It is unverified only because raising it needs root and this environment has no passwordless sudo.
-- **AC3's specified path still needs a different host** — a rootful Docker/podman
-  driver or KVM. Everything else about this environment is now demonstrated rather than asserted.
+- **AC3's host-DNS half is still manual and still needs root.** `*.gitsaas.test` does not resolve;
+  the 200 above is reached with `curl --resolve`. `dev-up.sh` prints the per-OS snippet — and now
+  points it at `127.0.0.1` rather than the node IP when ports are published, because a resolver aimed
+  at an unroutable address resolves fine and then times out, which reads as a broken cluster.
 - ADR-0024 says the same Minikube flow is used in CI; nothing wires that yet, and super-repo CI has
   `contents: read` with no cluster. `check-dev-images.sh` is the only part of this that CI gates.
 - ~~`ZITADEL_IMAGE` is `:latest`~~ **closed 2026-08-06 (ADR-0034)**: pinned to `v4.16.2`, the version

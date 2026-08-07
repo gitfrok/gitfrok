@@ -136,17 +136,38 @@ case "$rc" in
     fi
     ;;
   6)
-    # Resolution failed. Re-run pinning the host to the cluster IP: if that works, ingress and TLS
-    # are fine and only host DNS is missing — a different fix, and not a cluster fault.
-    if [ -n "$IP" ]; then
-      request --resolve "$HOST:443:$IP"
+    # Resolution failed. Re-run pinning the host to an address that should reach ingress: if that
+    # works, ingress and TLS are fine and only host DNS is missing — a different fix, and not a
+    # cluster fault.
+    #
+    # Two candidates, in this order, because which one works depends on the driver's rootlessness:
+    #
+    #   127.0.0.1  — the node's 80/443 published to the host (dev-up.sh's MINIKUBE_PORTS). This is
+    #                the only one that works under *rootless* podman, where the node IP sits in a
+    #                namespace the host cannot route into. Tried first for that reason.
+    #   $IP        — the node IP. Correct on a rootful driver, and the only option when the cluster
+    #                was created without published ports.
+    #
+    # The previous version tried the node IP alone and concluded from its `rc=28` timeout that AC3
+    # needed a rootful driver or KVM. It did not — it needed the ports published. Reporting only the
+    # unroutable address turned a fixable setup gap into a wrong architectural conclusion.
+    pinned=""
+    for candidate in 127.0.0.1 "$IP"; do
+      [ -n "$candidate" ] || continue
+      request --resolve "$HOST:443:$candidate"
       if [ "$rc" = "0" ] && [ "$code" = "200" ]; then
-        report "host DNS is not wired: ingress + TLS work (200 with --resolve $HOST:443:$IP) but
-    '$HOST' does not resolve. Point a resolver for the .test TLD at $IP — scripts/dev-up.sh
-    prints the snippet for this OS — or add it to /etc/hosts. AC3's ingress half passes."
-      else
-        report "'$HOST' does not resolve, and pinning it to $IP did not work either (rc=$rc code=$code)"
+        pinned="$candidate"
+        break
       fi
+    done
+    if [ -n "$pinned" ]; then
+      report "host DNS is not wired: ingress + TLS work (200 with --resolve $HOST:443:$pinned) but
+    '$HOST' does not resolve. Add it to /etc/hosts pointing at $pinned, or point a resolver for the
+    .test TLD there — scripts/dev-up.sh prints the snippet for this OS. AC3's ingress half passes."
+    elif [ -n "$IP" ]; then
+      report "'$HOST' does not resolve, and pinning it to 127.0.0.1 or $IP did not work either
+    (last rc=$rc code=$code). If the cluster was created without published ports, re-run
+    scripts/dev-up.sh — under a rootless driver the node IP alone is not reachable from the host."
     else
       report "'$HOST' does not resolve and 'minikube ip -p $PROFILE' gave nothing — is the cluster up?"
     fi
