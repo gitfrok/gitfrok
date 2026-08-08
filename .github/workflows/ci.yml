@@ -40,6 +40,14 @@ jobs:
       - name: make bootstrap
         run: make bootstrap
 
+      # ADR-0037: the sixteen agent surfaces are generated from governance/canonical/agent-surfaces/.
+      # Governance gates its own three; the other thirteen live in submodules a standalone run does
+      # not have, so the composition is the only place all of them can be checked — the same
+      # boundary `make codegen-check` sits behind. Runs after bootstrap because it needs every
+      # submodule checked out, and it hard-fails rather than skipping when one is not.
+      - name: make surfaces-check
+        run: make surfaces-check
+
       # The fitness scripts are the gates; nothing was gating them. T-0002 deferred this because
       # the scripts relied on word splitting (SC2086); T-0009 replaced that with NUL-delimited
       # arrays, so the lint runs clean with no suppressions to maintain.
