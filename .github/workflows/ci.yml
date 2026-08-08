@@ -208,15 +208,25 @@ jobs:
       - name: make surfaces-check on BSD
         run: make surfaces-check
 
-      # SPEC-0014 AC9, and the only thing that can answer it. `sort -z` is a GNU extension that
-      # FreeBSD-derived sort happens to accept, so the record could never do better than "flagged,
-      # unverified" from a Linux host. One probe, recorded rather than argued. It does not fail the
-      # build: the construct is already gone from this tree and the audit blocks its return — what is
-      # being resolved is a claim about Darwin, not a defect.
-      - name: resolve AC9 — does Darwin's sort accept -z
+      # The unverified-construct register in deploy/dev/README.md, settled. Every row in it says
+      # "unverified" for one reason — no macOS host — and that reason has stopped being true. These
+      # are claims about Darwin rather than defects, so the step reports and never fails: `sort -z`
+      # is already gone from this tree and the audit blocks its return, and `seq` is only a problem
+      # if Darwin lacks it.
+      #
+      # `seq` is the one that would matter. It has 14 uses across three repos, and under `set -e` a
+      # missing `seq` makes `for x in $(seq …)` run ZERO iterations rather than fail — the
+      # silent-wrong-answer shape, not the loud one.
+      - name: resolve the unverified-construct register
         run: |
           if printf 'b\na\n' | sort -z >/dev/null 2>&1; then
-            echo "AC9: macOS sort ACCEPTS -z (as FreeBSD-derived sort does)"
+            echo "register: sort -z  — Darwin ACCEPTS it (as FreeBSD-derived sort does); never a macOS defect"
           else
-            echo "AC9: macOS sort REJECTS -z — it is GNU-only in practice as well as on paper"
+            echo "register: sort -z  — Darwin REJECTS it; GNU-only in practice as well as on paper"
           fi
+          if command -v seq >/dev/null 2>&1 && [ "$(seq 1 3 | tr '\n' ' ')" = "1 2 3 " ]; then
+            echo "register: seq      — present on Darwin at $(command -v seq), and behaves"
+          else
+            echo "register: seq      — ABSENT or misbehaving on Darwin; the 14 uses are a real defect"
+          fi
+          echo "register: date +%N — not probed; bench-git-workload.sh self-guards and exits with a clear message"
