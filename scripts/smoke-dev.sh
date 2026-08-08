@@ -260,8 +260,80 @@ case "$rc" in
 esac
 fi
 
+# ---------------------------------------------------------------- AC3, the rest of *.gitsaas.test
+#
+# Everything above proves one host. AC3 is written about `*.gitsaas.test`, and for a long time the
+# record claimed the wildcard on the strength of `hello` alone — which a single `/etc/hosts` line
+# satisfies, and a wildcard is exactly what `/etc/hosts` cannot express. So ask the other hosts the
+# ingress actually serves, by name, with no `--resolve`.
+#
+# Deliberately the *declared* hosts and not a synthetic name like `nothing-here.gitsaas.test`:
+# dev-up.sh offers an `/etc/hosts` fallback that names these four and says plainly it is not a
+# wildcard. That fallback is a legitimate way to run the smoke test, and a synthetic name would fail
+# it. Proving true wildcard resolution needs a resolver, and that is a claim for the task record to
+# make about a given host — not something this script can require of every machine.
+#
+# 200 is not the bar here. `zitadel` answers 302 (its own redirect to /ui/login) and s3/filer answer
+# whatever SeaweedFS serves at `/`. What is being tested is that the name resolves, TLS validates
+# against the mkcert CA, and *something from the ingress* answers — so any HTTP status counts and
+# only curl's exit code decides.
+echo "AC3 — the other *.gitsaas.test hosts, by name"
+other_hosts=$("${KUBECTL[@]}" get ingress -n "$NS" -o jsonpath='{range .items[*].spec.rules[*]}{.host}{"\n"}{end}' 2>/dev/null \
+                | grep -v "^$HOST$" | sort -u)
+if [ -z "$other_hosts" ]; then
+  report "no ingress rules besides '$HOST' found in namespace '$NS' — expected zitadel/s3/filer too.
+    kubectl get ingress -n $NS"
+else
+  for h in $other_hosts; do
+    h_rc=0
+    h_code=$(curl -sS --cacert "$CA" -o /dev/null -w '%{http_code}' --max-time 20 "https://$h/" 2>/dev/null) || h_rc=$?
+    if [ "$h_rc" = "0" ]; then
+      ok "https://$h/ -> HTTP $h_code, resolved by name, certificate validated against the mkcert CA"
+      continue
+    fi
+
+    # Do not read the exit code as a diagnosis. A name that does not resolve is *usually* curl 6,
+    # but not reliably: measured on a systemd-resolved host, `curl https://nope.other.test/` exits
+    # 28 (timeout), because the unmatched `.test` lookup goes upstream and stalls rather than
+    # returning NXDOMAIN. Treating 28 as "resolved but the ingress did not answer" would name the
+    # wrong subsystem — the same class of mistake as the retracted "AC3 needs a rootful driver".
+    #
+    # So establish it instead of inferring it: re-ask pinned to an address known to reach the
+    # ingress. If that works, the name is what is broken. Same two candidates and same order as the
+    # main path above, and portable in a way `getent` is not (macOS has no getent).
+    pinned=""
+    for candidate in 127.0.0.1 "$IP"; do
+      [ -n "$candidate" ] || continue
+      p_rc=0
+      p_code=$(curl -sS --cacert "$CA" -o /dev/null -w '%{http_code}' --max-time 20 \
+                 --resolve "$h:443:$candidate" "https://$h/" 2>/dev/null) || p_rc=$?
+      if [ "$p_rc" = "0" ]; then
+        pinned="$candidate"
+        break
+      fi
+    done
+
+    if [ -n "$pinned" ]; then
+      report "'$h' does not resolve, though '$HOST' does — pinned to $pinned it answers HTTP $p_code,
+    so the ingress and the certificate are fine and only the name is missing (curl exit $h_rc).
+    A single-name /etc/hosts entry covers '$HOST' and nothing else, and AC3 is about the whole of
+    *.gitsaas.test. Either name the remaining hosts or wire a resolver for the domain —
+    scripts/dev-up.sh prints both for this OS."
+    elif [ "$h_rc" = "60" ]; then
+      report "TLS verification failed for https://$h/ against $CA, while '$HOST' validated. The
+    wildcard secret should cover every host in the ingress — check secret/$TLS_SECRET really is a
+    *.gitsaas.test certificate: kubectl get secret $TLS_SECRET -n $NS -o jsonpath='{.data.tls\.crt}' |
+    base64 -d | openssl x509 -noout -ext subjectAltName"
+    else
+      report "https://$h/ failed with curl exit $h_rc (HTTP '$h_code') and also failed pinned to the
+    published loopback and the node IP, while '$HOST' answered. That is the ingress or this host's
+    backend, not DNS. kubectl get ingress -n $NS; kubectl get pods -n $NS"
+    fi
+  done
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "smoke: FAIL"
   exit 1
 fi
-echo "smoke: OK (AC2 workloads + images, AC3 TLS over ingress)"
+echo "smoke: OK (AC2 workloads + images, AC3 TLS over ingress for every *.gitsaas.test host)"

@@ -371,27 +371,99 @@ done
 IP=$(minikube ip -p "$PROFILE")
 step "Host DNS for *.gitsaas.test — not automated, needs root"
 
-# Which address the host should point *.gitsaas.test at.
+# Which address the host should point *.gitsaas.test at, and — the part this section got wrong for
+# longer than it should have — *what kind of resolver config* points at it.
 #
-# Not always the node IP. Under a rootless driver the node IP is in a network namespace the host
-# cannot route into, so a resolver aimed there resolves fine and then times out — which reads as a
-# broken cluster rather than an unreachable address. When the ingress ports are published (the
-# default, see MINIKUBE_PORTS), the reachable address is the loopback the publish lands on.
+# There are two shapes, and they are not interchangeable:
+#
+#   forwarder ("send .test queries to the DNS server at X") — correct only when a DNS server that
+#     knows these names actually listens at X. The `ingress-dns` addon is that server: it runs with
+#     host networking on the node and answers the ingress's hosts on the node's :53.
+#   static answer ("answer *.gitsaas.test with the address X") — needs no DNS server at X at all.
+#     X is an HTTP address here, not a nameserver.
+#
+# Under a rootless driver the node IP is in a network namespace the host cannot route into, so the
+# forwarder shape fails twice over: nothing on the host can reach the node's :53 to ask, and the
+# answer would be the node IP, which is the address the host could not reach in the first place.
+# Publishing the ingress ports (the default, see MINIKUBE_PORTS) fixes reachability for HTTP by
+# moving it to a loopback — but there is no DNS server on that loopback, and publishing :53 as well
+# would not help, because ingress-dns would still answer with the unroutable node IP.
+#
+# So: published ports => static answer at the loopback. Node IP reachable => forwarder at the node.
 if [ -n "$PORTS" ]; then
   DNS_TARGET=127.0.0.1
-  echo "ingress ports are published, so point DNS at the loopback, not the node IP ($IP)"
+  DNS_SHAPE=static
+  echo "ingress ports are published, so *.gitsaas.test must be answered with the loopback"
+  echo "($DNS_TARGET), not forwarded to a nameserver — the node IP ($IP) is not routable from here."
 else
   DNS_TARGET="$IP"
+  DNS_SHAPE=forwarder
+  echo "ingress ports are not published, so forward .test to the ingress-dns addon on the node ($IP)"
 fi
-case "$(uname -s)" in
-  Darwin)
-    cat <<EOF
+
+# Both shapes share this fallback. It is not a wildcard — it names the four hosts the ingress serves
+# — but it needs no resolver and no daemon, and it is enough for `make dev-smoke`.
+hosts_fallback() {
+  cat <<EOF
+
+  Or, without touching system DNS at all — enough for the smoke test, but NOT a wildcard:
+    echo '$DNS_TARGET hello.gitsaas.test zitadel.gitsaas.test s3.gitsaas.test filer.gitsaas.test' |
+      sudo tee -a /etc/hosts >/dev/null
+EOF
+}
+
+if [ "$DNS_SHAPE" = static ]; then
+  # dnsmasq is the portable way to serve a static wildcard answer; systemd-resolved and macOS's
+  # /etc/resolver cannot express one — both take a nameserver address, never a record.
+  #
+  # `local=` is load-bearing next to `address=`, and leaving it out produces a failure that looks
+  # nothing like a DNS problem. `address=/gitsaas.test/<ipv4>` answers A and nothing else, so an
+  # AAAA query falls through to dnsmasq's upstream — which, on a resolved host, is the stub that
+  # just routed the query here. The query loops until it times out. `getent hosts` and anything
+  # else that asks A and AAAA together then *hangs* rather than failing, while `dig` for an A
+  # record answers instantly and makes the setup look correct. `local=/gitsaas.test/` makes dnsmasq
+  # authoritative for the domain, so AAAA gets an immediate NODATA and never leaves the process.
+  case "$(uname -s)" in
+    Darwin)
+      cat <<EOF
+  dnsmasq (brew install dnsmasq), then point the resolver at it:
+    printf 'address=/gitsaas.test/$DNS_TARGET\nlocal=/gitsaas.test/\n' |
+      sudo tee \$(brew --prefix)/etc/dnsmasq.d/gitsaas-test.conf >/dev/null
+    sudo brew services restart dnsmasq
+    sudo mkdir -p /etc/resolver
+    printf 'nameserver 127.0.0.1\n' | sudo tee /etc/resolver/gitsaas.test >/dev/null
+EOF
+      ;;
+    Linux)
+      cat <<EOF
+  dnsmasq + systemd-resolved:
+    printf 'address=/gitsaas.test/$DNS_TARGET\nlocal=/gitsaas.test/\nlisten-address=127.0.0.1\nbind-interfaces\n' |
+      sudo tee /etc/dnsmasq.d/gitsaas-test.conf >/dev/null
+    sudo systemctl enable --now dnsmasq
+    sudo mkdir -p /etc/systemd/resolved.conf.d
+    printf '[Resolve]\nDNS=127.0.0.1\nDomains=~gitsaas.test\n' |
+      sudo tee /etc/systemd/resolved.conf.d/gitsaas-test.conf >/dev/null
+    sudo systemctl restart systemd-resolved
+
+  NetworkManager's own dnsmasq (only if NetworkManager.conf already sets dns=dnsmasq):
+    printf 'address=/gitsaas.test/$DNS_TARGET\n' |
+      sudo tee /etc/NetworkManager/dnsmasq.d/gitsaas-test.conf >/dev/null
+    sudo systemctl reload NetworkManager
+EOF
+      ;;
+    *) echo "  unrecognised OS — answer *.gitsaas.test statically with $DNS_TARGET" ;;
+  esac
+  hosts_fallback
+else
+  case "$(uname -s)" in
+    Darwin)
+      cat <<EOF
   sudo mkdir -p /etc/resolver
   printf 'nameserver $DNS_TARGET\n' | sudo tee /etc/resolver/test >/dev/null
 EOF
-    ;;
-  Linux)
-    cat <<EOF
+      ;;
+    Linux)
+      cat <<EOF
   NetworkManager + dnsmasq:
     printf 'server=/test/$DNS_TARGET\n' | sudo tee /etc/NetworkManager/dnsmasq.d/minikube.conf >/dev/null
     sudo systemctl reload NetworkManager
@@ -401,14 +473,12 @@ EOF
     printf '[Resolve]\nDNS=$DNS_TARGET\nDomains=~test\n' |
       sudo tee /etc/systemd/resolved.conf.d/minikube-test.conf >/dev/null
     sudo systemctl restart systemd-resolved
-
-  Neither, or you would rather not touch system DNS — enough for the smoke test, no wildcard:
-    echo '$DNS_TARGET hello.gitsaas.test zitadel.gitsaas.test s3.gitsaas.test filer.gitsaas.test' |
-      sudo tee -a /etc/hosts >/dev/null
 EOF
-    ;;
-  *) echo "  unrecognised OS — point a resolver for the .test TLD at $DNS_TARGET" ;;
-esac
+      ;;
+    *) echo "  unrecognised OS — point a resolver for the .test TLD at $DNS_TARGET" ;;
+  esac
+  hosts_fallback
+fi
 
 step "dev-up: OK"
 cat <<EOF
