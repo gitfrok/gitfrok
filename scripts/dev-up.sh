@@ -427,6 +427,12 @@ if [ "$DNS_SHAPE" = static ]; then
     Darwin)
       cat <<EOF
   dnsmasq (brew install dnsmasq), then point the resolver at it:
+    # Homebrew ships dnsmasq.conf with its conf-dir line commented out, so a file dropped in
+    # dnsmasq.d is read only after this. Without it every command below still succeeds and the
+    # domain still does not resolve. (Unverified on a Mac — no macOS host here; see T-0003 AC4.)
+    grep -q '^conf-dir=' \$(brew --prefix)/etc/dnsmasq.conf ||
+      printf 'conf-dir=%s/etc/dnsmasq.d/,*.conf\n' "\$(brew --prefix)" |
+        sudo tee -a \$(brew --prefix)/etc/dnsmasq.conf >/dev/null
     printf 'address=/gitsaas.test/$DNS_TARGET\nlocal=/gitsaas.test/\n' |
       sudo tee \$(brew --prefix)/etc/dnsmasq.d/gitsaas-test.conf >/dev/null
     sudo brew services restart dnsmasq
@@ -446,7 +452,7 @@ EOF
     sudo systemctl restart systemd-resolved
 
   NetworkManager's own dnsmasq (only if NetworkManager.conf already sets dns=dnsmasq):
-    printf 'address=/gitsaas.test/$DNS_TARGET\n' |
+    printf 'address=/gitsaas.test/$DNS_TARGET\nlocal=/gitsaas.test/\n' |
       sudo tee /etc/NetworkManager/dnsmasq.d/gitsaas-test.conf >/dev/null
     sudo systemctl reload NetworkManager
 EOF

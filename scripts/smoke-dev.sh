@@ -278,8 +278,12 @@ fi
 # against the mkcert CA, and *something from the ingress* answers — so any HTTP status counts and
 # only curl's exit code decides.
 echo "AC3 — the other *.gitsaas.test hosts, by name"
+# `|| true` is not decoration: under `set -euo pipefail`, `grep -v` finding nothing exits 1, the
+# pipeline inherits it, and the assignment kills the script — silently, and precisely in the case
+# the `-z` check below exists to explain. Every other kubectl capture in this file is guarded the
+# same way.
 other_hosts=$("${KUBECTL[@]}" get ingress -n "$NS" -o jsonpath='{range .items[*].spec.rules[*]}{.host}{"\n"}{end}' 2>/dev/null \
-                | grep -v "^$HOST$" | sort -u)
+                | grep -v "^$HOST$" | sort -u) || true
 if [ -z "$other_hosts" ]; then
   report "no ingress rules besides '$HOST' found in namespace '$NS' — expected zitadel/s3/filer too.
     kubectl get ingress -n $NS"
@@ -323,7 +327,8 @@ else
       report "TLS verification failed for https://$h/ against $CA, while '$HOST' validated. The
     wildcard secret should cover every host in the ingress — check secret/$TLS_SECRET really is a
     *.gitsaas.test certificate: kubectl get secret $TLS_SECRET -n $NS -o jsonpath='{.data.tls\.crt}' |
-    base64 -d | openssl x509 -noout -ext subjectAltName"
+    { base64 -d 2>/dev/null || base64 -D; } | openssl x509 -noout -ext subjectAltName
+    (GNU base64 decodes with -d, BSD/macOS with -D)"
     else
       report "https://$h/ failed with curl exit $h_rc (HTTP '$h_code') and also failed pinned to the
     published loopback and the node IP, while '$HOST' answered. That is the ingress or this host's
