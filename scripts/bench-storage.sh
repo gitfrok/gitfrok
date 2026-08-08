@@ -84,7 +84,7 @@ mkdir -p "$scratch/block" "$scratch/seaweed-data" "$out"
 # check, because the output looks equally authoritative either way (T-0007's verdict fed ADR-0033).
 detect_fstype() { # detect_fstype <path>  -> prints type, non-zero if undeterminable
   local path="$1" out mp
-  # GNU coreutils.
+  # GNU coreutils. portability-ok: probed inside a conditional, with the df+mount fallback below
   if out=$(stat -f -c %T "$path" 2>/dev/null) && [ -n "$out" ]; then
     printf '%s\n' "$out"; return 0
   fi

@@ -32,13 +32,24 @@ MODE=${1:-plan}
 # governance's docs gate (T-0009) runs today but was never a required check, so a broken link in the
 # SoT repo could merge. ADR-0031 lists wiring it as a follow-up; it is included here because the
 # ruleset is being created anyway and leaving it out would mean editing the same rule twice.
+#
+# A repo may require MORE THAN ONE context, separated by `|`. That became necessary with SPEC-0014:
+# the macOS portability lane cannot be a step inside an existing job, because a job runs on one OS,
+# so it is a second job and therefore a second context. Until it is listed here it runs and reports
+# without blocking anything, which is the state every macOS lane is in until `apply` is next run.
 REPOS=(
-  "gitfrok:super-repo fitness gates"
-  "backend:build + vet + arch gates"
-  "bff:build + vet + arch gates"
-  "governance:docs gates"
-  "webfrontend:build + typecheck + test + arch gates"
+  "gitfrok:super-repo fitness gates|macOS portability"
+  "backend:build + vet + arch gates|macOS portability"
+  "bff:build + vet + arch gates|macOS portability"
+  "governance:docs gates|macOS portability"
+  "webfrontend:build + typecheck + test + arch gates|macOS portability"
 )
+
+# contexts_of <ctx-spec> — one context per line. `|` is the separator because every context here
+# contains spaces and several contain `+`, and a newline-delimited list is what jq wants anyway.
+contexts_of() {
+  printf '%s\n' "$1" | tr '|' '\n' | sed '/^$/d'
+}
 
 for cmd in gh jq; do
   command -v "$cmd" >/dev/null || { echo "$cmd not installed"; exit 1; }
@@ -56,10 +67,10 @@ report() { echo "  FAIL: $1"; fail=1; }
 # its default branch stays covered.
 conditions='{ "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } }'
 
-integrity_body() { # integrity_body <required-check-context>
+integrity_body() { # integrity_body <required-check-context-spec>
   local ctx="$1" checks='[]'
   if [ -n "$ctx" ]; then
-    checks=$(jq -nc --arg c "$ctx" '[{context: $c}]')
+    checks=$(contexts_of "$ctx" | jq -Rnc '[inputs | {context: .}]')
   fi
   jq -nc --argjson conditions "$conditions" --argjson checks "$checks" '
     {
@@ -161,9 +172,12 @@ check_repo() { # check_repo <repo> <expected-check-context> <default-branch>
       [[ ",$types," == *",$t,"* ]] || report "main-integrity missing rule $t"
     done
 
+    # Sorted on both sides: the API returns contexts in whatever order they were written, and a
+    # ruleset that requires the right two checks in the other order is not drift.
     got=$(jq -r '[.rules[] | select(.type == "required_status_checks")
-                 | .parameters.required_status_checks[].context] | join(",")' <<<"$rs")
-    [ "$got" = "$ctx" ] || report "main-integrity required checks are [$got], expected [$ctx]"
+                 | .parameters.required_status_checks[].context] | sort | join(", ")' <<<"$rs")
+    want=$(contexts_of "$ctx" | sort | paste -sd, - | sed 's/,/, /g')
+    [ "$got" = "$want" ] || report "main-integrity required checks are [$got], expected [$want]"
   fi
 
   id=$(ruleset_id "$repo" "main-review")
@@ -199,7 +213,7 @@ for entry in "${REPOS[@]}"; do
     plan)
       echo "  main-integrity: bypass none; PR+0 approvals, no force-push, no deletion, threads resolved"
       if [ -n "$ctx" ]; then
-        echo "                  required check: $ctx"
+        contexts_of "$ctx" | sed 's/^/                  required check: /'
       else
         echo "                  required check: none (no workflow in this repo yet)"
       fi

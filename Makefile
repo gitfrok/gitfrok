@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-smoke update-pins verify lint-shell codegen codegen-check policy-check surfaces surfaces-check ceremony-check dispatch-check bench-storage rulesets rulesets-apply rulesets-check
+.PHONY: bootstrap submodules dev-up dev-smoke update-pins verify lint-shell codegen codegen-check policy-check surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23)
@@ -29,6 +29,8 @@ ceremony-check: ## fail if this PR's declared ceremony tier does not match its d
 	@./scripts/check-ceremony-tier.sh
 dispatch-check: ## fail if this PR spans two submodules, or leaves its declared Scope (SPEC-0013)
 	@./scripts/check-dispatch-scope.sh
+portability-check: ## fail if any tracked script would break on macOS (SPEC-0014, T-0003 AC4)
+	@./scripts/check-shell-portability.sh
 codegen: ## regenerate Go (backend, bff) + TS (webfrontend) from governance/contracts (ADR-0022)
 	@cd backend && buf generate
 	@cd bff && buf generate
