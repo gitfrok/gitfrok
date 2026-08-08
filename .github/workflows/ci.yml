@@ -63,6 +63,18 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           CEREMONY_BASE: origin/${{ github.base_ref }}
 
+      # SPEC-0013: --no-verify skips the pre-commit scope hook, so the boundary only binds if CI
+      # checks the pushed diff. This is the one place invariant 23 has teeth — only here does
+      # .gitmodules exist — and it is asserted unconditionally, with no declaration required. The
+      # ceremony gate above only reaches its span check under the `bugfix` tier, which left a
+      # `full`-tier PR spanning two submodules unchecked.
+      - name: make dispatch-check
+        if: github.event_name == 'pull_request'
+        run: make dispatch-check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SCOPE_BASE: origin/${{ github.base_ref }}
+
       # The fitness scripts are the gates; nothing was gating them. T-0002 deferred this because
       # the scripts relied on word splitting (SC2086); T-0009 replaced that with NUL-delimited
       # arrays, so the lint runs clean with no suppressions to maintain.
