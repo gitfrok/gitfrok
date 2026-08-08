@@ -14,3 +14,22 @@
 # governance/docs/bench/ with the result doc that interprets them; a stray local run should not
 # look like tracked evidence.
 /bench-results/
+
+# Per-developer agent tooling. `.claude/settings.json`, `.claude/agents/` and `.cursor/rules/` are
+# deliberately tracked (the agents are generated — ADR-0037); everything else under these paths is
+# whatever plugins a given developer has installed, and it has no business in a shared repo.
+#
+# This exists because 13 such files were committed by a `git add -A` in 782854f and then blocked a
+# `git pull` on the machine they came from — the tree they were swept out of could no longer take
+# its own files back. Naming the paths is cheaper than remembering not to stage them.
+.claude/commands/
+.claude/skills/
+.claude/settings.local.json
+.claude/settings.json.*-bak
+.claude/worktrees/
+.codex/
+.cursor/commands/
+.cursor/skills/
+.github/prompts/
+.github/skills/
+openspec/
