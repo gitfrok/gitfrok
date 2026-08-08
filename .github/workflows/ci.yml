@@ -44,8 +44,8 @@ jobs:
       - name: make bootstrap
         run: make bootstrap
 
-      # ADR-0037: the sixteen agent surfaces are generated from governance/canonical/agent-surfaces/.
-      # Governance gates its own three; the other thirteen live in submodules a standalone run does
+      # ADR-0037: the eighteen agent surfaces are generated from governance/canonical/agent-surfaces/.
+      # Governance gates its own three; the other fifteen live in submodules a standalone run does
       # not have, so the composition is the only place all of them can be checked — the same
       # boundary `make codegen-check` sits behind. Runs after bootstrap because it needs every
       # submodule checked out, and it hard-fails rather than skipping when one is not.
@@ -98,6 +98,13 @@ jobs:
 
       - name: make lint-shell
         run: make lint-shell
+
+      # SPEC-0014 AC8: the flag audit binds on this lane too, so a contributor with no Mac finds a
+      # GNU-only construct in their own PR rather than on the macOS job. The userland assertion is a
+      # Darwin claim and does not apply here; the gate says so on its own output line rather than
+      # passing silently.
+      - name: make portability-check
+        run: make portability-check
 
       # --- T-0020 AC5: codegen freshness (ADR-0032) -----------------------------------------------
       # This is the one check that can only exist here. Each consumer's buf.gen.yaml reads
@@ -166,3 +173,50 @@ jobs:
       # reached the data. Same reasoning as the codegen row above (ADR-0032's precedent).
       - name: make policy-check
         run: make policy-check
+
+  # SPEC-0014, T-0003 AC4. "Works on macOS and Linux" had never been run on macOS; what stood in for
+  # it was a bash:3.2 container that is Alpine plus busybox, with no lineage to Darwin. This is the
+  # real thing, and it is free because the repo is public.
+  #
+  # This is the only lane that can check the composition on Darwin: surfaces-check needs all five
+  # repos checked out, which is what `submodules: recursive` gives it and a standalone repo cannot.
+  #
+  # A SEPARATE JOB, WHICH MEANS A SEPARATE REQUIRED-CHECK CONTEXT — registered alongside
+  # "super-repo fitness gates" by scripts/apply-rulesets.sh. Until `make rulesets-apply` runs with an
+  # admin token, this lane reports and does not block, in this repo and in the other four.
+  portability:
+    name: macOS portability
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # Part 3 of the gate asserts the bash and the userland before anything else runs, so a runner
+      # image that put Homebrew's GNU coreutils ahead of /usr/bin fails loudly here instead of
+      # quietly turning this lane into a second Linux one.
+      - name: make portability-check
+        run: make portability-check
+
+      # The composition-level gates, against a BSD userland rather than a container's. Parsing proves
+      # no bash-4 syntax; running proves no bash-4 behaviour and no GNU userland dependency — and the
+      # two defects the 2026-08 audit found were both invisible to parsing.
+      - name: make verify on BSD
+        run: make verify
+
+      - name: make surfaces-check on BSD
+        run: make surfaces-check
+
+      # SPEC-0014 AC9, and the only thing that can answer it. `sort -z` is a GNU extension that
+      # FreeBSD-derived sort happens to accept, so the record could never do better than "flagged,
+      # unverified" from a Linux host. One probe, recorded rather than argued. It does not fail the
+      # build: the construct is already gone from this tree and the audit blocks its return — what is
+      # being resolved is a claim about Darwin, not a defect.
+      - name: resolve AC9 — does Darwin's sort accept -z
+        run: |
+          if printf 'b\na\n' | sort -z >/dev/null 2>&1; then
+            echo "AC9: macOS sort ACCEPTS -z (as FreeBSD-derived sort does)"
+          else
+            echo "AC9: macOS sort REJECTS -z — it is GNU-only in practice as well as on paper"
+          fi
