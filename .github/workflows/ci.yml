@@ -18,9 +18,13 @@ jobs:
     steps:
       # Submodules are pinned commits (invariant 25); recursive checkout materialises exactly the
       # pins under review, which is what the dependency-direction scan needs to see.
+      # fetch-depth: 0 so `make ceremony-check` below has a merge base to diff against. With the
+      # default depth of 1 it exits 3 rather than passing quietly — SPEC-0012 AC6 refuses to
+      # certify a diff it cannot see, and a shallow clone is exactly that case.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: submodule pins under review
         run: git submodule status
@@ -47,6 +51,17 @@ jobs:
       # submodule checked out, and it hard-fails rather than skipping when one is not.
       - name: make surfaces-check
         run: make surfaces-check
+
+      # SPEC-0012: the ceremony tier this PR declares must match what its diff does. In the
+      # composition that includes the submodule-spanning check — invariant 23, one commit never
+      # spans two submodules — which is the one rule only this repo can evaluate, because only
+      # here does .gitmodules exist. Pull requests only; a push to main carries no declaration.
+      - name: make ceremony-check
+        if: github.event_name == 'pull_request'
+        run: make ceremony-check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          CEREMONY_BASE: origin/${{ github.base_ref }}
 
       # The fitness scripts are the gates; nothing was gating them. T-0002 deferred this because
       # the scripts relied on word splitting (SC2086); T-0009 replaced that with NUL-delimited
