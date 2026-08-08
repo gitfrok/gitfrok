@@ -384,7 +384,7 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 | AC1 — `make dev-up` starts Minikube with `ingress` + `ingress-dns` | **VERIFIED** — on 2026-08-08 the *cluster-create* path ran to completion for the first time, against a deleted-and-recreated `gitfrok` profile, and both addons came up. Getting there took the `fs.inotify.max_user_instances` raise the earlier attempt identified **plus a third defect that only a completed create could expose**: this script never passed `--container-runtime`, so minikube 1.35's *docker* default tried to start `dockerd` inside the node and failed (`Job for docker.service failed` → `StartHost failed`). The README had said `containerd` since the first bring-up; the script disagreed, and nothing caught it because the create path had never finished. Now pinned to `containerd`. |
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
 | AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified over the real ingress path, under rootless podman, with no `port-forward`** — `GET https://hello.gitsaas.test/` returns `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`) and the hello fixture, hitting `127.0.0.1:443`. **The previous conclusion here was wrong and is retracted:** it said the rootless node IP being unroutable meant AC3 "needs a rootful driver or KVM". It needed the node's 80/443 *published to the host* — `minikube start --ports=80:80,443:443`, which the podman driver supports and this script now passes by default (`MINIKUBE_PORTS`). Binding those ports rootless also needs `net.ipv4.ip_unprivileged_port_start=0`; the create path checks for it and prints the fix. Still root-requiring, and still not automated: the **host DNS** half. Until `*.gitsaas.test` resolves to `127.0.0.1`, the 200 above is reached with `curl --resolve`. |
-| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **holds; Linux demonstrated, and the macOS half is now tested rather than grepped** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. On 2026-08-08 all 15 scripts across the four repos were parsed under **bash 3.2.57** (the version macOS ships) and five fitness scripts were *executed* under it, all passing. A GNU-only-flag audit found **two** macOS-fatal defects: `governance/scripts/check-docs.sh` used `find -printf` (fixed in governance — BSD find lacks it, so that gate aborted entirely), and `bench-storage.sh` used `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, so its RAM-disk guard was **silently inert on macOS** — fixed here, portably, and now it refuses to run rather than guess. `sort -z` in `dev-up.sh` was dropped as a precaution but is **not** claimed as a defect (FreeBSD-derived sort accepts it; unverifiable from Linux). See [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not) — the short version is that **no script has run on a Mac**, and the bash-3.2 container is not a BSD userland. |
+| AC4 — no OrbStack, no Docker Compose; macOS and Linux | **verified on both, 2026-08-09** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. The macOS half is no longer inference: a `macos-latest` lane in all five repos parses every tracked script under **bash 3.2.57** on `arm64-apple-darwin25` and runs the fitness gates against Darwin's **own BSD userland** — including `governance/scripts/check-docs.sh`, the gate the 2026-08 audit found would have aborted outright on macOS via `find -printf`. Two genuinely macOS-fatal defects had been found and fixed by the audit this replaces: that one, and `bench-storage.sh` using `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, leaving its RAM-disk guard **silently inert on macOS**. The audit is now a standing gate (`check-shell-portability.sh`, SPEC-0014) rather than something someone remembers to run. `sort -z` is **resolved**: Darwin accepts it, so it was never a defect — dropping it from `dev-up.sh` was still right, being cosmetic there. **What is not verified is a cluster bring-up on a Mac**, which needs a hypervisor a hosted runner has not got; see [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not). |
 
 ### The seven defects the first run found
 
@@ -418,27 +418,37 @@ it was:
 | No OrbStack, no Docker Compose anywhere | **verified** | every mention in the tree is a prohibition |
 | No bash-4 *syntax* | **verified** | all 15 scripts across the four repos pass `bash -n` under bash 3.2.57 |
 | No bash-4 *behaviour* in the fitness gates | **verified** | `check-dep-direction`, `check-version-floors`, `check-dev-images`, webfrontend's `check-boundaries`, governance's `check-docs` all *executed* under bash 3.2.57 and pass |
-| No GNU-only tool flags | **two defects found and fixed** | audit of `grep -P`, `readlink -f`, `find -printf`, `date -d`, `stat -c`, `base64 -w`, `xargs -d`, `tac`, `sha256sum`, `sed -i`, `sort -z` |
-| The scripts run on a Mac | **NOT VERIFIED** | no macOS host available |
+| No GNU-only tool flags | **two defects found and fixed** | audit of `grep -P`, `readlink -f`, `find -printf`, `date -d`, `stat -c`, `base64 -w`, `xargs -d`, `tac`, `sha256sum`, `sed -i`, `sort -z` — now a standing gate, `check-shell-portability.sh` (SPEC-0014), not a person's grep |
+| The scripts run on a Mac | **verified 2026-08-09** | a `macos-latest` CI lane in all five repos: bash 3.2.57 on `arm64-apple-darwin25`, against Darwin's own BSD userland |
+| The dev cluster comes up on a Mac | **NOT VERIFIED** | needs a hypervisor; a hosted runner has none, so `dev-up.sh` and `smoke-dev.sh` are parsed there and not executed |
 
-**The bash 3.2 container is not a BSD userland**, and this matters for how much the tests above prove.
-It is Alpine + busybox — an independent minimal reimplementation with no lineage to Darwin's tools.
-That busybox also rejects `find -printf` corroborates the finding but is not evidence *about* BSD; the
-`-printf` conclusion rests on it being a documented GNU extension that no BSD-family `find(1)`
-implements. The container proves the *replacements* work without GNU extensions, which is a real and
-useful thing to prove, and is not the same as proving macOS behaviour.
+**The bash 3.2 container was never a BSD userland, and it is no longer what any of this rests on.**
+It is Alpine + busybox — an independent minimal reimplementation with no lineage to Darwin's tools —
+so it could only ever prove that the replacements work without GNU extensions. That was worth proving
+and was not the same as proving macOS behaviour. The macOS lane now proves the macOS behaviour
+directly, and the gate refuses to report success unless it can establish that the bash really was 3.2
+and `find`, `stat`, `sed`, `readlink` and `date` really were the system BSD ones — because a runner
+that put Homebrew's GNU coreutils ahead of `/usr/bin` would otherwise quietly turn the whole lane
+into a second Linux lane.
 
-### The audit is not complete, and this list is the honest version
+### The register, settled (2026-08-09)
 
-Three rounds of review each found something the previous round's audit had claimed to cover. So this
-section no longer claims completeness. What follows is a register of constructs whose macOS behaviour is
-**unverified**, kept as a list rather than as a verdict:
+Three rounds of review each found something the previous round's audit had claimed to cover, so this
+section stopped claiming completeness and kept a register of constructs whose macOS behaviour was
+**unverified**. Every row gave the same reason — no macOS host — and that reason expired when the
+macOS lane landed. Each was probed on Darwin rather than argued about:
 
 | Construct | Where | Status |
 |---|---|---|
-| `seq` | `bench-git-workload.sh`, `bench-storage.sh`, `governance/scripts/check-policy-composition.sh` (14 uses) | **unverified.** Reported as absent from stock macOS (Darwin ships `jot`); I cannot confirm that from Linux, and *the bash-3.2 container cannot either — busybox ships `seq`*. Not rewritten on an unverifiable claim. If it is absent, `for x in $(seq …)` runs **zero** iterations under `set -e` rather than failing, which is the silent-wrong-answer shape that matters. |
-| `date +%N` | `bench-git-workload.sh` | **known limit**, self-guarded — the script exits with a clear message without GNU `date`. macOS-*parseable*, not macOS-*runnable*. |
-| `sort -z` | removed from `dev-up.sh` | **unverified** — a GNU extension that FreeBSD-derived `sort` accepts. Removed anyway because it was cosmetic. |
+| `seq` | `bench-git-workload.sh`, `bench-storage.sh`, `governance/scripts/check-policy-composition.sh` (14 uses) | **present and correct.** `/usr/bin/seq` on Darwin, and `seq 1 3` returns `1 2 3`. The worry was that macOS ships only `jot`, which would have made `for x in $(seq …)` run **zero** iterations under `set -e` rather than fail — the silent-wrong-answer shape. It was right not to rewrite 14 call sites on an unverifiable claim: the claim was wrong. |
+| `date +%N` | `bench-git-workload.sh` | **known limit**, self-guarded — the script exits with a clear message without GNU `date`. macOS-*parseable*, not macOS-*runnable*, and the portability gate declares it on every run rather than omitting it. |
+| `sort -z` | removed from `dev-up.sh` | **accepted by Darwin**, as FreeBSD-derived `sort` does — so never a macOS defect. Removing it was still right: it was cosmetic there and cost nothing. |
+
+**What the register is worth in hindsight.** Two of its three rows were worries that turned out to be
+unfounded, and one was a genuine limit that was already self-guarding. That is not an argument for
+worrying less — the same discipline found `find -printf` and a silently-inert `stat -c`, both real and
+both fatal — but it is a reason to prefer *probing* over *reasoning* the moment a probe becomes
+available. Both of these had been arguable for weeks and took one CI step each to settle.
 
 Two defects were found *and fixed*: `find -printf` (governance `check-docs.sh`) and `stat -f -c`
 (`bench-storage.sh`). A third, `find -lname` in this repo's `dev-up.sh`, was fixed on the same day and
@@ -447,8 +457,10 @@ Linux* bug: BusyBox rejects `-lname`, and inside a pipeline under `set -euo pipe
 whole script with no message. Replaced with POSIX `-type l -exec readlink {} +` and a `|| true`, which
 returns the identical count (116 on the dev host) and survives BusyBox.
 
-**The only thing that will settle macOS is running these scripts on a Mac.** Everything above is
-inference from a Linux host and a busybox container, and busybox is not a BSD userland.
+**That was written as "the only thing that will settle macOS is running these scripts on a Mac", and
+it was correct.** They now run on a Mac, on every PR, in all five repos. What is left unsettled is
+narrower and is stated in the table above: a *cluster bring-up* on a Mac, which needs a hypervisor a
+hosted runner has not got.
 
 ### The two defects the create-path attempt found (2026-08-08)
 
