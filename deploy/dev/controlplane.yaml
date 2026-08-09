@@ -1,0 +1,88 @@
+---
+# T-0021: the control plane. Phase 1 ships it as a healthz-only baseline (the
+# agent gateway wires in Phase 3); it exists so the plane has a pinned image and
+# a presence in the cluster before the operator/Helm work of Phase 2.
+#
+# GITFROK_LISTEN_ADDR is the only config it reads.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+  namespace: default
+  labels:
+    app: controlplane
+    phase: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controlplane
+  template:
+    metadata:
+      labels:
+        app: controlplane
+        phase: "1"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+      - name: controlplane
+        # Image mirrors deploy/dev/versions.env (CONTROLPLANE_IMAGE).
+        image: docker.io/gitfrok/controlplane-app:0.1.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GITFROK_LISTEN_ADDR
+          value: ":8080"
+        ports:
+        - name: health
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "25m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: controlplane
+  namespace: default
+  labels:
+    app: controlplane
+    phase: "1"
+spec:
+  type: ClusterIP
+  ports:
+  - name: health
+    port: 8080
+    targetPort: health
+    protocol: TCP
+  selector:
+    app: controlplane

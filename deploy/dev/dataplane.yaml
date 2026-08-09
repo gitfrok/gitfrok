@@ -1,0 +1,105 @@
+---
+# T-0021: the data plane (ADR-0025 one modular-monolith binary per plane).
+#
+# It loads the OPA policy bundle the cluster publishes as a ConfigMap (ADR-0006,
+# invariant 2) and exits non-zero without one — AC4. Its healthz endpoint on
+# GITFROK_LISTEN_ADDR is the readiness/liveness probe target.
+#
+# The Git protocol front doors (T-0011) call GITFROK_GIT_STORAGE_ADDR; that
+# storage tier is a follow-up (T-0010/T-0012), so it is left empty here and the
+# front doors stay unconfigured rather than pointing at a missing service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dataplane
+  namespace: default
+  labels:
+    app: dataplane
+    phase: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dataplane
+  template:
+    metadata:
+      labels:
+        app: dataplane
+        phase: "1"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+      - name: dataplane
+        # Image mirrors deploy/dev/versions.env (DATAPLANE_IMAGE); dev-up.sh loads
+        # it into the node, so a tag here and the record agree.
+        image: docker.io/gitfrok/dataplane-app:0.1.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GITFROK_POLICY_BUNDLE_DIR
+          value: /etc/gitfrok/policy
+        - name: GITFROK_LISTEN_ADDR
+          value: ":8080"
+        - name: GITFROK_GIT_STORAGE_ADDR
+          value: ""
+        ports:
+        - name: health
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: policy-bundle
+          mountPath: /etc/gitfrok/policy
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "25m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      - name: policy-bundle
+        configMap:
+          name: gitfrok-policy-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dataplane
+  namespace: default
+  labels:
+    app: dataplane
+    phase: "1"
+spec:
+  type: ClusterIP
+  ports:
+  - name: health
+    port: 8080
+    targetPort: health
+    protocol: TCP
+  selector:
+    app: dataplane
