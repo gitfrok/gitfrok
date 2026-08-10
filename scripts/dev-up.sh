@@ -67,6 +67,16 @@ TLS_SECRET=gitsaas-tls
 WILDCARD='*.gitsaas.test'
 VERSIONS=deploy/dev/versions.env
 
+# The image tags this script builds and the manifests assert come from the one
+# record of truth (ADR-0023). check-dev-images.sh sources it; this script must
+# too, or the build_if_absent calls below trip `set -u` on the first undefined
+# variable. This was a latent bug in the T-0021 bring-up — the tags happened to
+# be in the environment that ran it.
+set -a
+# shellcheck disable=SC1091 # data file, not a script
+. ./"$VERSIONS"
+set +a
+
 # The OPA bundle governance owns and the data plane loads. POLICY_SRC is a path into the governance
 # submodule — read, never written — and POLICY_ENV/POLICY_MOUNT are the contract a dataplane
 # manifest has to honour once one exists (backend/cmd/dataplane-app reads POLICY_ENV and exits
