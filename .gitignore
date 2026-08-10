@@ -28,6 +28,7 @@
 .claude/settings.json.*-bak
 .claude/worktrees/
 .codex/
+.commandcode/
 .cursor/commands/
 .cursor/skills/
 .github/prompts/
