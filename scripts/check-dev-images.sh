@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSIONS=deploy/dev/versions.env
-MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml seaweedfs-mount.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml bff.yaml webfrontend.yaml"
+MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml seaweedfs-mount.yaml zitadel.yaml zitadel-login.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml bff.yaml webfrontend.yaml"
 
 fail=0
 report() { echo "DEV-IMAGE DRIFT: $1"; fail=1; }
@@ -46,6 +46,8 @@ expected_images() { # expected_images <manifest>
     seaweedfs-mount.yaml) printf '%s\n' "$SEAWEEDFS_IMAGE" ;;
     # Zitadel's db-wait init container is busybox, so this manifest legitimately carries two.
     zitadel.yaml)   printf '%s\n' "$ZITADEL_IMAGE" "$BUSYBOX_IMAGE" ;;
+    # Login V2 UI, same pin as the API (see zitadel-login.yaml).
+    zitadel-login.yaml) printf '%s\n' "$ZITADEL_LOGIN_IMAGE" "$BUSYBOX_IMAGE" ;;
     hello.yaml)     printf '%s\n' "$BUSYBOX_IMAGE" ;;
     # First-party plane images (T-0021): built and loaded into the cluster node
     # by dev-up.sh, never published to an external registry for dev. Their

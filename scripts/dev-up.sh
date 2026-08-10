@@ -64,6 +64,7 @@ RUNTIME="${MINIKUBE_RUNTIME:-containerd}"
 WORKER_PROCESSES="${INGRESS_WORKER_PROCESSES:-2}"
 NS=default
 TLS_SECRET=gitsaas-tls
+CA_SECRET=gitsaas-ca
 WILDCARD='*.gitsaas.test'
 VERSIONS=deploy/dev/versions.env
 
@@ -93,6 +94,10 @@ KUBECTL=(kubectl --context "$PROFILE")
 # Deployments to wait on, and how long each gets. Zitadel runs schema migrations on first boot, so
 # it is slow in a way the others are not.
 DEPLOYMENTS="postgres valkey redpanda seaweedfs hello git-storaged dataplane controlplane"
+# Zitadel and its Login V2 UI get separate rollouts and budgets at the bottom of the rollout
+# section: first boot is init + migrations + FirstInstance setup (which also writes the
+# login-client PAT the login UI waits for).
+OIDC_CM=gitfrok-oidc
 PAT_SECRET=gitfrok-pat-verifier
 S3_SECRET=gitfrok-seaweedfs-s3
 S3_BUCKET=gitfrok
@@ -306,6 +311,13 @@ trap 'rm -rf "$tlsdir"' EXIT
 mkcert -cert-file "$tlsdir/tls.crt" -key-file "$tlsdir/tls.key" "$WILDCARD" >/dev/null
 echo "issued by CA at $(mkcert -CAROOT)"
 
+# In-cluster TLS trust for pods that call a *.gitsaas.test URL (bff.yaml's OIDC
+# discovery mount). Same root CA, same convention as the ingress secret.
+step "gitsaas CA secret '$CA_SECRET'"
+"${KUBECTL[@]}" create secret generic "$CA_SECRET" \
+  --from-file=ca.crt="$(mkcert -CAROOT)/rootCA.pem" \
+  --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+
 # Re-issued on every run and upserted, so an expired or host-mismatched secret self-heals.
 "${KUBECTL[@]}" create secret tls "$TLS_SECRET" \
   --cert="$tlsdir/tls.crt" --key="$tlsdir/tls.key" -n "$NS" \
@@ -425,6 +437,20 @@ step "SeaweedFS S3 credentials secret '$S3_SECRET'"
   --from-literal=secret-key=minioadmin \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
 
+# Seed of the OIDC client record for the BFF and dataplane (their OIDC envs read
+# gitfrok-oidc). dev-provision.sh replaces client-id and tenant-mapping with the
+# real values Zitadel generated, then restarts both deployments so the pod env
+# converges. The placeholders here only exist so the pods can start before
+# provisioning runs. It is created ONCE: a later dev-up must not clobber the
+# provisioned values, so unlike the secrets above this one is only created when
+# absent (dev-up converges after provisioning anyway).
+step "OIDC client record configmap '$OIDC_CM'"
+"${KUBECTL[@]}" get configmap "$OIDC_CM" -n "$NS" >/dev/null 2>&1 \
+  || "${KUBECTL[@]}" create configmap "$OIDC_CM" -n "$NS" \
+     --from-literal=client-id=bff \
+     --from-literal=issuer=https://zitadel.gitsaas.test \
+     --from-literal=tenant-mapping=0=dev
+
 # KEDA, from its upstream release rather than vendored (ADR-0039). Without the
 # operator a ScaledObject is an inert custom resource and T-0017 AC2 cannot be
 # demonstrated at all.
@@ -435,7 +461,7 @@ step "KEDA $KEDA_VERSION"
 "${KUBECTL[@]}" rollout status deployment/keda-operator -n keda --timeout="$DEFAULT_TIMEOUT"
 
 step "Applying manifests"
-for m in postgres valkey redpanda seaweedfs zitadel hello git-storaged dataplane controlplane bff webfrontend ingress; do
+for m in postgres valkey redpanda seaweedfs zitadel zitadel-login hello git-storaged dataplane controlplane bff webfrontend ingress; do
   "${KUBECTL[@]}" apply -f "deploy/dev/$m.yaml"
 done
 if [ "$MOUNT_DAEMONSET" = "1" ]; then
@@ -541,6 +567,9 @@ for d in $DEPLOYMENTS; do
 done
 # Kept last and given its own budget: first boot is init + migrations + FirstInstance setup.
 "${KUBECTL[@]}" rollout status deployment/zitadel -n "$NS" --timeout="$ZITADEL_TIMEOUT"
+# The Login V2 UI waits for the login-client PAT the API's setup writes (its pat-wait init
+# container), so its rollout only starts meaningfully after the API is up.
+"${KUBECTL[@]}" rollout status deployment/zitadel-login -n "$NS" --timeout="$DEFAULT_TIMEOUT"
 
 # ------------------------------------------------------------------ object-tier bucket
 # SeaweedFS answers **200 to a PUT into a bucket that does not exist**, and the object is not there
@@ -558,6 +587,16 @@ else
   # dying here, and beats letting the first LFS push discover it.
   echo "WARNING: could not create the bucket $S3_BUCKET — LFS writes will be accepted and lost." >&2
   echo "  echo 's3.bucket.create -name $S3_BUCKET' | kubectl --context $PROFILE exec -i -n $NS deployment/seaweedfs -- weed shell" >&2
+fi
+
+# ---------------------------------------------------------------------------- provision
+# Migrations and the Zitadel OIDC app used to be manual runbook steps; dev-up converged the
+# cluster, not the application. dev-provision.sh is idempotent like everything else here; it
+# needs the Login V2 UI ready (for the headless login flow) and the ingress reachable, both of
+# which hold by this point.
+step "Provisioning (migrations + Zitadel OIDC client)"
+if ! ./scripts/dev-provision.sh; then
+  die "provisioning failed — see scripts/dev-provision.sh; the cluster is up but the app layer is incomplete"
 fi
 
 # ---------------------------------------------------------------------------- host DNS
@@ -685,6 +724,7 @@ Cluster:  minikube profile '$PROFILE' at $IP
 Context:  kubectl --context $PROFILE
 Hosts:    https://hello.gitsaas.test    (smoke-test fixture)
           https://zitadel.gitsaas.test  (admin@gitsaas.test / ChangeMe123!)
+          https://app.gitsaas.test      (web app, OIDC login provisioned)
           https://s3.gitsaas.test       https://filer.gitsaas.test
 Verify:   make dev-smoke
 EOF

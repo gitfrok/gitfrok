@@ -29,6 +29,16 @@ spec:
         runAsUser: 65532
         runAsGroup: 65532
         fsGroup: 65532
+      # The issuer URL is the public one (the browser must follow the authorize
+      # redirect), but in dev only the host resolves *.gitsaas.test (dnsmasq).
+      # The alias pins the minikube ingress IP so the pod can reach the issuer
+      # through the same route the browser takes; the CA mount makes the mkcert
+      # cert trustable in-cluster (Go reads SSL_CERT_DIR). dev-up.sh writes the
+      # gitsaas-ca secret from $(mkcert -CAROOT)/rootCA.pem and converges both.
+      hostAliases:
+      - ip: "192.168.49.2"
+        hostnames:
+        - zitadel.gitsaas.test
       containers:
       - name: bff
         # Image mirrors deploy/dev/versions.env (BFF_IMAGE); dev-up.sh loads it
@@ -45,19 +55,34 @@ spec:
         - name: GITFROK_BFF_LISTEN_ADDR
           value: ":8080"
         # OIDC login (ADR-0045). The issuer is Zitadel, which the dev cluster
-        # already deploys. The client is the BFF's own Zitadel application.
+        # already deploys. The client id is written by dev-provision.sh into the
+        # ConfigMap gitfrok-oidc (Zitadel generates client ids server-side; `bff`
+        # is only the dev-up seed/placeholder). Update of the ConfigMap is followed
+        # by a bff rollout restart inside dev-provision.sh so the pod picks it up.
         - name: GITFROK_OIDC_ISSUER
           value: "https://zitadel.gitsaas.test"
         - name: GITFROK_OIDC_CLIENT_ID
-          value: "bff"
+          valueFrom:
+            configMapKeyRef:
+              name: gitfrok-oidc
+              key: client-id
         - name: GITFROK_OIDC_REDIRECT_URI
           value: "https://app.gitsaas.test/callback"
+        # `urn:zitadel:iam:user:resourceowner` is what makes Zitadel include the
+        # resource-owner claims the tenant mapping reads (ADR-0045): without it
+        # the ID token carries no owner and every login maps to no tenant.
         - name: GITFROK_OIDC_SCOPE
-          value: "openid profile email"
+          value: "openid profile email urn:zitadel:iam:user:resourceowner"
         # ADR-0049 decision 5 names Valkey for the session store; the in-memory
         # store is the dev posture until a shared store is wired.
         - name: GITFROK_SESSION_STORE
           value: "memory"
+        - name: SSL_CERT_DIR
+          value: "/etc/ssl/gitsaas"
+        volumeMounts:
+        - name: gitsaas-ca
+          mountPath: /etc/ssl/gitsaas
+          readOnly: true
         ports:
         - name: http
           containerPort: 8080
@@ -90,6 +115,13 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+      volumes:
+      - name: gitsaas-ca
+        secret:
+          secretName: gitsaas-ca
+          items:
+          - key: ca.crt
+            path: ca.crt
 ---
 apiVersion: v1
 kind: Service
