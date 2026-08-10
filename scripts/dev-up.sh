@@ -73,7 +73,7 @@ VERSIONS=deploy/dev/versions.env
 # variable. This was a latent bug in the T-0021 bring-up — the tags happened to
 # be in the environment that ran it.
 set -a
-# shellcheck disable=SC1091 # data file, not a script
+# shellcheck disable=SC1090 # sourced path is a variable; the file is a data file, not a script
 . ./"$VERSIONS"
 set +a
 
