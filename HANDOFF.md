@@ -53,7 +53,7 @@ fakes. They are worth knowing because each one had passed review:
 3. SeaweedFS answers **200 to a PUT into a bucket that does not exist**. The object tier now reads
    back before acknowledging a write.
 
-**ADR-0051 (Proposed 2026-08-11)** follows from wiring that mount into `deploy/dev`: producing a FUSE
+**ADR-0051 (Accepted 2026-08-11)** follows from wiring that mount into `deploy/dev`: producing a FUSE
 mount in Kubernetes requires a privileged container somewhere, because kubelet rejects
 `mountPropagation: Bidirectional` on anything unprivileged. It proposes one privileged DaemonSet per
 node rather than a sidecar per consumer. Running it found that this driver never propagates the mount
