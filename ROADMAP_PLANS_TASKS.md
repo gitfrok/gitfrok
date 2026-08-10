@@ -5,7 +5,11 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `275984f` on 2026-08-06.**
+> **Synced from governance `main` on 2026-08-11, at governance PR #119 — which is not yet merged.**
+> The super-repo pin is still `62f1c79`, which predates it: at that commit T-0018 reads *In
+> progress*. The statuses below are therefore ahead of the pin **on purpose and only until #119
+> merges**, at which point this file's pin bump lands with the merged commit. Governance decides;
+> if #119 changes in review, this file follows it rather than the other way round.
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -19,8 +23,8 @@ must satisfy `governance/docs/process/definition-of-done.md`.
 
 | Phase | Theme | Tasks | State |
 |---|---|---|---|
-| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | in progress — 8 of 10 Done; EP-0 closed 2026-08-04, EP-9 + EP-3 2026-08-06 |
-| 1 | MVP (GitHub-lite) | T-0010 – T-0018 (9) | not started |
+| 0 | Foundations | T-0001 – T-0009, T-0020 (10) | **Closed** — all ten Done; EP-0 closed 2026-08-04, EP-9 + EP-3 2026-08-06, EP-1 with T-0003 |
+| 1 | MVP (GitHub-lite) | T-0010 – T-0018, T-0021 (10) | **all ten Done** (T-0018 last, 2026-08-11) — **not exited**: the end-to-end Minikube scenario is the open exit criterion |
 | 2 | Unified security & governance (the wedge) | none yet | backlog says *to be expanded* |
 | 3 | BYO & commercial | none yet | backlog says *to be expanded* |
 
@@ -76,9 +80,9 @@ by T-0009, not scheduled.
 
 ## PLANS — execution strategy
 
-`governance/docs/plans/` holds **one plan file**, `phase-0-foundations.md`, plus its `README.md`
-index. There is no Phase-1, Phase-2 or Phase-3 plan; PRD §12.2 open item 1 records this, and notes
-the consequence — later phases are sequenced only by whatever individual task files state.
+`governance/docs/plans/` holds **two plan files** — `phase-0-foundations.md` and `phase-1-mvp.md` —
+plus its `README.md` index. There is still no Phase-2 or Phase-3 plan, so those phases are sequenced
+only by whatever individual task files state. PRD §12.2 open item 1 is half closed.
 
 ### Plan: Phase 0 — Foundations
 
@@ -109,8 +113,8 @@ why T-0007 is in Phase 0 rather than later.
 policy/isolation + fitness-function tests; `make dev-up` brings the stack up on `*.gitsaas.test`.
 The plan now attributes each half of that CI line to a workstream, because "runs green" reads as
 already satisfied and is not: boundary + fitness → T-0002/T-0009 (done); contract → T-0020 (done);
-unit + policy/isolation → T-0004/T-0005/T-0006 (**done 2026-08-06**); `make dev-up` → T-0003 (in progress — it has
-now run on a cluster; AC2 and AC4 verified, AC1's create path and AC3's DNS path still open).
+unit + policy/isolation → T-0004/T-0005/T-0006 (**done 2026-08-06**); `make dev-up` → T-0003 (**done** —
+the full stack comes up and `make dev-smoke` is green; host DNS remains a manual root step).
 
 ---
 
@@ -125,7 +129,7 @@ against `docs/backlog/README.md`. **Owner is `unassigned` on every task** — no
 |---|---|---|---|---|---|---|
 | T-0001 | Scaffold super-repo + submodules | **Done** | EP-0 | super-repo + all four | chore | 0027, 0025, 0022, 0023, 0028 |
 | T-0002 | Boundary/arch enforcement in CI | **Done** | EP-0 | backend + bff + super-repo | chore | 0022, 0025, 0026, 0027, 0031 |
-| T-0003 | Minikube dev environment | **In progress** — AC2+AC4 verified | EP-1 | super-repo (`Makefile`, `deploy/dev/`) | chore | 0024, 0023 |
+| T-0003 | Minikube dev environment | **Done** — AC1–AC4 verified | EP-1 | super-repo (`Makefile`, `deploy/dev/`) | chore | 0024, 0023 |
 | T-0004 | Tenancy + RLS baseline | **Done** | EP-2 | backend | SPEC-0001 | 0003, 0022, 0007 |
 | T-0005 | PDP skeleton (OPA) | **Done** | EP-2 | governance → backend → bff | SPEC-0002 | 0006, 0022 |
 | T-0006 | Append-only audit log | **Done** | EP-2 | governance → backend | SPEC-0003 | 0007, 0022 |
@@ -194,13 +198,14 @@ readers, not a faster FUSE client. Evidence and its limits — one workstation, 
 latency *ratios* want a cluster re-run after T-0003 while the correctness verdict does not — are in
 `governance/docs/bench/T-0007/`.
 
-#### T-0003 — it has now actually run (In progress, 2026-08-06)
-`deploy/dev/` ran on a real cluster for the first time (minikube, rootless podman driver). **AC2 and
-AC4 are verified**; AC1's addon half is verified and its cluster-create path is not; **AC3 is verified
-in substance but not by the path it specifies** — ingress serves the mkcert wildcard and returns the
-fixture (`http_code=200`, `ssl_verify_result=0` against the mkcert CA), but only via
-`kubectl port-forward`, because under rootless podman the node IP is unroutable from the host. No
-`/etc/hosts` entry fixes that.
+#### T-0003 — Done, and the record was corrected twice getting there
+`deploy/dev/` ran on a real cluster for the first time on 2026-08-06 (minikube, rootless podman
+driver). All four criteria are now verified. **AC3's earlier conclusion was wrong and is retracted:**
+it said the unroutable rootless node IP meant AC3 needed a rootful driver or KVM. The observation was
+right, the inference was not — publishing the node's 80/443 to the host (`--ports`, supported by the
+podman driver) reaches ingress on `127.0.0.1` with no `port-forward` at all. The lesson kept in the
+record is that *"the node IP is unroutable"* is a measurement and *"so this needs a different host"*
+was an inference, and both went in with the same confidence.
 
 **It cost seven manifest fixes** (super-repo `41e2f45`). As written, three of the five services could
 not start: a Redpanda tag that was never published, a seaweedfs subcommand that does not exist, a
@@ -209,14 +214,17 @@ volume under `RollingUpdate`, and a Zitadel config poisoned by Kubernetes servic
 Service `zitadel` collides with Zitadel's own `ZITADEL_` config prefix. That is the value of running
 something: none of it was visible to review or to `check-dev-images.sh`.
 
-What remains is **not code** — AC1's create path and AC3's DNS path need a rootful container driver or
-KVM, and macOS needs a macOS. AC-by-AC detail: `deploy/dev/README.md` and the task file.
+The create path completed at the third attempt on 2026-08-08, costing three further defects that only
+a create which got *past* the previous one could expose. AC4 closed on 2026-08-09 against a real
+macOS runner. Two residuals are named rather than hidden: host DNS is a manual root step, and a
+cluster bring-up **on a Mac** needs a hypervisor no hosted runner has. AC-by-AC detail:
+`deploy/dev/README.md` and the task file; the operator path is `deploy/MVP-RUNBOOK.md`.
 
-### Phase 1 — MVP (9 tasks)
+### Phase 1 — MVP (10 tasks, all Done)
 
-Every Phase-1 task is `Todo`. Eight of the nine task files label the epic `1 / MVP` and leave the
-grouping to the backlog, which splits them into EP-4…EP-8 as shown here; T-0018 is the exception —
-its own field already reads `1 / EP-8 Migration`.
+Eight of the task files label the epic `1 / MVP` and leave the grouping to the backlog, which splits
+them into EP-4…EP-8 as shown here; T-0018 is the exception — its own field already reads
+`1 / EP-8 Migration`.
 
 | Task | Title | Epic | Repo(s) | Spec | ADRs |
 |---|---|---|---|---|---|
@@ -228,18 +236,25 @@ its own field already reads `1 / EP-8 Migration`.
 | T-0015 | Web: repo browser + file/diff + palette | EP-6 | webfrontend | SPEC-0008 | 0015, 0023 |
 | T-0016 | Merge requests + protected branches | EP-7 Review & CI | backend + governance | SPEC-0009 | 0004, 0006, 0007 |
 | T-0017 | CI v0: gVisor sandbox runner + KEDA | EP-7 | backend (ci + runner) | SPEC-0010 | 0005, 0012 |
-| T-0018 | Repository & review-history import | EP-8 Migration | governance + backend + bff + webfrontend | SPEC-0011 | **0029 (governing)**, 0004, 0016, 0007, 0006, 0003, 0022, 0015 |
+| T-0018 | Repository & review-history import | EP-8 Migration | governance + backend + bff + webfrontend | SPEC-0011, SPEC-0023 | **0029 (governing)**, **0050**, 0004, 0016, 0033, 0007, 0006, 0003, 0022, 0015 |
+| T-0021 | Container images for both planes | EP-4 | backend + bff + webfrontend | — | 0035, 0044, 0048 |
 
-T-0018 is ready to start: ADR-0029 Accepted, SPEC-0011 Approved. Imported history is
-`ATTESTED_IMPORT` — it never enters the audit log, and imported approvals never satisfy a merge
-policy. **T-0019 was retired**, folded into T-0018 at spec review; the number is never reused.
+**T-0018 closed 2026-08-11 and was Phase 1's last task** — 23 of 24 criteria met, AC19
+— the evidence-pack criterion, SPEC-0011 AC14 — moved to Phase 2. Imported history is
+`ATTESTED_IMPORT`: it
+never enters the audit log, and imported approvals never satisfy a merge policy. Its storage half
+produced **ADR-0050 (Accepted)**, which narrows ADR-0020 — LFS objects, CI artifacts and
+container-image blobs come from a SeaweedFS FUSE mount, transfers proxy through the plane because a
+mount has no signed URLs, and every read is verified against the digest in the object's name.
+ADR-0033 is unchanged: live bare repositories stay on block volumes. **T-0019 was retired**, folded
+into T-0018 at spec review; the number is never reused.
 
 ---
 
 ## Dependencies
 
-**Only two sources of truth exist for sequencing, and neither covers Phase 1 as a whole.** The task
-template has no `Depends on` field, and only T-0018 states dependencies explicitly.
+Both defined phases now have a plan file. The task template still has no `Depends on` field, so
+dependencies stated *inside* a task file remain rare — only T-0018 has one.
 
 **Phase 0** — from `plans/phase-0-foundations.md` (see the plan table above):
 
@@ -253,10 +268,12 @@ T-0003 ──▶ T-0004          (T-0003 runs parallel to T-0001/T-0002)
 T-0007                      parallel; GATES Phase-1 git-storage design
 ```
 
-**Phase 1** — the only stated dependency is T-0018's: **T-0010** (Git-RPC), **T-0006** (audit log),
-**T-0016** (MR + approval). Everything else is unsequenced in governance. Any other Phase-1 ordering
-you see quoted elsewhere is inference, not governance — writing
-`governance/docs/plans/phase-1-mvp.md` is the fix, and it is tracked as PRD §12.2 open item 1.
+**Phase 1** — `governance/docs/plans/phase-1-mvp.md` now carries the sequencing: eight workstreams in
+ADR-0027 order and a critical path of **T-0012** (durable ack) ⟷ **T-0016** (MR gate) ⟷ **T-0017**
+(CI gate), with T-0013 gating the web session and T-0018 terminal behind T-0016 + T-0013. The only
+dependency stated inside a task file is still T-0018's: **T-0010** (Git-RPC), **T-0006** (audit log),
+**T-0016** (MR + approval). All ten tasks are Done; workstream 8 — the single end-to-end scenario in
+Minikube — is what remains, and `deploy/MVP-RUNBOOK.md` is its operator-facing form.
 
 **Bottleneck cleared (2026-08-06):** T-0007 gated T-0010 and is now Done. The result does **not** amend
 ADR-0016 — ADR-0033 (Accepted) confirms block volumes for live bare repos, so T-0010's storage
@@ -309,7 +326,8 @@ statuses is `governance/docs/adr/README.md`.
 1. `make bootstrap` — initialises submodules and prints the toolchain floors.
 2. Read `governance/AGENTS.md`, then `governance/docs/agents/invariants.md`.
 3. Pick a `Todo` task in `governance/docs/tasks/`. Check its `Repo(s):` field — **one commit never
-   spans two submodules** (invariant 23).
+   spans two submodules** (invariant 23). *Every defined task is currently Done; what is open is
+   Phase 1's exit scenario (`deploy/MVP-RUNBOOK.md`) and the Phase-2/3 backlog.*
 4. Follow the AGDD loop (`governance/docs/process/agdd.md`): governance first → spec (or Proposed ADR
    and stop) → failing tests from the ACs → minimal code → gates → PR in that submodule.
 5. Cross-repo work follows ADR-0027's order: governance PR → consumers → super-repo pin bump to

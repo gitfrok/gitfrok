@@ -71,6 +71,51 @@ for d in postgres valkey redpanda seaweedfs zitadel hello git-storaged dataplane
   fi
 done
 
+# The large-object mount is a DaemonSet, so the loop above cannot see it — and if it
+# is deployed and broken, git-storaged and the data plane still report Available
+# while LFS is silently dead (ADR-0050, ADR-0051). It is optional here
+# (MOUNT_DAEMONSET in dev-up.sh; this driver cannot propagate a mount to the node),
+# so it is asserted when present and reported as absent when not, never skipped in
+# silence.
+#
+# numberReady, not desiredNumberScheduled: the pod's probes write and read through
+# the mount, so Ready means a mount that serves bytes rather than a running `weed`.
+#
+# READY IS NOT THE SAME CLAIM AS "the consumers have a mount", and conflating the two
+# would reproduce the measured failure inside the gate meant to catch it. The pod's
+# probes run in the pod's own mount namespace, where `weed`'s mount is always present
+# — including on this driver, where it never propagates to the node. So this asserts
+# the mount pod separately from the consumers, and says which claim it is making.
+desired=$("${KUBECTL[@]}" get daemonset/seaweedfs-mount -n "$NS" \
+            -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || true)
+ready=$("${KUBECTL[@]}" get daemonset/seaweedfs-mount -n "$NS" \
+          -o jsonpath='{.status.numberReady}' 2>/dev/null || true)
+if [ -z "$desired" ]; then
+  echo "  note  daemonset/seaweedfs-mount is not deployed — the object tier is the S3 adapter"
+  echo "        (ADR-0050 decision 6). MOUNT_DAEMONSET=1 in dev-up.sh deploys the FUSE mount."
+elif [ "${desired:-0}" -ge 1 ] && [ "${ready:-0}" = "$desired" ] 2>/dev/null; then
+  ok "daemonset/seaweedfs-mount is ready on $ready/$desired node(s) — \`weed\` serves its own mount"
+  # The consumer-side half. dev-up.sh only wires these two onto the mount once the
+  # DaemonSet is up, and each carries an init container that refuses to start unless
+  # /mnt/seaweedfs is a fuse.seaweedfs mount in its OWN namespace (ADR-0051 decision
+  # 3). So the env var present AND the deployment Available — asserted in the loop
+  # above — is the propagation claim, made from where propagation actually matters.
+  for c in git-storaged dataplane; do
+    root=$("${KUBECTL[@]}" get "deployment/$c" -n "$NS" \
+             -o jsonpath="{.spec.template.spec.containers[?(@.name=='$c')].env[?(@.name=='GITFROK_SEAWEEDFS_MOUNT')].value}" \
+             2>/dev/null || true)
+    if [ -n "$root" ]; then
+      ok "$c reads the object tier through the mount at $root, and its init container proved it propagated"
+    else
+      report "daemonset/seaweedfs-mount is ready but $c is still on the S3 adapter — the mount serves nothing.
+    dev-up.sh patches the consumers onto it only under MOUNT_DAEMONSET=1; a bare \`kubectl apply\` of the manifests undoes that."
+    fi
+  done
+else
+  report "daemonset/seaweedfs-mount is ${ready:-0}/${desired:-0} ready — it is deployed and not serving.
+    kubectl --context $PROFILE logs -n $NS daemonset/seaweedfs-mount"
+fi
+
 # ------------------------------------------------------- AC2: running images match versions.env
 # dev-up.sh asserts this against the manifest text; this asserts it against what the cluster is
 # actually running, which is the claim AC2 makes. A stale ReplicaSet or a hand-edited deployment

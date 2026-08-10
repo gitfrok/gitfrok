@@ -33,3 +33,8 @@
 .github/prompts/
 .github/skills/
 openspec/
+
+# Generated wholesale by the graphify tool and regenerated on every update — a navigation
+# aid, never a source of truth (CLAUDE.md). Committing it would put a derived, machine-
+# written map under review alongside the code it describes.
+graphify-out/

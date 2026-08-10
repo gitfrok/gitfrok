@@ -4,25 +4,33 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `1c1d55c` on 2026-08-06.**
+> **Synced from governance `main` on 2026-08-11, at governance PR #119 — which is not yet merged.**
+> The super-repo pin is still `62f1c79`, which predates it: at that commit T-0018 reads *In
+> progress*. The statuses below are therefore ahead of the pin **on purpose and only until #119
+> merges**, at which point this file's pin bump lands with the merged commit. Governance decides;
+> if #119 changes in review, this file follows it rather than the other way round.
 
 ## The four phases
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ PHASE 0 — Foundations                          IN PROGRESS       │
+│ PHASE 0 — Foundations                          CLOSED            │
 │ scaffolding · dev env · tenancy/RLS · PDP · audit · storage bench│
-│ 10 tasks: T-0001…T-0009 + T-0020  —  9 Done, 1 in progress      │
+│ 10 tasks: T-0001…T-0009 + T-0020  —  all Done                   │
 │ Exit: tenant-scoped, policy-checked, audited request end-to-end  │
 │       in Minikube; boundary/arch tests in CI; benchmark decided  │
 └──────────────────────────────────────────────────────────────────┘
                               ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│ PHASE 1 — MVP (GitHub-lite)                    NOT STARTED       │
+│ PHASE 1 — MVP (GitHub-lite)          ALL TASKS DONE, NOT EXITED  │
 │ git push/pull · auth · repo UI · MR/PR · CI v0 · import          │
-│ 9 tasks: T-0010…T-0018  —  all Todo                             │
+│ 10 tasks: T-0010…T-0018 + T-0021  —  all Done (T-0018 last,      │
+│           2026-08-11; its AC19 moved to Phase 2)                 │
 │ Exit: a team hosts a repo, reviews+merges an MR, runs a pipeline │
-│ Blocked by: Phase-0 exit; T-0007 benchmark gates git storage     │
+│ Open: the end-to-end Minikube scenario. No object tier is wired  │
+│       into any manifest; migrations are hand-applied; rootless   │
+│       podman has no gVisor; one node proves no quorum/failover.  │
+│       Runbook: deploy/MVP-RUNBOOK.md                             │
 └──────────────────────────────────────────────────────────────────┘
                               ↓
 ┌──────────────────────────────────────────────────────────────────┐
@@ -49,7 +57,7 @@ Status is each task file's own `Status:` field.
 |---|---|---|---|
 | T-0001 | Scaffold super-repo + submodules | ✅ **Done** | EP-0 |
 | T-0002 | Boundary/arch enforcement in CI | ✅ **Done** | EP-0 |
-| T-0003 | Minikube dev environment | 🔧 **In progress** — AC2+AC4 verified | EP-1 |
+| T-0003 | Minikube dev environment | ✅ **Done** — AC1–AC4 verified | EP-1 |
 | T-0004 | Tenancy + RLS baseline | ✅ **Done** | EP-2 |
 | T-0005 | PDP skeleton (OPA) | ✅ **Done** | EP-2 |
 | T-0006 | Append-only audit log | ✅ **Done** | EP-2 |
@@ -74,12 +82,15 @@ in governance, and the super-repo requires generated code to match its pinned co
 amended: per-consumer codegen gating needs the ADR-0027/0028 generated-type publishing follow-up,
 so it is gated at the composition boundary instead.
 
-**T-0003 update (2026-08-06):** it has now run on a real cluster. **AC2 and AC4 verified**; AC1's
-addon half verified, its cluster-create path not exercised; **AC3 verified in substance only** — 200
-with the certificate validated against the mkcert CA, but via `port-forward`, because under rootless
-podman the node IP is unroutable from the host. Getting there took **seven manifest fixes**: as
-written, three of the five services could not start. What is left needs a rootful driver or KVM, and a
-macOS for macOS — not more code. AC-by-AC state: `deploy/dev/README.md`.
+**EP-1 closed — T-0003 Done.** All four criteria are verified. The create path completed on
+2026-08-08 at the third attempt, costing three defects the earlier seven-manifest-fix sweep could not
+have caught, because nothing had ever exercised that branch. **AC3 needed no different host:** the
+earlier conclusion that it required a rootful driver or KVM was an inference from a correct
+observation and is retracted — publishing the node's 80/443 to the host (`--ports`, which the podman
+driver supports) makes ingress reachable on `127.0.0.1` with no `port-forward`. AC4 closed 2026-08-09
+on a real macOS runner rather than by grepping for bash-4 syntax. Two residuals are named in the
+record: host DNS is a manual root step, and a cluster bring-up *on a Mac* needs a hypervisor no hosted
+runner has. AC-by-AC state: `deploy/dev/README.md`; operator path: `deploy/MVP-RUNBOOK.md`.
 
 ## Phase 0 sequencing
 
@@ -96,10 +107,15 @@ parallel:       T-0001 ──▶ T-0002 ──▶ T-0009
 T-0020 is off the critical path — nothing in Phase 0 waits on it — but Phase 0 cannot exit without
 it: it owns the *contract* half of the CI exit criterion.
 
-## Phase 1 sequencing — mostly undefined
+## Phase 1 sequencing
 
-There is **no Phase-1 plan file**, and the task template has no `Depends on` field. The only stated
-Phase-1 dependency in governance is T-0018's:
+`governance/docs/plans/phase-1-mvp.md` now exists and is authoritative: eight workstreams, a critical
+path of T-0012 ⟷ T-0016 ⟷ T-0017, and three exit criteria of which one remains open. Every task in
+the table below is **Done**; the plan's workstream 8 — the single end-to-end Minikube scenario — is
+the only one still running.
+
+The task template still has no `Depends on` field. The only dependency stated inside a task file is
+T-0018's:
 
 ```
 T-0018 (import) requires  T-0010 (Git-RPC) · T-0006 (audit log) · T-0016 (MR + approval)
@@ -109,34 +125,33 @@ The cross-phase gate **T-0007 → T-0010** is **lifted**: the benchmark ran on 2
 Accepted, block volumes are confirmed and ADR-0016 needed **no** amendment. T-0010 can proceed on that
 assumption.
 
-Everything else is unsequenced. Writing `governance/docs/plans/phase-1-mvp.md` is tracked as PRD
-§12.2 open item 1 — until it exists, do not treat any other Phase-1 ordering as authoritative.
-
-| Task | Title | Epic |
-|---|---|---|
-| T-0010 | Git-RPC storage service | EP-4 Git plane |
-| T-0011 | Smart-HTTP + SSH front doors | EP-4 |
-| T-0012 | Sync-replica write path + failover | EP-4 |
-| T-0013 | Identity & access: Zitadel + PATs | EP-5 Identity |
-| T-0014 | Repository read APIs + BFF aggregation | EP-6 Code UX |
-| T-0015 | Web: repo browser + file/diff + palette | EP-6 |
-| T-0016 | Merge requests + protected branches | EP-7 Review & CI |
-| T-0017 | CI v0: gVisor sandbox runner + KEDA | EP-7 |
-| T-0018 | Repository & review-history import | EP-8 Migration |
+| Task | Title | Epic | Status |
+|---|---|---|---|
+| T-0010 | Git-RPC storage service | EP-4 Git plane | ✅ Done |
+| T-0011 | Smart-HTTP + SSH front doors | EP-4 | ✅ Done |
+| T-0012 | Sync-replica write path + failover | EP-4 | ✅ Done |
+| T-0013 | Identity & access: Zitadel + PATs | EP-5 Identity | ✅ Done |
+| T-0014 | Repository read APIs + BFF aggregation | EP-6 Code UX | ✅ Done |
+| T-0015 | Web: repo browser + file/diff + palette | EP-6 | ✅ Done |
+| T-0016 | Merge requests + protected branches | EP-7 Review & CI | ✅ Done |
+| T-0017 | CI v0: gVisor sandbox runner + KEDA | EP-7 | ✅ Done — dev cluster cannot run gVisor |
+| T-0018 | Repository & review-history import | EP-8 Migration | ✅ **Done 2026-08-11** — AC19 → Phase 2 |
+| T-0021 | Container images for both planes | EP-4 | ✅ Done |
 
 ## Phase 0 exit criteria
 
 From `governance/docs/roadmap/README.md` and the phase-0 plan:
 
-- [ ] all 10 Phase-0 tasks Done (per `definition-of-done.md`) — **9 of 10**; only T-0003 is open
+- [x] all 10 Phase-0 tasks Done (per `definition-of-done.md`) — *T-0003 was the last, closed with
+      AC1–AC4 verified*
 - [x] CI green on unit + contract + boundary + policy/isolation + fitness-function tests —
       *completed 2026-08-06 by T-0005, which supplied the policy half: `opa test` plus a
       deny-by-default assertion in governance, the PDP adapter and inline-authz fitness function in
       backend, the PEP in bff, and a cross-repo composition gate in the super-repo*
-- [ ] `make dev-up` brings the stack up on `*.gitsaas.test` — **the only criterion still open.**
-      Needs a host with a rootful container driver or KVM (see T-0003), plus one manifest change
-      that can be made anywhere: `deploy/dev` mounts no policy bundle, and the data plane now exits
-      without `GITFROK_POLICY_BUNDLE_DIR`
+- [x] `make dev-up` brings the stack up on `*.gitsaas.test` — *closed: the full stack comes up under
+      rootless podman and `make dev-smoke` is green, with the policy bundle published as a ConfigMap
+      from `governance/policies` at bring-up. The one residual is host DNS, which needs root and is
+      printed rather than applied*
 - [x] storage benchmark (T-0007) decided; any ADR-0016 amendment recorded — *decided 2026-08-06 via
       ADR-0033 (Accepted): block volumes; ADR-0016 not amended*
 
@@ -176,6 +191,8 @@ task file + backlog updated. Full text: `governance/docs/process/definition-of-d
 ## Reference
 
 - Full detail: `ROADMAP_PLANS_TASKS.md` · document map: `DOCUMENTATION_INDEX.md`
+- Deploy the MVP: [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) · handing over a session:
+  [`HANDOFF.md`](HANDOFF.md)
 - Governance: `governance/docs/roadmap/`, `docs/plans/`, `docs/backlog/`, `docs/tasks/`
 - Product: `governance/docs/product/PRD.md` (`PR-#`, phases, non-goals, GA)
 - Process: `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md`

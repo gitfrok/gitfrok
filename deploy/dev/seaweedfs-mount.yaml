@@ -1,0 +1,156 @@
+---
+# The SeaweedFS FUSE mount for large objects — ADR-0050 (what the tier is) and
+# ADR-0051 (how the mount is produced).
+#
+# ADR-0050 decided that LFS objects, CI artifacts and container-image blobs are
+# read and written through a FUSE mount "presented to the data plane as a
+# filesystem path". This is the workload that makes such a path exist.
+#
+# WHY A PRIVILEGED DAEMONSET AND NOT A SIDECAR. A mount made inside a container is
+# visible only in that container's mount namespace unless the volume carrying it
+# declares `mountPropagation: Bidirectional` — and kubelet REJECTS Bidirectional on
+# any container that is not privileged. An unprivileged `weed mount` sidecar beside
+# git-storaged would appear to succeed while the application container next to it
+# saw an empty directory and wrote objects onto one node's local disk. So the
+# question was never whether to grant privilege; it was where it sits and how many
+# copies exist. One per node, in a third-party image, is ADR-0051's answer.
+#
+# LIVE REPOSITORIES DO NOT COME NEAR THIS. ADR-0033 stands: bare repositories are on
+# a block volume, git-storaged refuses a FUSE repository root (ErrFUSERepositoryRoot,
+# invariant 7), and GITFROK_GIT_STORAGE_ROOT must never point here.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: seaweedfs-mount
+  namespace: default
+  labels:
+    app: seaweedfs-mount
+    phase: "1"
+spec:
+  selector:
+    matchLabels:
+      app: seaweedfs-mount
+  template:
+    metadata:
+      labels:
+        app: seaweedfs-mount
+        phase: "1"
+    spec:
+      # The mount must survive a node under pressure: evicting it takes large-object
+      # storage down for every consumer on the node, and by their init containers,
+      # takes the consumers down with it on the next restart.
+      priorityClassName: system-node-critical
+      # A FUSE mount does not unmount cleanly if the process is killed outright;
+      # give weed time to flush and release the mount before SIGKILL.
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: mount
+        # Image mirrors deploy/dev/versions.env (SEAWEEDFS_IMAGE) — the same pin the
+        # filer runs, so the mount client and the server never diverge by version.
+        image: docker.io/chrislusf/seaweedfs:4.40
+        imagePullPolicy: IfNotPresent
+        command: ["weed"]
+        args:
+        - mount
+        # The filer by Service name, so a filer pod reschedule does not strand the
+        # mount on a dead pod IP.
+        - -filer=seaweedfs:8888
+        # Everything this platform stores lives under one filer subtree, so the
+        # mount cannot see — or be used to reach — anything else the filer holds.
+        - -filer.path=/gitfrok
+        - -dir=/mnt/seaweedfs
+        # The mount point is the hostPath below, created by kubelet on first
+        # schedule. weed must create it inside its own namespace on a fresh node.
+        - -dirAutoCreate
+        # Data through the filer rather than straight to volume servers. Volume
+        # servers advertise pod IPs, which change on reschedule and would strand
+        # in-flight reads; the filer has a stable Service name. It costs a hop.
+        - -volumeServerAccess=filerProxy
+        # The consumers run as 65532 and this mount is made by root. Without these
+        # two, every write from git-storaged and the data plane is EACCES —
+        # a failure that surfaces as "LFS is broken" with nothing pointing here.
+        - -allowOthers
+        - -defaultPermissions=false
+        - -umask=000
+        securityContext:
+          # Required by kubelet for Bidirectional propagation below. This is the
+          # whole of ADR-0051's cost, and it is why this container runs the
+          # third-party SeaweedFS image rather than anything this platform builds.
+          privileged: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            # The FUSE client caches chunks and metadata; 128 MB of chunk cache is
+            # the SeaweedFS default and this leaves room above it.
+            memory: "512Mi"
+            cpu: "500m"
+        # The mount root belongs to the filer and comes back owned by root, mode
+        # 0755, so the consumers — which run as 65532 and must never run as root —
+        # cannot write to it. This opens it once the mount is actually up.
+        #
+        # It loops because postStart races the mount: kubelet runs this the moment
+        # the container starts, and `weed` presents the mount point before it has
+        # finished talking to the filer.
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - sh
+              - -c
+              - |
+                for i in $(seq 1 60); do
+                  if chmod 0777 /mnt/seaweedfs 2>/dev/null; then exit 0; fi
+                  sleep 2
+                done
+                echo "could not open the mount root for the consumers" >&2; exit 1
+        # Both probes WRITE AND READ. `mountpoint -q` is not enough, and finding that
+        # out cost a bring-up: `weed mount` establishes the FUSE mount point *before*
+        # it can reach the filer, so for as long as it is retrying, the path is a
+        # mountpoint that cannot serve a single byte. A probe that only asked whether
+        # something was mounted reported Ready against exactly that state — the same
+        # silent-success this whole design exists to prevent, reproduced in the check
+        # meant to catch it.
+        #
+        # The file is named per node so two DaemonSet pods never probe the same path.
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - p=/mnt/seaweedfs/.probe-$(hostname); echo ok > "$p" && [ "$(cat "$p")" = ok ] && rm -f "$p"
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - p=/mnt/seaweedfs/.probe-$(hostname); echo ok > "$p" && [ "$(cat "$p")" = ok ] && rm -f "$p"
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+        volumeMounts:
+        - name: seaweedfs-mount
+          mountPath: /mnt/seaweedfs
+          # Bidirectional: the mount this container makes must propagate back out to
+          # the node, or no other pod can see it. This is the line that requires
+          # `privileged: true` above.
+          mountPropagation: Bidirectional
+        - name: cache
+          mountPath: /tmp
+      volumes:
+      - name: seaweedfs-mount
+        hostPath:
+          path: /mnt/seaweedfs
+          # DirectoryOrCreate only here. Consumers use `Directory`, so a consumer
+          # scheduled onto a node this DaemonSet has never touched fails to start
+          # rather than creating the path itself and writing into node-local disk.
+          type: DirectoryOrCreate
+      - name: cache
+        emptyDir:
+          sizeLimit: 1Gi

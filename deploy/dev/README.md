@@ -2,17 +2,25 @@
 
 Kubernetes manifests for the local Minikube dev environment per ADR-0024.
 
-> **Status: applied to a real cluster and serving; T-0003 is `In progress`** in
-> `governance/docs/tasks/T-0003-minikube-dev-env.md`. The core six deployments come up Available from
-> these manifests on the tags in `versions.env`, and ingress serves the mkcert wildcard. Getting
-> there cost **nine defects** — seven in the manifests (2026-08-06) and two in `dev-up.sh`'s
-> cluster-*create* path (2026-08-08) — every one of them invisible to the static validation this
-> directory used to rest on.
+> **New here? Read [`../MVP-RUNBOOK.md`](../MVP-RUNBOOK.md) first.** It is the ordered operator path
+> — preflight, bring-up, the three manual root steps, and what this cluster can and cannot prove.
+> This file is the per-manifest record behind it.
 >
-> What is **not** verified is narrow and named: AC1's create path (blocked on one `sysctl`), AC3's
-> `*.gitsaas.test` routing from the host (blocked on rootless podman — the smoke test verifies the
-> ingress+TLS half and defers only host DNS to an operator `sudo` step), and AC4's macOS half. The
-> data plane (T-0021) mounts the policy bundle and is up on minikube.
+> **Status: T-0003 is `Done`, AC1–AC4 verified.** The full stack comes up Available from these
+> manifests on the tags in `versions.env`, ingress serves the mkcert wildcard, and `make dev-smoke`
+> is green. Getting there cost **ten defects** — seven in the manifests (2026-08-06) and three in
+> `dev-up.sh`'s cluster-*create* path (2026-08-08) — every one of them invisible to the static
+> validation this directory used to rest on.
+>
+> Two residuals are named rather than closed: **host DNS** for `*.gitsaas.test` needs root, so the
+> script prints the per-OS snippet instead of applying it, and a **cluster bring-up on a Mac** needs
+> a hypervisor no hosted runner has (the scripts themselves are exercised on a real macOS runner).
+>
+> **The object tier is now wired**, and it is the S3 adapter rather than ADR-0050's FUSE mount:
+> the mount cannot propagate to the node on this driver, which was measured rather than assumed.
+> Two further defects were found doing it — the filer's gRPC port was never exposed, and the S3
+> endpoint served every object to unsigned requests. See
+> [the object tier](#the-object-tier-wired-to-s3-because-the-fuse-mount-cannot-propagate-here).
 >
 > **Added since that run and therefore unverified in a cluster:** the `git-storaged` workload, the
 > Git front doors now that it exists, KEDA, the CI `ScaledObject`, and the T-0015 web surface
@@ -401,6 +409,89 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
 | AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified over the real ingress path, under rootless podman, with no `port-forward`** — `GET https://hello.gitsaas.test/` returns `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`) and the hello fixture, hitting `127.0.0.1:443`. **The previous conclusion here was wrong and is retracted:** it said the rootless node IP being unroutable meant AC3 "needs a rootful driver or KVM". It needed the node's 80/443 *published to the host* — `minikube start --ports=80:80,443:443`, which the podman driver supports and this script now passes by default (`MINIKUBE_PORTS`). Binding those ports rootless also needs `net.ipv4.ip_unprivileged_port_start=0`; the create path checks for it and prints the fix. Still root-requiring, and still not automated: the **host DNS** half. Until `*.gitsaas.test` resolves to `127.0.0.1`, the 200 above is reached with `curl --resolve`. |
 | AC4 — no OrbStack, no Docker Compose; macOS and Linux | **verified on both, 2026-08-09** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. The macOS half is no longer inference: a `macos-latest` lane in all five repos parses every tracked script under **bash 3.2.57** on `arm64-apple-darwin25` and runs the fitness gates against Darwin's **own BSD userland** — including `governance/scripts/check-docs.sh`, the gate the 2026-08 audit found would have aborted outright on macOS via `find -printf`. Two genuinely macOS-fatal defects had been found and fixed by the audit this replaces: that one, and `bench-storage.sh` using `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, leaving its RAM-disk guard **silently inert on macOS**. The audit is now a standing gate (`check-shell-portability.sh`, SPEC-0014) rather than something someone remembers to run. `sort -z` is **resolved**: Darwin accepts it, so it was never a defect — dropping it from `dev-up.sh` was still right, being cosmetic there. **What is not verified is a cluster bring-up on a Mac**, which needs a hypervisor a hosted runner has not got; see [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not). |
+
+### The object tier: wired to S3, because the FUSE mount cannot propagate here
+
+`git-storaged` and the data plane now carry the five `GITFROK_SEAWEEDFS_S3_*` variables, so this
+cluster serves LFS. **That is the S3 adapter and not the FUSE mount ADR-0050 decides on**, and the
+reason is measured rather than assumed.
+
+ADR-0051 produces the mount with a privileged DaemonSet — the only shape Kubernetes allows, since
+kubelet rejects `mountPropagation: Bidirectional` on any container that is not privileged. It was
+built (`seaweedfs-mount.yaml`) and run here, and it does not work on this driver:
+
+| Observation | Value |
+|---|---|
+| the DaemonSet's own mount | `seaweedfs:8888:/gitfrok /mnt/seaweedfs fuse.seaweedfs rw,…` |
+| its propagation flag inside the pod | `shared:1550` |
+| the node's `/` propagation | `shared` |
+| **seaweed mounts in the node's table** | **0** |
+| what the consumers bound instead | the plain directory underneath |
+| what a write from `git-storaged` produced | `/mnt/seaweedfs/lfs/roundtrip.txt` **on node-local disk**, readable back on that node, invisible to the filer and to the mount pod |
+
+That last row is the whole problem: **every check passed while the data diverged.** `mountpoint -q`
+passed, a write-then-read gate passed, `objectstore.NewMount`'s writability probe passed. Only
+comparing three views — consumer, mount pod, filer — showed the objects were never in SeaweedFS at
+all. It is precisely the failure ADR-0050 and ADR-0051 exist to prevent, reproduced inside the checks
+meant to catch it.
+
+So the DaemonSet is **not applied by default**: `MOUNT_DAEMONSET=1 make dev-up` deploys it on a node
+whose driver propagates mounts, waits for it to serve bytes, and only then patches `git-storaged` and
+the data plane onto it — a `HostToContainer` hostPath of `type: Directory` and
+`GITFROK_SEAWEEDFS_MOUNT=/mnt/seaweedfs`, which the process prefers over the S3 variables. That
+patch is deliberately not in the committed manifests: a `type: Directory` hostPath in the tracked
+YAML would refuse to start both planes on every node without the DaemonSet, which is the default
+path here.
+
+**Each consumer gets an init container that refuses to start unless `/mnt/seaweedfs` is a
+`fuse.seaweedfs` mount in its own namespace** (ADR-0051 decision 3), and it is the load-bearing part
+of that patch. Nothing else catches the failure above: the DaemonSet's readiness proves only that
+`weed` serves its own mount inside its own namespace, `type: Directory` passes because the host
+directory exists whether or not anything is mounted over it, and `objectstore.NewMount` probes for a
+writable directory, which a plain host directory is. `smoke-dev.sh` reports the two claims
+separately for the same reason — the mount pod being Ready and the consumers actually having a
+propagated mount are not the same statement. ADR-0050 decision 6 keeps the S3 adapter for exactly this case —
+"how a deployment without a mount runs" — and this is that deployment. `smoke-dev.sh` reports which
+tier is in use rather than staying silent about it.
+
+Two other defects were found getting here, both by running it:
+
+1. **`weed mount` needs the filer's gRPC port, 18888, and the Service never exposed it.** SeaweedFS
+   derives it as HTTP+10000 and does not announce it; the HTTP port is used only to *look it up*.
+   The mount client retried `dial tcp …:18888: i/o timeout` indefinitely while the filer sat healthy
+   on 8888. Now in `seaweedfs.yaml`'s container ports and Service.
+2. **The S3 endpoint served every object to unsigned requests.** The credentials were attached to the
+   identity named `anonymous`, which is SeaweedFS's *unauthenticated* identity — so the keys were
+   decoration and the gateway was open to anyone who could reach `s3.gitsaas.test`. Tolerable while
+   nothing lived there; not once it became the large-object tier holding tenant LFS data. The
+   identity is now named `gitfrok`, and `s3.gitsaas.test` answers **403** to an unsigned request.
+
+Caught by running backend's live suite against this cluster, which is also the proof the tier works:
+
+```
+--- PASS: TestLiveSeaweedFSRoundTrip
+--- PASS: TestLiveSeaweedFSAbsentObject
+--- PASS: TestLiveSeaweedFSHonoursOurPresignedURL
+--- PASS: TestLiveSeaweedFSRefusesAnUnsignedRequest      # failed before the identity was renamed
+--- PASS: TestLiveSeaweedFSRefusesATamperedPresignedURL
+```
+
+```bash
+kubectl --context gitfrok port-forward -n default svc/seaweedfs 18333:8333 &
+cd backend && GITFROK_TEST_SEAWEEDFS_ENDPOINT=http://127.0.0.1:18333 \
+  GITFROK_TEST_SEAWEEDFS_BUCKET=gitfrok \
+  GITFROK_TEST_SEAWEEDFS_ACCESS_KEY=minioadmin GITFROK_TEST_SEAWEEDFS_SECRET_KEY=minioadmin \
+  go test ./platform/objectstore/ -run TestLiveSeaweedFS -count=1
+```
+
+**The bucket is created by `dev-up.sh` before anything can write.** SeaweedFS answers **200 to a PUT
+into a bucket that does not exist** and keeps nothing, and a bucket written to before it was
+registered stays poisoned — reads return `NoSuchBucket` permanently, with no repair but a new name.
+Both were found against a live gateway during T-0018.
+
+Live bare repositories are unaffected and stay on the block-backed PVC: ADR-0033 stands,
+`GITFROK_GIT_STORAGE_ROOT` points at the PVC, and `git-storaged` refuses a FUSE repository root
+outright (invariant 7).
 
 ### The Git tier and CI scaling, and what is not proven about them
 
