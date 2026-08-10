@@ -19,9 +19,11 @@ make dev-up         # Minikube dev cluster (*.gitsaas.test, mkcert TLS) — ADR-
 ```
 
 ## Where to look
+- **Picking up a session, or where things stand:** [`HANDOFF.md`](HANDOFF.md).
 - **Agents:** `AGENTS.md` (this repo), then `governance/AGENTS.md` + `governance/docs/`.
 - **Decisions (SoT):** `governance/docs/adr/README.md`.
 - **How work flows:** `governance/docs/process/agdd.md` (framework) + `agentic-sdlc.md` (loop).
 - **Topology & submodule workflow:** `governance/docs/architecture/04-repository-topology.md`.
+- **Deploy / run the dev cluster:** [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md).
 
 Configure real submodule URLs in `.gitmodules` (placeholders provided).
