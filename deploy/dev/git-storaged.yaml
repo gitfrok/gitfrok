@@ -1,0 +1,141 @@
+---
+# The Git storage tier (ADR-0004, SPEC-0015). T-0021 deployed the two planes and
+# left this out, because backend built no image for it: git-storaged executes git
+# as a subprocess and cannot ship from `scratch` like the planes do. ADR-0048
+# settled that, so it has an image and this is its workload.
+#
+# Without it the data plane's Git front doors have nothing to call, which is why
+# T-0021 left GITFROK_GIT_STORAGE_ADDR empty rather than pointing at a service
+# that was not there.
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-storaged
+  namespace: default
+  labels:
+    app: git-storaged
+    phase: "1"
+spec:
+  selector:
+    app: git-storaged
+  ports:
+  - name: grpc
+    port: 9000
+    targetPort: grpc
+    protocol: TCP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: git-storaged-repositories
+  namespace: default
+  labels:
+    app: git-storaged
+    phase: "1"
+spec:
+  # ADR-0033: live bare repositories stay on a block volume. SeaweedFS-FUSE was
+  # benchmarked and disqualified because its rename() is not atomic, and git
+  # renames a .lock over the ref on every update.
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-storaged
+  namespace: default
+  labels:
+    app: git-storaged
+    phase: "1"
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: this pod mounts a ReadWriteOnce PVC, so a rolling
+  # update would start the replacement while the old pod still holds the volume and
+  # the rollout would deadlock — the same defect the T-0003 first run found in four
+  # other manifests here.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: git-storaged
+  template:
+    metadata:
+      labels:
+        app: git-storaged
+        phase: "1"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+      - name: git-storaged
+        # Image mirrors deploy/dev/versions.env (GIT_STORAGED_IMAGE); dev-up.sh
+        # builds it into the node, so the manifest and the record agree.
+        image: docker.io/gitfrok/git-storaged:0.1.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GITFROK_GIT_STORAGE_ROOT
+          value: /var/lib/gitfrok/repositories
+        - name: GITFROK_GIT_STORAGE_LISTEN_ADDR
+          value: ":9000"
+        - name: GITFROK_POLICY_BUNDLE_DIR
+          value: /etc/gitfrok/policy
+        # Node identity for replica coordination (SPEC-0018). One node in dev, so
+        # it is its own sync replica; a real topology sets this per node.
+        - name: GITFROK_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        ports:
+        - name: grpc
+          containerPort: 9000
+          protocol: TCP
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        # git-storaged serves gRPC and no HTTP health endpoint, so the probe is a
+        # TCP connect. It is honest about what it proves: the listener is up.
+        livenessProbe:
+          tcpSocket:
+            port: grpc
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: grpc
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          # Not read-only: git writes lock files, temporary objects and hooks
+          # inside the repository tree, and git-storaged rewrites the pre-receive
+          # hook on every push. The repository volume below is the only writable
+          # path, and it is the one git needs.
+          readOnlyRootFilesystem: false
+        volumeMounts:
+        - name: repositories
+          mountPath: /var/lib/gitfrok/repositories
+        - name: policy
+          mountPath: /etc/gitfrok/policy
+          readOnly: true
+      volumes:
+      - name: repositories
+        persistentVolumeClaim:
+          claimName: git-storaged-repositories
+      - name: policy
+        configMap:
+          name: gitfrok-policy-bundle

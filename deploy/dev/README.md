@@ -12,9 +12,12 @@ Kubernetes manifests for the local Minikube dev environment per ADR-0024.
 > What is **not** verified is narrow and named: AC1's create path (blocked on one `sysctl`), AC3's
 > `*.gitsaas.test` routing from the host (blocked on rootless podman — the smoke test verifies the
 > ingress+TLS half and defers only host DNS to an operator `sudo` step), and AC4's macOS half. The
-> data plane (T-0021) mounts the policy bundle and is up on minikube; its git front doors wait on the
-> GitStorage tier (the T-0010/T-0012 seam) — see [What is not done yet](#what-is-not-done-yet).
-> See [What is not done yet](#what-is-not-done-yet).
+> data plane (T-0021) mounts the policy bundle and is up on minikube.
+>
+> **Added since that run and therefore unverified in a cluster:** the `git-storaged` workload, the
+> Git front doors now that it exists, KEDA, and the CI `ScaledObject`. Given that the first real run
+> of this directory cost nine defects, treat them as written-not-proven — see
+> [What is not done yet](#what-is-not-done-yet).
 
 ## Service Architecture
 
@@ -23,6 +26,8 @@ Local Services (Minikube + ingress-dns)
 ├── postgres:5432          — PostgreSQL 18 (tenancy + RLS, T-0004)
 ├── valkey:6379            — Valkey 9.1 (replaces Redis, ADR-0023)
 ├── redpanda:9092          — Redpanda v26.2 (event broker; ADR-0023 floor is 26.1)
+├── git-storaged:9000      — Git storage tier (ADR-0004/0048; the planes' Git front doors call it)
+├── keda (ns: keda)        — autoscales the data plane on CI queue depth (T-0017 AC2)
 │   ├── :8081              — Schema Registry
 │   ├── :8082              — PandaProxy (HTTP proxy)
 │   ├── :9644              — Admin API (readiness)
@@ -390,6 +395,26 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
 | AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified over the real ingress path, under rootless podman, with no `port-forward`** — `GET https://hello.gitsaas.test/` returns `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`) and the hello fixture, hitting `127.0.0.1:443`. **The previous conclusion here was wrong and is retracted:** it said the rootless node IP being unroutable meant AC3 "needs a rootful driver or KVM". It needed the node's 80/443 *published to the host* — `minikube start --ports=80:80,443:443`, which the podman driver supports and this script now passes by default (`MINIKUBE_PORTS`). Binding those ports rootless also needs `net.ipv4.ip_unprivileged_port_start=0`; the create path checks for it and prints the fix. Still root-requiring, and still not automated: the **host DNS** half. Until `*.gitsaas.test` resolves to `127.0.0.1`, the 200 above is reached with `curl --resolve`. |
 | AC4 — no OrbStack, no Docker Compose; macOS and Linux | **verified on both, 2026-08-09** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. The macOS half is no longer inference: a `macos-latest` lane in all five repos parses every tracked script under **bash 3.2.57** on `arm64-apple-darwin25` and runs the fitness gates against Darwin's **own BSD userland** — including `governance/scripts/check-docs.sh`, the gate the 2026-08 audit found would have aborted outright on macOS via `find -printf`. Two genuinely macOS-fatal defects had been found and fixed by the audit this replaces: that one, and `bench-storage.sh` using `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, leaving its RAM-disk guard **silently inert on macOS**. The audit is now a standing gate (`check-shell-portability.sh`, SPEC-0014) rather than something someone remembers to run. `sort -z` is **resolved**: Darwin accepts it, so it was never a defect — dropping it from `dev-up.sh` was still right, being cosmetic there. **What is not verified is a cluster bring-up on a Mac**, which needs a hypervisor a hosted runner has not got; see [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not). |
+
+### The Git tier and CI scaling, and what is not proven about them
+
+`git-storaged.yaml` and `ci-scaledobject.yaml` land after the T-0021 run that verified the two
+planes, so **neither has run in a cluster**. Four things about them are worth stating rather than
+leaving to be discovered:
+
+1. **`git-storaged` is the one first-party image with a base.** Its whole job is to execute git as a
+   subprocess, so it cannot ship from `scratch` (ADR-0048). Its root filesystem is also writable,
+   unlike the planes': git writes lock files, temporary objects and hooks inside the repository
+   tree, and git-storaged rewrites the `pre-receive` hook on every push.
+2. **The data plane's Git front doors are configured now** that there is something to call, which
+   also means the plane now needs the generated PAT verifier key — `dev-up.sh` upserts it as a
+   Secret rather than committing one.
+3. **The `ScaledObject` cannot yet demonstrate real autoscaling.** The dev job queue is in-process,
+   so each replica reports its own depth and a new replica starts empty. The scaler, the metric and
+   the trigger are correct; dividing the work needs the durable queue.
+4. **First-party images here are pinned by tag, not digest.** ADR-0035 decision 4 requires a digest.
+   The tag is what the verified T-0021 bring-up uses, so it is left alone rather than changed blind;
+   closing that gap is a follow-up, and it is a real one.
 
 ### The seven defects the first run found
 

@@ -1,0 +1,38 @@
+---
+# KEDA scales the data plane on CI queue depth (T-0017 AC2, SPEC-0020 AC3).
+#
+# The trigger is `metrics-api` rather than `prometheus` on purpose: the plane
+# already serves `ci_queued_jobs` in Prometheus exposition format, and the
+# metrics-api scaler reads that endpoint directly. A `prometheus` trigger would
+# need a Prometheus server in this cluster whose only job was to scrape one gauge
+# and hand it back.
+#
+# The honest limit, and why this is not yet the whole of AC2: the dev job queue is
+# in-process, so each replica reports the depth of *its own* queue and a new
+# replica starts empty. Scaling up therefore does not divide existing work. The
+# scaler, the metric and the trigger are correct and in place; dividing the work
+# needs the durable queue, and Redpanda is already in this cluster waiting for it.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: dataplane-ci
+  namespace: default
+  labels:
+    app: dataplane
+    phase: "1"
+spec:
+  scaleTargetRef:
+    name: dataplane
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  # Long enough that a burst of jobs does not thrash the plane, which also serves
+  # the Git front doors: scaling it is not free the way scaling a pure worker is.
+  pollingInterval: 15
+  cooldownPeriod: 120
+  triggers:
+  - type: metrics-api
+    metadata:
+      targetValue: "5"
+      url: "http://dataplane:9102/metrics"
+      valueLocation: "ci_queued_jobs"
+      format: "prometheus"
