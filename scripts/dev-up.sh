@@ -67,6 +67,16 @@ TLS_SECRET=gitsaas-tls
 WILDCARD='*.gitsaas.test'
 VERSIONS=deploy/dev/versions.env
 
+# The image tags this script builds and the manifests assert come from the one
+# record of truth (ADR-0023). check-dev-images.sh sources it; this script must
+# too, or the build_if_absent calls below trip `set -u` on the first undefined
+# variable. This was a latent bug in the T-0021 bring-up — the tags happened to
+# be in the environment that ran it.
+set -a
+# shellcheck disable=SC1090 # sourced path is a variable; the file is a data file, not a script
+. ./"$VERSIONS"
+set +a
+
 # The OPA bundle governance owns and the data plane loads. POLICY_SRC is a path into the governance
 # submodule — read, never written — and POLICY_ENV/POLICY_MOUNT are the contract a dataplane
 # manifest has to honour once one exists (backend/cmd/dataplane-app reads POLICY_ENV and exits
@@ -374,6 +384,8 @@ build_if_absent() { # build_if_absent <ref> <dockerfile> <context-dir>
 build_if_absent "$DATAPLANE_IMAGE" Dockerfile.dataplane backend
 build_if_absent "$CONTROLPLANE_IMAGE" Dockerfile.controlplane backend
 build_if_absent "$GIT_STORAGED_IMAGE" Dockerfile.gitstoraged backend
+build_if_absent "$BFF_IMAGE" Dockerfile bff
+build_if_absent "$WEBFRONTEND_IMAGE" Dockerfile webfrontend
 
 # The key the Git front doors verify PATs with. Generated and upserted like the
 # TLS certificate: a credential committed to the tree is a credential every clone
@@ -393,7 +405,7 @@ step "KEDA $KEDA_VERSION"
 "${KUBECTL[@]}" rollout status deployment/keda-operator -n keda --timeout="$DEFAULT_TIMEOUT"
 
 step "Applying manifests"
-for m in postgres valkey redpanda seaweedfs zitadel hello git-storaged dataplane controlplane ingress; do
+for m in postgres valkey redpanda seaweedfs zitadel hello git-storaged dataplane controlplane bff webfrontend ingress; do
   "${KUBECTL[@]}" apply -f "deploy/dev/$m.yaml"
 done
 

@@ -1,0 +1,110 @@
+---
+# T-0015: the BFF (Backend-for-Frontend), aggregation only (invariant 18).
+#
+# It is the web frontend's sole upstream (invariant 22): it shapes RepositoryReader
+# (git-storaged) results into the SPEC-0021 browser surface, serves the OIDC login
+# flow, and owns the browser session (ADR-0049). It never reaches a datastore and
+# never decides anything itself; every decision stays behind the backend's PDP.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  namespace: default
+  labels:
+    app: bff
+    phase: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bff
+  template:
+    metadata:
+      labels:
+        app: bff
+        phase: "1"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+      - name: bff
+        # Image mirrors deploy/dev/versions.env (BFF_IMAGE); dev-up.sh loads it
+        # into the node, so a tag here and the record agree.
+        image: docker.io/gitfrok/bff:0.1.0
+        imagePullPolicy: IfNotPresent
+        env:
+        # The data plane's policy door serves PDP, codereview, CI and OIDC on one
+        # gRPC listener (ADR-0041).
+        - name: GITFROK_PDP_ADDR
+          value: "dataplane:9090"
+        - name: GITFROK_REPOSITORY_READER_ADDR
+          value: "git-storaged:9000"
+        - name: GITFROK_BFF_LISTEN_ADDR
+          value: ":8080"
+        # OIDC login (ADR-0045). The issuer is Zitadel, which the dev cluster
+        # already deploys. The client is the BFF's own Zitadel application.
+        - name: GITFROK_OIDC_ISSUER
+          value: "https://zitadel.gitsaas.test"
+        - name: GITFROK_OIDC_CLIENT_ID
+          value: "bff"
+        - name: GITFROK_OIDC_REDIRECT_URI
+          value: "https://app.gitsaas.test/callback"
+        - name: GITFROK_OIDC_SCOPE
+          value: "openid profile email"
+        # ADR-0049 decision 5 names Valkey for the session store; the in-memory
+        # store is the dev posture until a shared store is wired.
+        - name: GITFROK_SESSION_STORE
+          value: "memory"
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "25m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff
+  namespace: default
+  labels:
+    app: bff
+    phase: "1"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: bff
