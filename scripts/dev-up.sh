@@ -97,7 +97,6 @@ DEPLOYMENTS="postgres valkey redpanda seaweedfs hello git-storaged dataplane con
 # Zitadel and its Login V2 UI get separate rollouts and budgets at the bottom of the rollout
 # section: first boot is init + migrations + FirstInstance setup (which also writes the
 # login-client PAT the login UI waits for).
-ZITADEL_DEPLOYMENTS="zitadel zitadel-login"
 OIDC_CM=gitfrok-oidc
 PAT_SECRET=gitfrok-pat-verifier
 S3_SECRET=gitfrok-seaweedfs-s3
