@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSIONS=deploy/dev/versions.env
-MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml"
+MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml"
 
 fail=0
 report() { echo "DEV-IMAGE DRIFT: $1"; fail=1; }
@@ -26,6 +26,13 @@ set -a
 . ./deploy/dev/versions.env
 set +a
 
+# First-party dev plane images are loaded into the cluster node by dev-up.sh
+# (minikube image build), not published to an external registry — exempt them
+# from registry resolution below, which would otherwise fail and block the
+# dev bring-up. They are still required entries above so the image recorded
+# in versions.env is the one asserted running on the cluster.
+FIRST_PARTY_IMAGES="$DATAPLANE_IMAGE $CONTROLPLANE_IMAGE"
+
 # One image per line, so comparison never depends on word splitting.
 expected_images() { # expected_images <manifest>
   case "$1" in
@@ -36,6 +43,12 @@ expected_images() { # expected_images <manifest>
     # Zitadel's db-wait init container is busybox, so this manifest legitimately carries two.
     zitadel.yaml)   printf '%s\n' "$ZITADEL_IMAGE" "$BUSYBOX_IMAGE" ;;
     hello.yaml)     printf '%s\n' "$BUSYBOX_IMAGE" ;;
+    # First-party plane images (T-0021): built and loaded into the cluster node
+    # by dev-up.sh, never published to an external registry for dev. Their
+    # resolution is exempted below; they are still required here so the image
+    # recorded in versions.env is the one asserted on the cluster.
+    dataplane.yaml) printf '%s\n' "$DATAPLANE_IMAGE" ;;
+    controlplane.yaml) printf '%s\n' "$CONTROLPLANE_IMAGE" ;;
     *) echo "unmapped manifest: $1" >&2; return 1 ;;
   esac
 }
@@ -118,6 +131,11 @@ if [ "${CHECK_IMAGE_RESOLVE:-0}" = "1" ]; then
   else
     while IFS= read -r ref; do
       [ -n "$ref" ] || continue
+      # First-party dev plane images live in the cluster node, not in an external registry —
+      # skip the probe that would flag them as missing (see FIRST_PARTY_IMAGES above).
+      case " $FIRST_PARTY_IMAGES " in
+        *" $ref "*) echo "  skip  first-party dev image: $ref"; continue ;;
+      esac
       if command -v skopeo >/dev/null; then
         probe=(skopeo inspect --raw "docker://$ref")
       elif command -v podman >/dev/null; then

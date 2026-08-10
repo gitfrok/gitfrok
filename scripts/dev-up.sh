@@ -82,7 +82,7 @@ KUBECTL=(kubectl --context "$PROFILE")
 
 # Deployments to wait on, and how long each gets. Zitadel runs schema migrations on first boot, so
 # it is slow in a way the others are not.
-DEPLOYMENTS="postgres valkey redpanda seaweedfs hello"
+DEPLOYMENTS="postgres valkey redpanda seaweedfs hello dataplane controlplane"
 ZITADEL_TIMEOUT=420s
 DEFAULT_TIMEOUT=240s
 
@@ -350,13 +350,31 @@ done < <(find "$POLICY_SRC" -name '*.rego' ! -name '*_test.rego' -print0)
 echo "revision $(sed -n 's/.*"revision"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
   "$POLICY_SRC/.manifest" | head -1), $policy_count policy file(s)"
 printf '  mount it at %s and set %s to that path.\n' "$POLICY_MOUNT" "$POLICY_ENV"
-printf '  No workload consumes it yet: deploy/dev/ has no dataplane manifest, and backend/ has no\n'
-printf '  Dockerfile to build one from. See deploy/dev/README.md ("Policy bundle").\n'
+printf '  The data plane (deploy/dev/dataplane.yaml) consumes this bundle: it fails fast without one.\n'
 
-# ---------------------------------------------------------------------------- workloads
-# Ingress last: it is the only object that depends on the Services and the TLS secret existing.
+# ----------------------------------------------------------------------- workloads
+# The data plane and control plane are first-party images, not published to an
+# external registry for dev — build them straight into the cluster node
+# (T-0021) and apply manifests last so every service they might depend on is
+# already declared. Ingress last: it depends on the Services and the TLS secret.
+step "Build and load first-party dev plane images (T-0021)"
+existing=$(minikube image ls -p "$PROFILE" 2>/dev/null || true)
+build_if_absent() { # build_if_absent <ref> <dockerfile> <context-dir>
+  local ref="$1" dockerfile="$2" ctx="$3"
+  if printf '%s\n' "$existing" | grep -qxF "$ref"; then
+    echo "  present: $ref"
+  else
+    echo "  building $ref from $ctx/$dockerfile into node"
+    if ! minikube image build -p "$PROFILE" -t "$ref" -f "$ctx/$dockerfile" "$ctx"; then
+      die "could not build $ref — see output above"
+    fi
+  fi
+}
+build_if_absent "$DATAPLANE_IMAGE" Dockerfile.dataplane backend
+build_if_absent "$CONTROLPLANE_IMAGE" Dockerfile.controlplane backend
+
 step "Applying manifests"
-for m in postgres valkey redpanda seaweedfs zitadel hello ingress; do
+for m in postgres valkey redpanda seaweedfs zitadel hello dataplane controlplane ingress; do
   "${KUBECTL[@]}" apply -f "deploy/dev/$m.yaml"
 done
 

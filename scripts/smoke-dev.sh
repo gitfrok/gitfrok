@@ -60,7 +60,7 @@ set +a
 
 # ------------------------------------------------------------------ AC2: workloads are up
 echo "AC2 — deployments Available"
-for d in postgres valkey redpanda seaweedfs zitadel hello; do
+for d in postgres valkey redpanda seaweedfs zitadel hello dataplane controlplane; do
   # .status.availableReplicas is absent (not 0) before the first pod is ready, hence the default.
   avail=$("${KUBECTL[@]}" get "deployment/$d" -n "$NS" \
             -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
@@ -80,7 +80,7 @@ running=$("${KUBECTL[@]}" get pods -n "$NS" -o \
   jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{range .spec.initContainers[*]}{.image}{"\n"}{end}{end}' \
   2>/dev/null | sed '/^$/d' | sort -u)
 expected=$(printf '%s\n' "$POSTGRES_IMAGE" "$VALKEY_IMAGE" "$REDPANDA_IMAGE" \
-  "$SEAWEEDFS_IMAGE" "$ZITADEL_IMAGE" "$BUSYBOX_IMAGE" | sort -u)
+  "$SEAWEEDFS_IMAGE" "$ZITADEL_IMAGE" "$BUSYBOX_IMAGE" "$DATAPLANE_IMAGE" "$CONTROLPLANE_IMAGE" | sort -u)
 
 unexpected=$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$running"))
 missing=$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$running"))
