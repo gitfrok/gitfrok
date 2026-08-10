@@ -4,7 +4,11 @@
 > `governance/` (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees with governance,
 > governance is right. Companion: `ROADMAP_PLANS_TASKS.md` (full detail).
 >
-> **Synced from governance pin `62f1c79` on 2026-08-11.**
+> **Synced from governance `main` on 2026-08-11, at governance PR #119 — which is not yet merged.**
+> The super-repo pin is still `62f1c79`, which predates it: at that commit T-0018 reads *In
+> progress*. The statuses below are therefore ahead of the pin **on purpose and only until #119
+> merges**, at which point this file's pin bump lands with the merged commit. Governance decides;
+> if #119 changes in review, this file follows it rather than the other way round.
 
 ## The four phases
 

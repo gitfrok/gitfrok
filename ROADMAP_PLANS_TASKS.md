@@ -5,7 +5,11 @@
 > this file disagrees with governance, **governance is right and this file is stale**. Re-derive it
 > rather than editing a status here.
 >
-> **Synced from governance pin `62f1c79` on 2026-08-11.**
+> **Synced from governance `main` on 2026-08-11, at governance PR #119 — which is not yet merged.**
+> The super-repo pin is still `62f1c79`, which predates it: at that commit T-0018 reads *In
+> progress*. The statuses below are therefore ahead of the pin **on purpose and only until #119
+> merges**, at which point this file's pin bump lands with the merged commit. Governance decides;
+> if #119 changes in review, this file follows it rather than the other way round.
 > Sources: `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md`,
 > `docs/tasks/T-*.md` (each task file's own `Status:` field), `docs/product/PRD.md`.
 
@@ -76,9 +80,9 @@ by T-0009, not scheduled.
 
 ## PLANS — execution strategy
 
-`governance/docs/plans/` holds **one plan file**, `phase-0-foundations.md`, plus its `README.md`
-index. There is no Phase-1, Phase-2 or Phase-3 plan; PRD §12.2 open item 1 records this, and notes
-the consequence — later phases are sequenced only by whatever individual task files state.
+`governance/docs/plans/` holds **two plan files** — `phase-0-foundations.md` and `phase-1-mvp.md` —
+plus its `README.md` index. There is still no Phase-2 or Phase-3 plan, so those phases are sequenced
+only by whatever individual task files state. PRD §12.2 open item 1 is half closed.
 
 ### Plan: Phase 0 — Foundations
 
@@ -109,8 +113,8 @@ why T-0007 is in Phase 0 rather than later.
 policy/isolation + fitness-function tests; `make dev-up` brings the stack up on `*.gitsaas.test`.
 The plan now attributes each half of that CI line to a workstream, because "runs green" reads as
 already satisfied and is not: boundary + fitness → T-0002/T-0009 (done); contract → T-0020 (done);
-unit + policy/isolation → T-0004/T-0005/T-0006 (**done 2026-08-06**); `make dev-up` → T-0003 (in progress — it has
-now run on a cluster; AC2 and AC4 verified, AC1's create path and AC3's DNS path still open).
+unit + policy/isolation → T-0004/T-0005/T-0006 (**done 2026-08-06**); `make dev-up` → T-0003 (**done** —
+the full stack comes up and `make dev-smoke` is green; host DNS remains a manual root step).
 
 ---
 
@@ -125,7 +129,7 @@ against `docs/backlog/README.md`. **Owner is `unassigned` on every task** — no
 |---|---|---|---|---|---|---|
 | T-0001 | Scaffold super-repo + submodules | **Done** | EP-0 | super-repo + all four | chore | 0027, 0025, 0022, 0023, 0028 |
 | T-0002 | Boundary/arch enforcement in CI | **Done** | EP-0 | backend + bff + super-repo | chore | 0022, 0025, 0026, 0027, 0031 |
-| T-0003 | Minikube dev environment | **In progress** — AC2+AC4 verified | EP-1 | super-repo (`Makefile`, `deploy/dev/`) | chore | 0024, 0023 |
+| T-0003 | Minikube dev environment | **Done** — AC1–AC4 verified | EP-1 | super-repo (`Makefile`, `deploy/dev/`) | chore | 0024, 0023 |
 | T-0004 | Tenancy + RLS baseline | **Done** | EP-2 | backend | SPEC-0001 | 0003, 0022, 0007 |
 | T-0005 | PDP skeleton (OPA) | **Done** | EP-2 | governance → backend → bff | SPEC-0002 | 0006, 0022 |
 | T-0006 | Append-only audit log | **Done** | EP-2 | governance → backend | SPEC-0003 | 0007, 0022 |
@@ -236,7 +240,8 @@ them into EP-4…EP-8 as shown here; T-0018 is the exception — its own field a
 | T-0021 | Container images for both planes | EP-4 | backend + bff + webfrontend | — | 0035, 0044, 0048 |
 
 **T-0018 closed 2026-08-11 and was Phase 1's last task** — 23 of 24 criteria met, AC19
-(bidirectional sync back to the source) moved to Phase 2. Imported history is `ATTESTED_IMPORT`: it
+— the evidence-pack criterion, SPEC-0011 AC14 — moved to Phase 2. Imported history is
+`ATTESTED_IMPORT`: it
 never enters the audit log, and imported approvals never satisfy a merge policy. Its storage half
 produced **ADR-0050 (Accepted)**, which narrows ADR-0020 — LFS objects, CI artifacts and
 container-image blobs come from a SeaweedFS FUSE mount, transfers proxy through the plane because a

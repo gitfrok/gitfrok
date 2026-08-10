@@ -4,7 +4,11 @@
 > `governance/`, which is authoritative (ADR-0001; super-repo `AGENTS.md` rule 4). If this disagrees
 > with governance, governance is right.
 >
-> **Synced from governance pin `62f1c79` on 2026-08-11.**
+> **Synced from governance `main` on 2026-08-11, at governance PR #119 — which is not yet merged.**
+> The super-repo pin is still `62f1c79`, which predates it: at that commit T-0018 reads *In
+> progress*. The statuses below are therefore ahead of the pin **on purpose and only until #119
+> merges**, at which point this file's pin bump lands with the merged commit. Governance decides;
+> if #119 changes in review, this file follows it rather than the other way round.
 
 ## Where to start
 
@@ -43,7 +47,7 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │       ├── product/PRD.md            product requirements (PR-#); restates ADRs, never decides
 │       ├── specs/                    SPEC-0001…SPEC-0011 + _template.md
 │       ├── roadmap/README.md         four phases + exit criteria
-│       ├── plans/                    README.md + phase-0-foundations.md  ← no phase-1/2/3 plan yet
+│       ├── plans/                    README.md + phase-0-foundations.md + phase-1-mvp.md
 │       ├── backlog/README.md         epics EP-0…EP-9
 │       ├── tasks/                    T-0001…T-0018, T-0020 + README + _template.md
 │       ├── process/                  agdd.md · agentic-sdlc.md · definition-of-done.md
@@ -61,6 +65,7 @@ gitfrok-rev4/                         super-repo — pins + orchestration only (
 │                                     scripts/check-boundaries.sh = TS half of invariant 22,
 │                                     run by its CI gate (required on main since 2026-08-05)
 │
+├── deploy/MVP-RUNBOOK.md             clean host → running MVP; the manual steps and the real limits
 ├── deploy/dev/                       Minikube dev environment (T-0003, ADR-0024)
 │   ├── postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml
 │   ├── ingress.yaml                  *.gitsaas.test over TLS — the only externally reachable path
@@ -95,7 +100,7 @@ Every status below is the task file's own `Status:` field.
 |---|---|---|---|
 | 0 — Foundations | T-0001…T-0009 + T-0020 (10) | **all ten** | — |
 | 1 — MVP | T-0010…T-0018 + T-0021 (10) | **all ten** | — |
-| 2 — the wedge | none defined | — | backlog: *to be expanded*, plus T-0018's AC19 (bidirectional sync to the source), moved here 2026-08-11 |
+| 2 — the wedge | none defined | — | backlog: *to be expanded*, plus T-0018's AC19 (the evidence-pack criterion — SPEC-0011 AC14, ADR-0029 §4), moved here 2026-08-10 and recorded under EP-8 |
 | 3 — BYO | none defined | — | backlog: *to be expanded* |
 
 **Every task in both defined phases is Done, and Phase 1 has still not exited.** Its second exit

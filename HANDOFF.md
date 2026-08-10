@@ -6,8 +6,8 @@ complete pack so any agent picks up the same rules.
 ## Where the work stands (2026-08-11)
 
 **Phase 0 is Closed. Every Phase-1 task — T-0010…T-0018 plus T-0021 — is Done.** T-0018 was the last
-of them, closed 2026-08-11 with 23 of its 24 acceptance criteria met and AC19 (bidirectional sync
-back to the source) formally moved to Phase 2.
+of them, closed 2026-08-11 with 23 of its 24 acceptance criteria met and AC19 — the **evidence-pack**
+criterion — formally moved to Phase 2, because no evidence-pack surface exists yet to satisfy it.
 
 Phase 1 is **not** exited. Its first exit criterion is met; the second is not, and that is the whole
 of the remaining work:
