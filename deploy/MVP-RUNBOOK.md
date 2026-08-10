@@ -130,9 +130,8 @@ kubectl --context gitfrok exec -i deploy/postgres -- \
   psql -U postgres -d gitfrok < backend/modules/audit/internal/adapters/postgres/migrations/0001_audit_log.sql
 ```
 
-Two sources of schema truth across two schemas is a known gap, recorded in `DOCUMENTATION_INDEX.md`
-under *Known governance gaps*. Do not close it by editing the manifest — that would make the drift
-harder to see, not smaller.
+Two sources of schema truth across two schemas is a known gap (`../HANDOFF.md`). Do not close it by
+editing the manifest — that would make the drift harder to see, not smaller.
 
 **The application must connect as `gitfrok_app`**, never as `postgres`. RLS does not bind a superuser
 and does not bind the table owner unless forced; a DSN pointing at `postgres` makes tenant isolation

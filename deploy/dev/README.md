@@ -163,67 +163,28 @@ they reference rules that exist only to be tested, and including them can fail c
 
 ## Why Redpanda is pinned on docker.io
 
-`REDPANDA_IMAGE` moved from `docker.redpanda.com/redpandadata/redpanda:v26.2.1` to
-`docker.io/redpandadata/redpanda:v26.2.1`. Same tag, same version — different registry, and it cuts
-against what ADR-0034 assumed, so the reason is recorded here rather than left to a diff.
+`REDPANDA_IMAGE` is `docker.io/redpandadata/redpanda:v26.2.1`, not the vendor's own
+`docker.redpanda.com` that ADR-0034 preferred — recorded here because it cuts against that ADR's
+example rather than following it.
 
-ADR-0034 preferred the vendor's own distribution point, noting that `redpandadata/redpanda` on Docker
-Hub "is a mirror subject to Docker Hub's rate limits and retention". That reasoning is sound in
-general and turned out to be **backwards for this image**: `docker.redpanda.com` answers an
-unauthenticated manifest query with
-
-```
-toomanyrequests: You have reached your unauthenticated pull rate limit.
-```
-
-so it appears to sit behind Docker Hub and inherit exactly the limit ADR-0034 was trying to avoid.
-
-A rate-limit error alone would be thin evidence — it could be transient. Two things make it structural,
-and they are the reason to trust this rather than the error message:
-
-```
-$ dig +short docker.redpanda.com
-vectorized.docker.scarf.sh.                     # a Docker-Hub-fronting proxy
-
-$ curl -sSI https://docker.redpanda.com/v2/redpandadata/redpanda/manifests/v26.2.1
-www-authenticate: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",…
-```
-
-The vendor endpoint delegates authentication to Docker Hub's own registry, so pulls through it are
-Docker Hub pulls with an extra hop. ADR-0034's premise — that these are two independent distribution
-channels with different limits — does not hold for this image.
-The practical consequence is that ADR-0034's own **rule 4 — resolvability is checked, not assumed** —
-could not be satisfied there: `check-dev-images.sh` reported `?? inconclusive` for every run. On
-`docker.io` the same tag reports `ok resolves`. A pin that can be verified beats a pin from a
-preferred registry that cannot, which is the spirit of the ADR even where it contradicts its example.
-
-The mirror's retention risk is unchanged and real; the resolvability probe is what turns a deleted or
-retagged upstream into a red build instead of a deploy-time 404.
+`docker.redpanda.com` turned out to be **backwards for this image**: it answers an unauthenticated
+manifest query with `toomanyrequests: You have reached your unauthenticated pull rate limit`, and
+`dig`/`curl` show why — it resolves to a Docker-Hub-fronting proxy (`vectorized.docker.scarf.sh`) and
+delegates auth to `auth.docker.io`. It is a Docker Hub pull with an extra hop, not an independent
+distribution channel, so it inherits exactly the rate limit ADR-0034 wanted to avoid — and fails
+ADR-0034's own rule 4 (resolvability checked, not assumed): `check-dev-images.sh` reported
+`?? inconclusive` against it on every run. The same tag on `docker.io` resolves clean. A pin that
+verifies beats a preferred registry that cannot, which is the ADR's spirit even where it contradicts
+its example. The mirror's retention risk is unchanged; the resolvability probe is what turns a
+deleted or retagged upstream into a red build instead of a deploy-time 404.
 
 ### Redpanda refuses downgrades — clearing the PVC is the only way down
 
-Found on 2026-08-08 while briefly pinning to `v26.1.15`. The pod crash-looped, and the cause was not
-the tag:
-
-```
-application_bootstrap.cc:656 - Incompatible downgrade detected!
-My version 18, feature table 19 indicates that all nodes in cluster were previously >= that version
-```
-
-Quoted verbatim from `kubectl logs` of the crash-looping pod, which was running **v26.1.15** — the
-`:656` is that build's line number. Review flagged it as wrong on the grounds that the call sits at
-line 626 in **v26.2.1**'s source, which is a different build: the process that logged this was the
-26.1.15 binary refusing to start, not the 26.2.1 one. Noting the check and why it does not apply, so
-nobody re-opens it.
-
-Redpanda records a feature-table version in its data directory and **refuses to start** against data
-written by a newer release. Consequences worth knowing before someone tries this again:
-
-- Moving a Redpanda pin **down** a minor requires deleting `redpanda-pvc`. There is no in-place path,
-  and the failure is a crash loop rather than a clear startup refusal in the rollout output.
-- Moving **up** is fine — `v26.1.15 → v26.2.1` rolled out with the existing volume untouched.
-- In this dev cluster the PVC holds no application data (nothing consumes the broker yet — there is no
-  dataplane), so clearing it costs nothing. That will stop being true once something produces to it.
+Moving the pin **down** a minor (`v26.2.1 → v26.1.15`) crash-loops on
+`Incompatible downgrade detected! My version 18, feature table 19 indicates that all nodes in cluster
+were previously >= that version` — Redpanda records a feature-table version in its data directory and
+refuses to start against data a newer release wrote. There is no in-place path down; delete
+`redpanda-pvc` first. Moving **up** is fine and rolls out on the existing volume untouched.
 
 ## Resource Allocation (Minikube Local Dev)
 
@@ -374,13 +335,13 @@ set is an OOMKill rather than an eviction.
 `/etc/redpanda` replaces the config the image generates and makes it read-only to the `rpk` startup
 path. Advertised addresses use the Service name so clients survive rescheduling.
 
-**SeaweedFS (`seaweedfs.yaml`)** — master + filer + S3 in one pod (`weed all`). There is no
-`s3.gitsaas.test` Service: Service names must be RFC 1035 labels, so a dotted name is rejected
-outright, and it would not have produced that hostname anyway. Use `seaweedfs:8333` in-cluster or
-the ingress host from outside. The `s3_config.json` credentials `minioadmin`/`minioadmin` are
-attached to the identity named `anonymous`, which is SeaweedFS's *unauthenticated* identity — as
-written the S3 endpoint is open Read/Write/List without credentials. Acceptable for a local cluster,
-not a model for anything else.
+**SeaweedFS (`seaweedfs.yaml`)** — master + filer + S3 in one pod (`weed server -filer -s3`). There
+is no `s3.gitsaas.test` Service: Service names must be RFC 1035 labels, so a dotted name is rejected
+outright, and it would not have produced that hostname anyway. Use `seaweedfs:8333` in-cluster or the
+ingress host from outside. The `s3_config.json` credentials `minioadmin`/`minioadmin` are attached to
+the identity named `gitfrok`, **not** `anonymous` (SeaweedFS's unauthenticated identity) — see
+[the object tier](#the-object-tier-wired-to-s3-because-the-fuse-mount-cannot-propagate-here) for why
+that rename mattered.
 
 **Zitadel (`zitadel.yaml`)** — OIDC/OAuth2 provider for T-0013. Runs `start-from-init`, which is
 idempotent: first boot creates its schema and the `FirstInstance` org, later restarts skip setup.
@@ -513,158 +474,50 @@ leaving to be discovered:
    The tag is what the verified T-0021 bring-up uses, so it is left alone rather than changed blind;
    closing that gap is a follow-up, and it is a real one.
 
-### The seven defects the first run found
+### Defects found bringing this cluster up
 
-Each was invisible to review and to `check-dev-images.sh`, because nothing had executed:
+All ten were invisible to review and to `check-dev-images.sh`, because nothing had executed. #1–7
+came from the first cluster run (2026-08-06); #8–10 needed a *create* path that had never once run to
+completion, which only surfaced on 2026-08-08 once #9 stopped blocking it:
 
-| # | Defect | How it failed |
+| # | Defect | How it failed → fix |
 |---|---|---|
-| 1 | postgres PVC mounted at `/var/lib/postgresql/data` | pg18 stores data in major-version subdirectories and **exits** rather than ignore that mount: *"there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)"*. Fixed to a single mount one level up (docker-library/postgres#1259). |
-| 2 | `redpandadata/redpanda:v26.1` | never published — the registry answers `not found`. The v26.1 **series** exists (v26.1.2…v26.1.14) but Redpanda tags patch releases only, so there is no floating minor tag to pin. Now `docker.io/redpandadata/redpanda:v26.2.1` — see [Why Redpanda is pinned on docker.io](#why-redpanda-is-pinned-on-dockerio). |
-| 3 | seaweedfs `args: [all, …]` | `weed: unknown subcommand "all"`. The set is `master\|volume\|filer\|s3\|server`; combined mode is `server`, and `-filer` must be asked for explicitly or nothing serves `filer.gitsaas.test:8888`. |
-| 4 | zitadel `--tls-mode=external` | `Error: unknown flag`. The flag is `--tlsMode` — camelCase. |
-| 5 | seaweedfs readiness `path: /status` | 404s on the master (*"volume id status not found"*), so the pod never became Ready and the rollout blocked forever. `/cluster/status` is the health endpoint and returns `{"IsLeader":true,…}`. |
-| 6 | zitadel `Port` config | Kubernetes injects `<SVC>_PORT=tcp://<ip>:<port>` for every Service in the namespace. The Service is named `zitadel`, Zitadel's config reader consumes `ZITADEL_`-prefixed env vars, so it received `ZITADEL_PORT=tcp://10.97.6.84:8080` where it wanted a `uint16`. Fixed with `enableServiceLinks: false`. **Only visible after #4** — the unknown-flag error killed it before config parsing. |
-| 7 | RWO PVCs with the default `RollingUpdate` | the replacement pod starts while the old one still holds the volume: redpanda died with *"failed to lock pidfile. already locked"*, and the rollout deadlocks — the old pod will not terminate until the new is Ready, and the new cannot be Ready until the old lets go. `strategy: Recreate` added to postgres, valkey, redpanda and seaweedfs (zitadel already had it). Redpanda's *first* rollout squeaked through, which is worse than a clean failure because it hides the bug. |
+| 1 | postgres PVC at `/var/lib/postgresql/data` | pg18 **exits** on that mount (data belongs one level up; docker-library/postgres#1259) → mounted one level up |
+| 2 | `redpandadata/redpanda:v26.1` | never published — Redpanda tags patch releases only, no floating minor → pinned `docker.io/redpandadata/redpanda:v26.2.1` (below: [why `docker.io`](#why-redpanda-is-pinned-on-dockerio)) |
+| 3 | seaweedfs `args: [all, …]` | `weed: unknown subcommand "all"` → `server` + `-filer` |
+| 4 | zitadel `--tls-mode=external` | flag is camelCase → `--tlsMode` |
+| 5 | seaweedfs readiness `path: /status` | 404s on the master, rollout never Ready → `/cluster/status` |
+| 6 | zitadel `Port` config | Kubernetes' `ZITADEL_PORT` service-link env collides with Zitadel's own `ZITADEL_` prefix → `enableServiceLinks: false` |
+| 7 | RWO PVCs, default `RollingUpdate` | new pod starts before the old releases the volume; rollout deadlocks → `strategy: Recreate` on all four stateful deployments |
+| 8 | `dev-up.sh` didn't converge a **failed** create | minikube's retry drops the container but leaves the podman volume, so attempt two dies on `volume already exists` and the profile is stuck taking the create branch forever → `minikube delete` a non-running profile before creating |
+| 9 | `fs.inotify.max_user_instances` exhausted | Fedora ships 128; a GUI session had ~114 in use, so PID 1 in the node gets none and exits → preflight check on the create path, prints the `sysctl` fix |
+| 10 | `dev-up.sh` never passed `--container-runtime` | minikube 1.35 defaults to docker, which fails to provision → `MINIKUBE_RUNTIME=containerd` (the default here) |
 
-One script change came with them: `dev-up.sh` called `mkcert -install` under `set -e`. That step writes
-the **system** trust store and needs root, so on a host without passwordless sudo it aborted the whole
-bring-up before applying a single manifest — over a step no acceptance criterion depends on
-(`smoke-dev.sh` validates with `--cacert` against `rootCA.pem`). It now warns and continues when the CA
-exists, matching how the script already treats host DNS: print the root-requiring step, don't do it.
+One more, found in passing: `mkcert -install` ran under `set -e` and aborted the whole bring-up on a
+host without passwordless sudo, over a step no acceptance criterion depends on. It now warns and
+continues when the CA already exists.
 
-### What is verified about macOS, and what is not
+### macOS: what's actually verified
 
-AC4 says "works on macOS and Linux". Its evidence used to be a grep for bash-4 features, which tests
-the **shell** and ignores the **userland**. macOS has both an old bash (3.2.57) and a BSD userland, and
-both audits below were needed. Stated precisely, because the previous record read as more complete than
-it was:
+AC4 needs both an old **shell** (bash 3.2.57) and a BSD **userland** proven, not just grepped for.
 
-| Claim | Status | How |
-|---|---|---|
-| No OrbStack, no Docker Compose anywhere | **verified** | every mention in the tree is a prohibition |
-| No bash-4 *syntax* | **verified** | all 15 scripts across the four repos pass `bash -n` under bash 3.2.57 |
-| No bash-4 *behaviour* in the fitness gates | **verified** | `check-dep-direction`, `check-version-floors`, `check-dev-images`, webfrontend's `check-boundaries`, governance's `check-docs` all *executed* under bash 3.2.57 and pass |
-| No GNU-only tool flags | **two defects found and fixed** | audit of `grep -P`, `readlink -f`, `find -printf`, `date -d`, `stat -c`, `base64 -w`, `xargs -d`, `tac`, `sha256sum`, `sed -i`, `sort -z` — now a standing gate, `check-shell-portability.sh` (SPEC-0014), not a person's grep |
-| The scripts run on a Mac | **verified 2026-08-09** | a `macos-latest` CI lane in all five repos: bash 3.2.57 on `arm64-apple-darwin25`, against Darwin's own BSD userland |
-| The dev cluster comes up on a Mac | **NOT VERIFIED** | needs a hypervisor; a hosted runner has none, so `dev-up.sh` and `smoke-dev.sh` are parsed there and not executed |
+| Claim | Status |
+|---|---|
+| No OrbStack, no Docker Compose anywhere | verified — every mention in the tree is a prohibition |
+| No bash-4 syntax or GNU-only behaviour in the fitness gates | verified — a `macos-latest` lane in all five repos runs them under real bash 3.2.57 on Darwin's own BSD userland |
+| No GNU-only tool flags (`grep -P`, `find -printf`, `date -d`, `stat -c`, …) | **two real defects found and fixed** — `check-docs.sh`'s `find -printf` and `bench-storage.sh`'s `stat -f -c` (its failure was swallowed by `2>/dev/null`, leaving the guard silently inert); now a standing gate, `check-shell-portability.sh` |
+| `seq`, `sort -z` | fine as written — Darwin ships both; two earlier worries that running the gate for real showed were unfounded |
+| `date +%N` (`bench-git-workload.sh`) | known, self-guarded — the script exits with a clear message without GNU `date` |
+| The dev cluster comes up on a Mac | **NOT verified** — needs a hypervisor no hosted runner has |
 
-**The bash 3.2 container was never a BSD userland, and it is no longer what any of this rests on.**
-It is Alpine + busybox — an independent minimal reimplementation with no lineage to Darwin's tools —
-so it could only ever prove that the replacements work without GNU extensions. That was worth proving
-and was not the same as proving macOS behaviour. The macOS lane now proves the macOS behaviour
-directly, and the gate refuses to report success unless it can establish that the bash really was 3.2
-and `find`, `stat`, `sed`, `readlink` and `date` really were the system BSD ones — because a runner
-that put Homebrew's GNU coreutils ahead of `/usr/bin` would otherwise quietly turn the whole lane
-into a second Linux lane.
+The macOS lane replaced a bash-3.2-in-an-Alpine-container audit, which could prove GNU-extension-free
+shell but nothing about Darwin's actual `find`/`stat`/`sed`/`date` — the lane checks it really is
+running those before it will report success.
 
-### The register, settled (2026-08-09)
-
-Three rounds of review each found something the previous round's audit had claimed to cover, so this
-section stopped claiming completeness and kept a register of constructs whose macOS behaviour was
-**unverified**. Every row gave the same reason — no macOS host — and that reason expired when the
-macOS lane landed. Each was probed on Darwin rather than argued about:
-
-| Construct | Where | Status |
-|---|---|---|
-| `seq` | `bench-git-workload.sh`, `bench-storage.sh`, `governance/scripts/check-policy-composition.sh` (14 uses) | **present and correct.** `/usr/bin/seq` on Darwin, and `seq 1 3` returns `1 2 3`. The worry was that macOS ships only `jot`, which would have made `for x in $(seq …)` run **zero** iterations under `set -e` rather than fail — the silent-wrong-answer shape. It was right not to rewrite 14 call sites on an unverifiable claim: the claim was wrong. |
-| `date +%N` | `bench-git-workload.sh` | **known limit**, self-guarded — the script exits with a clear message without GNU `date`. macOS-*parseable*, not macOS-*runnable*, and the portability gate declares it on every run rather than omitting it. |
-| `sort -z` | removed from `dev-up.sh` | **accepted by Darwin**, as FreeBSD-derived `sort` does — so never a macOS defect. Removing it was still right: it was cosmetic there and cost nothing. |
-
-**What the register is worth in hindsight.** Two of its three rows were worries that turned out to be
-unfounded, and one was a genuine limit that was already self-guarding. That is not an argument for
-worrying less — the same discipline found `find -printf` and a silently-inert `stat -c`, both real and
-both fatal — but it is a reason to prefer *probing* over *reasoning* the moment a probe becomes
-available. Both of these had been arguable for weeks and took one CI step each to settle.
-
-Two defects were found *and fixed*: `find -printf` (governance `check-docs.sh`) and `stat -f -c`
-(`bench-storage.sh`). A third, `find -lname` in this repo's `dev-up.sh`, was fixed on the same day and
-is **not** a macOS bug — macOS has no `/proc`, so the block is skipped entirely. It was a *non-GNU
-Linux* bug: BusyBox rejects `-lname`, and inside a pipeline under `set -euo pipefail` that killed the
-whole script with no message. Replaced with POSIX `-type l -exec readlink {} +` and a `|| true`, which
-returns the identical count (116 on the dev host) and survives BusyBox.
-
-**That was written as "the only thing that will settle macOS is running these scripts on a Mac", and
-it was correct.** They now run on a Mac, on every PR, in all five repos. What is left unsettled is
-narrower and is stated in the table above: a *cluster bring-up* on a Mac, which needs a hypervisor a
-hosted runner has not got.
-
-### The two defects the create-path attempt found (2026-08-08)
-
-The first run could not test cluster creation, because a cluster already existed. Pointing `dev-up.sh`
-at a profile it had to make itself found two more defects — and neither is in the manifests, which is
-why the first run's seven-fix sweep could not have caught them:
-
-| # | Defect | How it failed |
-|---|---|---|
-| 8 | **`dev-up.sh` does not converge a *failed create*.** | Its header promises "every step converges rather than creates, so re-running this is the normal way to repair a half-up cluster". That was true of a running cluster and false of a half-created one. minikube's own in-run retry deletes the failed **container** but leaves the podman **volume**, so attempt two died on `volume with name gitfrok already exists` — and left the profile registered but unusable (`STATUS` blank, runtime `docker` instead of `containerd`), so *every* later run would take the create branch and fail identically. Worse, the stale-volume error is what surfaced to the operator, naming nothing about the real cause. Fixed: the script now `minikube delete`s a non-running profile before creating, which is what removes both container and volume. |
-| 9 | **The real cause was `fs.inotify.max_user_instances`.** | Fedora ships **128**; a GUI login session had ~114 in use. The node runs systemd as PID 1, which needs its own inotify instances and got none: *"Failed to create control group inotify object: Too many open files … Failed to allocate manager object"*, then `Exiting PID 1`. Not exotic — any Fedora desktop hits it. Fixed as a **preflight check on the create path only** (a running cluster has already paid the cost), which prints the exact `sysctl` and stops before pulling images rather than after. Raising it needs root, so the script prints and does not do — same convention as host DNS and `mkcert -install`. |
-
-Both were latent in a script that had "run end to end" once. The first run exercised the *converge*
-branch; nothing had ever exercised the *create* branch, and that is where both of these lived.
-
-### The create path completed (2026-08-08), and cost a third defect
-
-With `fs.inotify.max_user_instances=512` applied, `dev-up.sh` was pointed at a deleted `gitfrok`
-profile again. It failed a second time, on something only a create that gets *past* inotify can reach:
-
-| # | Defect | How it failed |
-|---|---|---|
-| 10 | **`dev-up.sh` never passed `--container-runtime`.** | minikube 1.35 defaults to **docker**, so provisioning installed and started `dockerd` inside the node — `Job for docker.service failed because the control process exited with error code`, then `StartHost failed`, then minikube's retry hit the stale-volume trap above and exited `GUEST_PROVISION`. This README has documented `--container-runtime=containerd` since the first bring-up; the script disagreed with it, and the existing cluster was containerd only because it had been created by hand from these docs. A disagreement between a script and its own README survived because the script's create branch had never once run to completion. Fixed: `MINIKUBE_RUNTIME`, defaulting to `containerd`. minikube's own notice says it flips to containerd at v1.39.0 — pinning it means this behaves identically either side of that. |
-
-The third attempt came up clean: node created, both addons enabled, mkcert wildcard installed, policy
-bundle published, all six deployments Available, `dev-up: OK`. **AC1 is verified.** Re-running it on
-the now-running cluster exits 0 and changes nothing, so the converge branch still converges.
-
-One more thing was fixed in passing: `minikube delete` only removes the podman volume while minikube
-still knows the profile exists. Once the registration is gone the volume is orphaned and *nothing*
-cleaned it, so the create failed with `volume with name gitfrok already exists` and no hint that a
-previous run was the cause. There is now an explicit orphan-volume sweep against podman and docker.
-
-### AC3 did not need a different host — it needed the ports published
-
-The previous record concluded that AC3's specified path required a rootful driver or KVM, on the
-evidence that the node IP is unroutable from the host under rootless podman (`ping 192.168.49.2` 100%
-loss, `--resolve` to it `rc=28`). **That conclusion was wrong.** The observation was right; the
-inference from it was not. The node's 80/443 can simply be published to the host —
-`minikube start --ports=80:80,443:443`, supported by the podman driver — and then ingress is reachable
-on `127.0.0.1` with no `port-forward` and no rootful anything:
-
-```
-GET https://hello.gitsaas.test/   http_code=200  ssl_verify_result=0  remote=127.0.0.1:443
-body: gitfrok dev cluster: hello over TLS
-```
-
-`dev-up.sh` now passes this by default via `MINIKUBE_PORTS`; set it empty to opt out. Binding 80/443
-as a non-root user needs `net.ipv4.ip_unprivileged_port_start=0`, so the create path checks that
-sysctl and dies with the fix rather than letting `minikube start` fail on an opaque bind error.
-
-`smoke-dev.sh` was pinning its `--resolve` fallback to the node IP alone, which is why it reported
-`rc=28` and fed the wrong conclusion. It now tries `127.0.0.1` first and the node IP second, and its
-message names which one worked.
-
-The lesson worth keeping: *"the node IP is unroutable"* is an observation. *"So this needs a different
-host"* was an inference, and it went into the record with the same confidence as the measurement.
-
-Also outstanding:
-
-- **AC3's host-DNS half is still manual and still needs root.** `*.gitsaas.test` does not resolve;
-  the 200 above is reached with `curl --resolve`. `dev-up.sh` prints the per-OS snippet — and now
-  points it at `127.0.0.1` rather than the node IP when ports are published, because a resolver aimed
-  at an unroutable address resolves fine and then times out, which reads as a broken cluster.
-- ADR-0024 says the same Minikube flow is used in CI; nothing wires that yet, and super-repo CI has
-  `contents: read` with no cluster. `check-dev-images.sh` is the only part of this that CI gates.
-- ~~`ZITADEL_IMAGE` is `:latest`~~ **closed 2026-08-06 (ADR-0034)**: pinned to `v4.16.2`, the version
-  this cluster resolved, and `:latest` is now a hard failure rather than a warning. Every pin is
-  fully qualified with its registry, and `CHECK_IMAGE_RESOLVE=1` asserts each one resolves — the check
-  that would have caught `redpanda:v26.1` for one registry request instead of a cluster run
-- The scripts default to profile `gitfrok`; a cluster created by hand as `minikube` needs
-  `MINIKUBE_PROFILE=minikube`. `smoke-dev.sh` now says so in one line instead of reporting six
-  dead deployments — every query in it is `2>/dev/null || true`, so a nonexistent context used to be
-  indistinguishable from a cluster whose services had all failed
-- the unused Zitadel PVC; `namespace: default` hardcoded in all 24 objects, so two stacks cannot
-  coexist; Valkey has no `maxmemory`; SeaweedFS's S3 endpoint is open
-- per-OS Minikube driver docs (an ADR-0024 follow-up)
+Also outstanding: no CI wires this Minikube flow itself (ADR-0024's stated intent) — only
+`check-dev-images.sh` gates from CI; the unused Zitadel PVC; `namespace: default` hardcoded in all 24
+objects, so two stacks cannot coexist; Valkey has no `maxmemory`; per-OS Minikube driver docs (an
+ADR-0024 follow-up).
 
 ## References
 

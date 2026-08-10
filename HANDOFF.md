@@ -1,7 +1,25 @@
 # Agent handoff pack
 
 This repo is ready for autonomous coding agents under **AGDD** (ADR-0028). Every repo carries a
-complete pack so any agent picks up the same rules.
+complete pack so any agent picks up the same rules. **`governance/` is the Source of Truth (ADR-0001)
+for every decision, status and spec below — if this file ever disagrees with it, governance is right
+and this file is stale.** Read this file first for where a session left off; read governance for why.
+
+## Where to look
+
+| You want to… | Read |
+|---|---|
+| pick up a handed-over session | this file |
+| deploy or run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) (ordered steps), then [`deploy/dev/README.md`](deploy/dev/README.md) (per-manifest detail) |
+| understand **what** the product must do | `governance/docs/product/PRD.md` |
+| understand **why** it is built this way | `governance/docs/adr/` — the SoT; index in its `README.md` |
+| pick up a task | `governance/docs/tasks/` — one file per task, its own `Status:` + `Repo(s):` |
+| see phase intent, exit criteria, sequencing | `governance/docs/roadmap/README.md`, `docs/plans/`, `docs/backlog/README.md` |
+| know the rules before committing | `governance/docs/agents/invariants.md` (25 constraints), then `governance/AGENTS.md` |
+| know how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md` |
+
+**Reading order for a new agent:** `AGENTS.md` (this repo) → `governance/AGENTS.md` →
+`governance/docs/agents/invariants.md` → the task's spec and ADRs.
 
 ## Where the work stands (2026-08-11)
 
@@ -33,6 +51,22 @@ cannot propagate to the node on this driver — the measurement is in `deploy/de
 
 **Start at [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md)** if the task is to get something running.
 Start at `governance/docs/plans/phase-1-mvp.md` if the task is to decide what to build next.
+
+### Known gaps, beyond the Phase-1 blockers above
+
+Tracked in PRD §12 except the last, which is observed in the tree:
+
+1. No Phase-2/3 plan files — those phases are sequenced only by what individual task files state.
+2. Phase-2/3 requirements (`PR-13`…`PR-23`) have no epics, specs or tasks yet.
+3. Per-consumer codegen gating is impossible: every consumer's `buf.gen.yaml` reads
+   `../governance/contracts`, a sibling checkout that exists only in this composition, so freshness
+   is gated at the super-repo pin bump instead of in each consumer's own CI.
+4. **Backend integration tests don't run in CI.** T-0004's isolation proofs and T-0006's tamper
+   proofs both skip without `TEST_DATABASE_URL`, so two tasks' central claims rest on evidence that
+   exists only in a local run.
+5. **Two sources of schema truth.** `deploy/dev/postgres.yaml`'s ConfigMap creates the T-0004 tenancy
+   schema independently of the migration files under `backend/` that a real deployment would run.
+   Both currently agree; nothing enforces that they keep agreeing.
 
 ### What landed most recently, and why it matters
 
