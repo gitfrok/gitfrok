@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSIONS=deploy/dev/versions.env
-MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml"
+MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml"
 
 fail=0
 report() { echo "DEV-IMAGE DRIFT: $1"; fail=1; }
@@ -48,6 +48,7 @@ expected_images() { # expected_images <manifest>
     # resolution is exempted below; they are still required here so the image
     # recorded in versions.env is the one asserted on the cluster.
     dataplane.yaml) printf '%s\n' "$DATAPLANE_IMAGE" ;;
+    git-storaged.yaml) printf '%s\n' "$GIT_STORAGED_IMAGE" ;;
     controlplane.yaml) printf '%s\n' "$CONTROLPLANE_IMAGE" ;;
     *) echo "unmapped manifest: $1" >&2; return 1 ;;
   esac
