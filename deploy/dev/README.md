@@ -2,17 +2,23 @@
 
 Kubernetes manifests for the local Minikube dev environment per ADR-0024.
 
-> **Status: applied to a real cluster and serving; T-0003 is `In progress`** in
-> `governance/docs/tasks/T-0003-minikube-dev-env.md`. The core six deployments come up Available from
-> these manifests on the tags in `versions.env`, and ingress serves the mkcert wildcard. Getting
-> there cost **nine defects** — seven in the manifests (2026-08-06) and two in `dev-up.sh`'s
-> cluster-*create* path (2026-08-08) — every one of them invisible to the static validation this
-> directory used to rest on.
+> **New here? Read [`../MVP-RUNBOOK.md`](../MVP-RUNBOOK.md) first.** It is the ordered operator path
+> — preflight, bring-up, the three manual root steps, and what this cluster can and cannot prove.
+> This file is the per-manifest record behind it.
 >
-> What is **not** verified is narrow and named: AC1's create path (blocked on one `sysctl`), AC3's
-> `*.gitsaas.test` routing from the host (blocked on rootless podman — the smoke test verifies the
-> ingress+TLS half and defers only host DNS to an operator `sudo` step), and AC4's macOS half. The
-> data plane (T-0021) mounts the policy bundle and is up on minikube.
+> **Status: T-0003 is `Done`, AC1–AC4 verified.** The full stack comes up Available from these
+> manifests on the tags in `versions.env`, ingress serves the mkcert wildcard, and `make dev-smoke`
+> is green. Getting there cost **ten defects** — seven in the manifests (2026-08-06) and three in
+> `dev-up.sh`'s cluster-*create* path (2026-08-08) — every one of them invisible to the static
+> validation this directory used to rest on.
+>
+> Two residuals are named rather than closed: **host DNS** for `*.gitsaas.test` needs root, so the
+> script prints the per-OS snippet instead of applying it, and a **cluster bring-up on a Mac** needs
+> a hypervisor no hosted runner has (the scripts themselves are exercised on a real macOS runner).
+>
+> **No object tier is wired into any manifest**, so this cluster serves no LFS, no CI artifacts and
+> no image blobs. ADR-0050 decides that tier is a SeaweedFS FUSE mount; wiring it is
+> [runbook step 6](../MVP-RUNBOOK.md) and the shortest remaining path to Phase 1's exit scenario.
 >
 > **Added since that run and therefore unverified in a cluster:** the `git-storaged` workload, the
 > Git front doors now that it exists, KEDA, the CI `ScaledObject`, and the T-0015 web surface
@@ -401,6 +407,30 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
 | AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified over the real ingress path, under rootless podman, with no `port-forward`** — `GET https://hello.gitsaas.test/` returns `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`) and the hello fixture, hitting `127.0.0.1:443`. **The previous conclusion here was wrong and is retracted:** it said the rootless node IP being unroutable meant AC3 "needs a rootful driver or KVM". It needed the node's 80/443 *published to the host* — `minikube start --ports=80:80,443:443`, which the podman driver supports and this script now passes by default (`MINIKUBE_PORTS`). Binding those ports rootless also needs `net.ipv4.ip_unprivileged_port_start=0`; the create path checks for it and prints the fix. Still root-requiring, and still not automated: the **host DNS** half. Until `*.gitsaas.test` resolves to `127.0.0.1`, the 200 above is reached with `curl --resolve`. |
 | AC4 — no OrbStack, no Docker Compose; macOS and Linux | **verified on both, 2026-08-09** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. The macOS half is no longer inference: a `macos-latest` lane in all five repos parses every tracked script under **bash 3.2.57** on `arm64-apple-darwin25` and runs the fitness gates against Darwin's **own BSD userland** — including `governance/scripts/check-docs.sh`, the gate the 2026-08 audit found would have aborted outright on macOS via `find -printf`. Two genuinely macOS-fatal defects had been found and fixed by the audit this replaces: that one, and `bench-storage.sh` using `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, leaving its RAM-disk guard **silently inert on macOS**. The audit is now a standing gate (`check-shell-portability.sh`, SPEC-0014) rather than something someone remembers to run. `sort -z` is **resolved**: Darwin accepts it, so it was never a defect — dropping it from `dev-up.sh` was still right, being cosmetic there. **What is not verified is a cluster bring-up on a Mac**, which needs a hypervisor a hosted runner has not got; see [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not). |
+
+### No object tier is configured (ADR-0050)
+
+Neither `git-storaged.yaml` nor `dataplane.yaml` sets `GITFROK_SEAWEEDFS_MOUNT` or the five
+`GITFROK_SEAWEEDFS_S3_*` variables, so **both processes start with no large-object tier and this
+cluster serves no LFS.** That is the configured-or-absent design working as intended, not a
+misconfiguration: a node with none of the variables set serves no large objects, and a node with
+*three of five* is an error rather than a silent fallback, because an operator who set three meant to
+enable LFS.
+
+ADR-0050 decides the tier is a **SeaweedFS FUSE mount**, preferred over S3 wherever both are set. The
+mount root must exist and be writable before the process starts — `NewMount` refuses to create it,
+because a mount point the process had to create is a mount point that was not mounted, and objects
+written underneath it are invisible to every other node.
+
+`GITFROK_GIT_STORAGE_ROOT` must **not** point at that mount. Live bare repositories stay on block
+volumes (ADR-0033, invariant 7) and `git-storaged` refuses a FUSE repository root outright. The
+measurement behind that rule: 36 of 428 concurrent ref reads failed on the FUSE arm against 0 of 229
+on block, because git renames `refs/heads/<name>.lock` over the ref and that rename is not atomic
+here. The object tier accepts the same backend only because every read is verified against the digest
+in the object's name before a byte reaches a client.
+
+Wiring it is [runbook step 6](../MVP-RUNBOOK.md), and it is the shortest remaining path to Phase 1's
+exit scenario.
 
 ### The Git tier and CI scaling, and what is not proven about them
 
