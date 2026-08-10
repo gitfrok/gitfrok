@@ -1,0 +1,93 @@
+---
+# T-0015: the web frontend (Astro SSR, ADR-0020). A thin proxy: it renders
+# tree/file/diff views from BFF responses only (invariant 22, SPEC-0021) and
+# holds no backend address, gRPC client, storage client, or credential.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webfrontend
+  namespace: default
+  labels:
+    app: webfrontend
+    phase: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webfrontend
+  template:
+    metadata:
+      labels:
+        app: webfrontend
+        phase: "1"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+      - name: webfrontend
+        # Image mirrors deploy/dev/versions.env (WEBFRONTEND_IMAGE); dev-up.sh
+        # loads it into the node, so a tag here and the record agree.
+        image: docker.io/gitfrok/webfrontend:0.1.0
+        imagePullPolicy: IfNotPresent
+        env:
+        # The one per-environment upstream (SPEC-0021). The SSR server fetches
+        # the BFF over the in-cluster Service.
+        - name: GITFROK_BFF_ORIGIN
+          value: "http://bff:8080"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "4321"
+        ports:
+        - name: http
+          containerPort: 4321
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "25m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webfrontend
+  namespace: default
+  labels:
+    app: webfrontend
+    phase: "1"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 4321
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: webfrontend

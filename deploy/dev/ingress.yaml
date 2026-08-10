@@ -33,6 +33,7 @@ spec:
     - zitadel.gitsaas.test
     - s3.gitsaas.test
     - filer.gitsaas.test
+    - app.gitsaas.test
     secretName: gitsaas-tls
   rules:
   # The T-0003 smoke-test target (hello.yaml). Kept first and kept trivial: it isolates "is the
@@ -87,3 +88,15 @@ spec:
             name: seaweedfs
             port:
               number: 8888
+  # The web app (T-0015). The SSR server renders tree/file/diff views from BFF
+  # responses; /callback and /login terminate the OIDC flow at the BFF.
+  - host: app.gitsaas.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: webfrontend
+            port:
+              number: 4321

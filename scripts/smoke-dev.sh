@@ -60,7 +60,7 @@ set +a
 
 # ------------------------------------------------------------------ AC2: workloads are up
 echo "AC2 — deployments Available"
-for d in postgres valkey redpanda seaweedfs zitadel hello dataplane controlplane; do
+for d in postgres valkey redpanda seaweedfs zitadel hello git-storaged dataplane controlplane bff webfrontend; do
   # .status.availableReplicas is absent (not 0) before the first pod is ready, hence the default.
   avail=$("${KUBECTL[@]}" get "deployment/$d" -n "$NS" \
             -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)

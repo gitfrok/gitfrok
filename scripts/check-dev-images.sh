@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSIONS=deploy/dev/versions.env
-MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml"
+MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml bff.yaml webfrontend.yaml"
 
 fail=0
 report() { echo "DEV-IMAGE DRIFT: $1"; fail=1; }
@@ -31,7 +31,7 @@ set +a
 # from registry resolution below, which would otherwise fail and block the
 # dev bring-up. They are still required entries above so the image recorded
 # in versions.env is the one asserted running on the cluster.
-FIRST_PARTY_IMAGES="$DATAPLANE_IMAGE $CONTROLPLANE_IMAGE"
+FIRST_PARTY_IMAGES="$DATAPLANE_IMAGE $CONTROLPLANE_IMAGE $GIT_STORAGED_IMAGE $BFF_IMAGE $WEBFRONTEND_IMAGE"
 
 # One image per line, so comparison never depends on word splitting.
 expected_images() { # expected_images <manifest>
@@ -50,6 +50,8 @@ expected_images() { # expected_images <manifest>
     dataplane.yaml) printf '%s\n' "$DATAPLANE_IMAGE" ;;
     git-storaged.yaml) printf '%s\n' "$GIT_STORAGED_IMAGE" ;;
     controlplane.yaml) printf '%s\n' "$CONTROLPLANE_IMAGE" ;;
+    bff.yaml) printf '%s\n' "$BFF_IMAGE" ;;
+    webfrontend.yaml) printf '%s\n' "$WEBFRONTEND_IMAGE" ;;
     *) echo "unmapped manifest: $1" >&2; return 1 ;;
   esac
 }
