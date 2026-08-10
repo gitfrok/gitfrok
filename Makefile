@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-smoke update-pins verify lint-shell codegen codegen-check policy-check surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check
+.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23)
@@ -42,6 +42,8 @@ submodules: ## init/update all submodules
 	git submodule update --init --recursive
 dev-up: ## start the Minikube dev cluster: addons + mkcert TLS + manifests (T-0003, ADR-0024)
 	@./scripts/dev-up.sh
+dev-provision: ## apply DB migrations + provision the Zitadel OIDC client + verify the login roundtrip (idempotent)
+	@./scripts/dev-provision.sh
 dev-smoke: ## T-0003 integration smoke test: deployments up, 200 over real TLS at *.gitsaas.test
 	@./scripts/smoke-dev.sh
 update-pins: ## fetch latest submodule commits (review before committing the bump)

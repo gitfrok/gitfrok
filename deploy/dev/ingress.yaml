@@ -58,6 +58,15 @@ spec:
   - host: zitadel.gitsaas.test
     http:
       paths:
+      # Login V2 UI (zitadel-login.yaml). Must precede the catch-all: NGINX picks the longest
+      # matching prefix, so /ui/v2/login routes here and everything else still hits the API.
+      - path: /ui/v2/login
+        pathType: Prefix
+        backend:
+          service:
+            name: zitadel-login
+            port:
+              number: 3000
       - path: /
         pathType: Prefix
         backend:

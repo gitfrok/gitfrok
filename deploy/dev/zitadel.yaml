@@ -18,6 +18,27 @@ spec:
       storage: 5Gi
 
 ---
+# Bootstrap volume shared with the Login V2 UI (zitadel-login.yaml). The FirstInstance setup
+# writes the login-client PAT here (ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH); the login UI
+# mounts the same PVC read-only. A PVC rather than a Secret + kubectl cp dance: the setup job
+# writes this file exactly once (on first instance creation), so the file must survive pod
+# restarts — the instance stays in Postgres, an emptyDir would not.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zitadel-bootstrap-pvc
+  namespace: default
+  labels:
+    app: zitadel
+    phase: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -145,6 +166,32 @@ spec:
         # deployment takes this from a secret manager, never from a manifest.
         - name: ZITADEL_MASTERKEY
           value: "gitfrok-dev-masterkey-0123456789"
+        # FirstInstance setup: create the login-client machine user (IAM_LOGIN_CLIENT) and write
+        # its PAT to the shared bootstrap volume for the Login V2 UI to consume. Applied only on
+        # first setup of a new instance (the mirror of the Docker Compose pack's
+        # ZITADEL_FIRSTINSTANCE_* defaults — scripts/dev-provision.sh depends on the file
+        # existing at /zitadel/bootstrap/login-client.pat).
+        - name: ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH
+          value: /zitadel/bootstrap/login-client.pat
+        - name: ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME
+          value: login-client
+        - name: ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME
+          value: Automatically Initialized IAM_LOGIN_CLIENT
+        - name: ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE
+          value: "2099-01-01T00:00:00Z"
+        # DefaultInstance: every new instance gets Login V2 required, hosted at /ui/v2/login on
+        # the Zitadel host, with the OIDC/SAML redirect URLs pointed at the Login UI. These match
+        # the Compose pack so the dev cluster and the reference deployment agree (ADR-0024).
+        - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED
+          value: "true"
+        - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI
+          value: "https://zitadel.gitsaas.test/ui/v2/login/"
+        - name: ZITADEL_OIDC_DEFAULTLOGINURLV2
+          value: "https://zitadel.gitsaas.test/ui/v2/login/login?authRequest="
+        - name: ZITADEL_OIDC_DEFAULTLOGOUTURLV2
+          value: "https://zitadel.gitsaas.test/ui/v2/login/logout?post_logout_redirect="
+        - name: ZITADEL_SAML_DEFAULTLOGINURLV2
+          value: "https://zitadel.gitsaas.test/ui/v2/login/login?samlRequest="
         resources:
           requests:
             memory: "256Mi"
@@ -173,6 +220,8 @@ spec:
           mountPath: /etc/zitadel
         - name: data
           mountPath: /zitadel/data
+        - name: bootstrap
+          mountPath: /zitadel/bootstrap
       volumes:
       - name: config
         configMap:
@@ -180,6 +229,9 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: zitadel-pvc
+      - name: bootstrap
+        persistentVolumeClaim:
+          claimName: zitadel-bootstrap-pvc
 
 ---
 apiVersion: v1

@@ -1,0 +1,122 @@
+---
+# Zitadel Login V2 UI (self-hosted login service).
+# The Zitadel API binary does not serve its own /ui/v2/login in v4.16: the instance features
+# (DefaultInstance Features LoginV2, zitadel.yaml) create Login V2 auth requests, and an
+# instance-wide `required: true` means every OIDC authorize redirects here — without this
+# deployment, login is a 404 and no browser flow works at all.
+# Mirrors the Login V2 service from the upstream Docker Compose pack: same image version tag as
+# the API, same env surface (ZITADEL_API_URL, NEXT_PUBLIC_BASE_PATH, ZITADEL_SERVICE_USER_TOKEN_FILE,
+# CUSTOM_REQUEST_HEADERS), PAT file from the shared bootstrap PVC instead of a bind mount.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zitadel-login
+  namespace: default
+  labels:
+    app: zitadel-login
+    phase: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zitadel-login
+  template:
+    metadata:
+      labels:
+        app: zitadel-login
+        phase: "0"
+    spec:
+      # Same trap as the API pod: Kubernetes injects <SVC>_PORT env vars for every Service, and
+      # the login UI would trip over NEXT_PUBLIC_*/ZITADEL_* collisions only when they exist;
+      # disable service links to keep its env namespace clean.
+      enableServiceLinks: false
+      initContainers:
+      # Must not race the API's first-boot setup: the PAT file only appears once FirstInstance
+      # has run, so this container waits for it (and for the API to accept connections).
+      - name: pat-wait
+        image: docker.io/library/busybox:1.35.0
+        command:
+          - sh
+          - -c
+          - |
+            until [ -f /zitadel/bootstrap/login-client.pat ]; do
+              echo "Waiting for Zitadel login-client PAT..."
+              sleep 2
+            done
+            echo "login-client PAT present"
+        volumeMounts:
+        - name: bootstrap
+          mountPath: /zitadel/bootstrap
+      containers:
+      - name: zitadel-login
+        image: ghcr.io/zitadel/zitadel-login:v4.16.2
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        env:
+        # Zitadel API base URL the UI proxies to (in-cluster; the API advertises
+        # https://zitadel.gitsaas.test for the browser, but the UI itself talks to this).
+        - name: ZITADEL_API_URL
+          value: "http://zitadel:8080"
+        - name: NEXT_PUBLIC_BASE_PATH
+          value: /ui/v2/login
+        # PAT written by the API's FirstInstance setup into the shared bootstrap volume.
+        - name: ZITADEL_SERVICE_USER_TOKEN_FILE
+          value: /zitadel/bootstrap/login-client.pat
+        # The UI renders redirect URLs and must see the same scheme/host the user agent does,
+        # otherwise it rebuilds http:// links and OIDC validation fails.
+        - name: CUSTOM_REQUEST_HEADERS
+          value: "Host:zitadel.gitsaas.test,X-Forwarded-Proto:https"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        readinessProbe:
+          httpGet:
+            path: /ui/v2/login/healthy
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /ui/v2/login/healthy
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: bootstrap
+          mountPath: /zitadel/bootstrap
+          readOnly: true
+      volumes:
+      - name: bootstrap
+        persistentVolumeClaim:
+          claimName: zitadel-bootstrap-pvc
+          readOnly: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zitadel-login
+  namespace: default
+  labels:
+    app: zitadel-login
+    phase: "0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 3000
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: zitadel-login
