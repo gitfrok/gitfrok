@@ -63,6 +63,45 @@ spec:
         # image exists to pin.
         - name: GITFROK_CI_METRICS_ADDR
           value: ":9102"
+        # The large-object tier: LFS objects today, CI artifacts and image blobs
+        # later (ADR-0050, SPEC-0023).
+        #
+        # **This is the S3 adapter, not the FUSE mount, and that is deliberate.**
+        # ADR-0050 decides the mount is the tier and ADR-0051 decides a privileged
+        # DaemonSet produces it — but on this driver the mount does not reach the
+        # node. It was tried: the DaemonSet mounts `fuse.seaweedfs` and the mount is
+        # marked shared inside the pod, the node's `/` is shared, and the mount still
+        # never appears in the node's table. The consumers then bind the plain
+        # directory underneath and write objects to node-local disk while every read
+        # on that node succeeds. See deploy/dev/seaweedfs-mount.yaml and
+        # deploy/dev/README.md for the measurement.
+        #
+        # ADR-0050 decision 6 keeps the S3 adapter for exactly this case — "how a
+        # deployment without a mount runs" — so the dev cluster uses it and the mount
+        # path is exercised on a node that can propagate one.
+        #
+        # All five or none: a node with three of them has an operator who intended
+        # LFS and a deployment that would refuse it.
+        - name: GITFROK_SEAWEEDFS_S3_ENDPOINT
+          value: "http://seaweedfs:8333"
+        - name: GITFROK_SEAWEEDFS_S3_REGION
+          value: "us-east-1"
+        - name: GITFROK_SEAWEEDFS_S3_BUCKET
+          value: "gitfrok"
+        # Upserted by dev-up.sh, like the TLS key and the PAT verifier: a credential
+        # committed to the tree is a credential every clone of the tree holds.
+        - name: GITFROK_SEAWEEDFS_S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gitfrok-seaweedfs-s3
+              key: access-key
+        - name: GITFROK_SEAWEEDFS_S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gitfrok-seaweedfs-s3
+              key: secret-key
+        # Either way, this is what turns the plane's /info/lfs endpoints from
+        # configured-absent into working, under repo.lfs.read / repo.lfs.write.
         ports:
         - name: health
           containerPort: 8080

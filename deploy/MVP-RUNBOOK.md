@@ -4,8 +4,8 @@
 account of which parts of the Phase-1 exit scenario that path can actually demonstrate. It is written
 to be handed to someone who was not present for the work.
 
-**What it is not.** A production deployment guide. Every credential below is a dev-only default, the
-S3 endpoint is open, and the cluster is a single Minikube node. Production posture is ADR-0035
+**What it is not.** A production deployment guide. Every credential below is a dev-only default and
+the cluster is a single Minikube node. Production posture is ADR-0035
 (supply chain), ADR-0044 (trust bundle) and the cluster lane of T-0003 — none of which this runbook
 covers.
 
@@ -25,12 +25,12 @@ disagree, governance wins (ADR-0001). The per-manifest detail and the full defec
 | Host DNS for `*.gitsaas.test` | **manual, needs root** — the script prints, it does not apply |
 | Database migrations | **manual** — nothing in the cluster applies them |
 | Zitadel OIDC client for the BFF | **manual** — `dev-up` deploys Zitadel, it does not configure an app |
-| LFS / artifact / image object tier (ADR-0050) | **not wired into any manifest** — see [step 6](#6-wire-the-object-tier-adr-0050) |
+| LFS / artifact / image object tier | **wired to S3 and proved live**; ADR-0050's FUSE mount cannot propagate on this driver — see [step 6](#6-the-object-tier-adr-0050--adr-0051) |
 | CI sandbox dispatch (gVisor) | **unavailable** under rootless podman |
 | Durability quorum and failover | **proved in tests, not demonstrable here** — one node |
 
-The last four rows are the whole of what stands between this runbook and the Phase-1 exit scenario.
-None of them is missing code.
+The last three rows are the whole of what stands between this runbook and the Phase-1 exit
+scenario. None of them is missing code.
 
 ---
 
@@ -83,7 +83,8 @@ create is deleted rather than converged (a half-created profile cannot be repair
 It runs: preflight → assert every manifest's image tag against `versions.env` → `minikube start`
 with the `ingress` and `ingress-dns` addons → mkcert wildcard into `secret/gitsaas-tls` → build and
 load the five first-party images → publish the policy bundle ConfigMap from `governance/policies` →
-apply all manifests with `ingress` last → wait for every rollout → print the host-DNS snippet.
+apply all manifests with `ingress` last → wait for every rollout → create the object-tier bucket →
+print the host-DNS snippet.
 
 Knobs, all environment variables: `MINIKUBE_PROFILE` (default `gitfrok`), `MINIKUBE_DRIVER`,
 `MINIKUBE_CPUS` (4), `MINIKUBE_MEMORY` (6144 MiB), `MINIKUBE_PORTS` (`80:80,443:443`),
@@ -154,58 +155,73 @@ application with exactly that client ID and redirect URI, and PKCE as the auth m
 Sessions are `GITFROK_SESSION_STORE=memory` in dev; ADR-0049 decision 5 names Valkey for a shared
 store, and wiring it is outstanding.
 
-## 6. Wire the object tier (ADR-0050)
+## 6. The object tier (ADR-0050 / ADR-0051)
 
-**No manifest sets an object tier, so the cluster serves no LFS at all.** The tier is
-configured-or-absent by design — a node with none of the variables set serves no large objects, which
-is a deployment choice rather than a failure — and in `deploy/dev/` it is absent.
+**Nothing to do — `dev-up` wires it.** This step is here because what it wires is not what ADR-0050
+decides, and the difference matters if you deploy anywhere else.
 
-ADR-0050 decides that LFS objects, CI artifacts and container-image blobs come from a **SeaweedFS
-FUSE mount**. Both `git-storaged` and the data plane read the same variable and prefer it over S3:
+`git-storaged` and the data plane get the five `GITFROK_SEAWEEDFS_S3_*` variables, `dev-up` upserts
+the credentials as a Secret and creates the `gitfrok` bucket before anything can write. LFS works.
 
-```yaml
-- name: GITFROK_SEAWEEDFS_MOUNT
-  value: /mnt/seaweedfs
+### Why S3 here and not the FUSE mount
+
+ADR-0050 decides large objects come from a SeaweedFS FUSE mount; ADR-0051 produces that mount with a
+privileged DaemonSet, which is the only shape Kubernetes permits — kubelet rejects
+`mountPropagation: Bidirectional` on a container that is not privileged. It is built
+(`deploy/dev/seaweedfs-mount.yaml`) and it does not work on this driver:
+
+- the DaemonSet mounts `fuse.seaweedfs` and its mount is `shared` inside the pod
+- the node's `/` is `shared`
+- **the node's mount table never shows it**, so consumers bind the plain directory underneath
+
+A write from `git-storaged` then lands on node-local disk and reads back fine on that node, while the
+filer and the mount pod never see it. **Every gate passed while the data diverged** — `mountpoint`,
+a write-then-read probe, and `objectstore.NewMount`'s own writability check. Only comparing the
+consumer's view, the mount pod's view and the filer's showed it.
+
+So the DaemonSet is not applied by default. On a node whose driver propagates mounts:
+
+```bash
+MOUNT_DAEMONSET=1 make dev-up
 ```
 
-The mount must already exist and be writable when the process starts. `NewMount` refuses to create
-it, deliberately: a mount point the process had to create is a mount point that was **not** mounted,
-and objects written into the empty directory underneath it are invisible to every other node.
+ADR-0050 decision 6 keeps the S3 adapter for exactly this case, and `make dev-smoke` says which tier
+is in use rather than leaving you to guess.
 
-Two properties make this safe to build on, and both are enforced in code rather than assumed:
+### Two things that will cost you an afternoon elsewhere
 
-- **Writes stage and commit.** An object is written beside its destination, fsynced, renamed onto its
-  content-addressed name, then read back at full length before the write is acknowledged.
-- **Reads verify.** `rename()` is *not* atomic on this backend — that is the measured finding behind
-  ADR-0033 — so every read hashes the whole object and compares it against the digest in its name
-  before a byte reaches a client. A mismatch is reported as absence.
+1. **`weed mount` needs the filer's gRPC port — 8888+10000 = 18888 — which SeaweedFS never
+   announces.** Expose it or the mount client retries `i/o timeout` forever against a filer that is
+   healthy on 8888.
+2. **A PUT into a bucket that does not exist returns 200** and keeps nothing, and a bucket written to
+   before it was registered stays poisoned — `NoSuchBucket` on every read, no repair but a new name.
+   Create the bucket first: `echo 's3.bucket.create -name gitfrok' | kubectl exec -i deploy/seaweedfs -- weed shell`.
 
-**Live bare repositories stay on block volumes.** ADR-0033 is unchanged and `git-storaged` refuses a
-FUSE repository root outright (`ErrFUSERepositoryRoot`, invariant 7). Do not point
-`GITFROK_GIT_STORAGE_ROOT` at the mount — it will not start, and that is the guard working.
+### The credentials must not be on the `anonymous` identity
 
-### The S3 alternative
+SeaweedFS's `anonymous` identity is its *unauthenticated* one: attaching keys to it grants those
+actions to every unsigned request. This cluster shipped that way, so the gateway served any object to
+anyone who could reach `s3.gitsaas.test`. The identity is now named `gitfrok`, and that host answers
+**403** without a signature.
 
-The S3 adapter is retained for a deployment that has no mount. It is **all-or-nothing**: set all five
-variables or none, because a node with three of them has an operator who intended LFS and a
-deployment that would refuse it.
+### Live repositories never touch either tier
 
-```yaml
-- {name: GITFROK_SEAWEEDFS_S3_ENDPOINT,   value: "http://seaweedfs:8333"}
-- {name: GITFROK_SEAWEEDFS_S3_REGION,     value: "us-east-1"}
-- {name: GITFROK_SEAWEEDFS_S3_BUCKET,     value: "gitfrok"}
-- {name: GITFROK_SEAWEEDFS_S3_ACCESS_KEY, valueFrom: {secretKeyRef: {name: seaweedfs-s3, key: access-key}}}
-- {name: GITFROK_SEAWEEDFS_S3_SECRET_KEY, valueFrom: {secretKeyRef: {name: seaweedfs-s3, key: secret-key}}}
+`GITFROK_GIT_STORAGE_ROOT` stays on the block-backed PVC (ADR-0033), and `git-storaged` refuses a
+FUSE repository root outright (invariant 7). Pointing it at a mount does not corrupt anything — the
+process fails to start.
+
+### Proving the tier works
+
+```bash
+kubectl --context gitfrok port-forward -n default svc/seaweedfs 18333:8333 &
+cd backend && GITFROK_TEST_SEAWEEDFS_ENDPOINT=http://127.0.0.1:18333 \
+  GITFROK_TEST_SEAWEEDFS_BUCKET=gitfrok \
+  GITFROK_TEST_SEAWEEDFS_ACCESS_KEY=minioadmin GITFROK_TEST_SEAWEEDFS_SECRET_KEY=minioadmin \
+  go test ./platform/objectstore/ -run TestLiveSeaweedFS -count=1
 ```
 
-Two SeaweedFS behaviours will cost you an afternoon if you meet them without warning:
-
-1. **A PUT into a bucket that does not exist returns 200**, and the object is not there afterwards.
-   The tier now reads every object back before acknowledging, which is what turns this into an error
-   instead of silent data loss. Create the bucket first:
-   `weed shell` → `s3.bucket.create -name gitfrok`.
-2. **A bucket written to before it was registered stays poisoned** — reads return `NoSuchBucket`
-   permanently. Recover with a freshly registered bucket name; there is no repair.
+Five tests: round trip, absent object, presigned fetch, **unsigned request refused**, tampered
+presigned URL refused. All pass against this cluster.
 
 ## 7. Verify
 
@@ -247,7 +263,7 @@ trail → git-node failover promotes the in-sync replica.**
 | CI job runs, status gates merge | **no** — no gVisor RuntimeClass under rootless podman, so dispatch is unconfigured |
 | audit trail | **yes**, once step 4 is done |
 | failover promotes the in-sync replica | **no** — one node |
-| LFS push/fetch through the plane | **only after step 6** |
+| LFS push/fetch through the plane | **yes** — the object tier is wired and its live suite passes against this cluster |
 
 Three of those four gaps are the same gap: **this host is one node without a hypervisor.** Closing
 them is T-0003's cluster lane — a second physical node running SPEC-0018's production coordinator,

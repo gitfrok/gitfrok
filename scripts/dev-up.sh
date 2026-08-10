@@ -94,6 +94,21 @@ KUBECTL=(kubectl --context "$PROFILE")
 # it is slow in a way the others are not.
 DEPLOYMENTS="postgres valkey redpanda seaweedfs hello git-storaged dataplane controlplane"
 PAT_SECRET=gitfrok-pat-verifier
+S3_SECRET=gitfrok-seaweedfs-s3
+S3_BUCKET=gitfrok
+
+# The ADR-0051 FUSE-mount DaemonSet is OFF by default here, and the reason is
+# measured rather than assumed: on the podman driver the mount never reaches the
+# node. The DaemonSet mounts fuse.seaweedfs and the mount is marked shared inside
+# the pod, the node's / is shared, and the node's mount table still never shows it.
+# Consumers then bind the plain directory underneath and write objects to
+# node-local disk while every read on that node succeeds — silent divergence, the
+# exact failure ADR-0050 and ADR-0051 exist to prevent.
+#
+# So the dev cluster runs the S3 adapter, which ADR-0050 decision 6 keeps for
+# precisely this case. Set MOUNT_DAEMONSET=1 on a node whose driver propagates
+# mounts to apply it and exercise the mount path instead.
+MOUNT_DAEMONSET="${MOUNT_DAEMONSET:-0}"
 ZITADEL_TIMEOUT=420s
 DEFAULT_TIMEOUT=240s
 
@@ -399,6 +414,17 @@ step "PAT verifier key secret '$PAT_SECRET'"
   --from-literal=key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')" \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
 
+# The object tier's S3 credentials (ADR-0050 decision 6 — the adapter a deployment
+# without a FUSE mount runs on, which is what this cluster is; see MOUNT_DAEMONSET
+# below). Upserted rather than committed, on the same rule as the two above. The
+# values match seaweedfs.yaml's s3_config.json, which is dev-only and open anyway;
+# keeping them out of the workload manifests is still the right habit.
+step "SeaweedFS S3 credentials secret '$S3_SECRET'"
+"${KUBECTL[@]}" create secret generic "$S3_SECRET" -n "$NS" \
+  --from-literal=access-key=minioadmin \
+  --from-literal=secret-key=minioadmin \
+  --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+
 # KEDA, from its upstream release rather than vendored (ADR-0039). Without the
 # operator a ScaledObject is an inert custom resource and T-0017 AC2 cannot be
 # demonstrated at all.
@@ -412,17 +438,89 @@ step "Applying manifests"
 for m in postgres valkey redpanda seaweedfs zitadel hello git-storaged dataplane controlplane bff webfrontend ingress; do
   "${KUBECTL[@]}" apply -f "deploy/dev/$m.yaml"
 done
+if [ "$MOUNT_DAEMONSET" = "1" ]; then
+  "${KUBECTL[@]}" apply -f deploy/dev/seaweedfs-mount.yaml
+else
+  echo "  skipped seaweedfs-mount.yaml — MOUNT_DAEMONSET=0 (see the note at the top of this script)"
+fi
 
 # After the Deployment it targets, so KEDA never sees a scale target that is not
 # there yet.
 "${KUBECTL[@]}" apply -f deploy/dev/ci-scaledobject.yaml
 
 step "Waiting for rollouts"
+if [ "$MOUNT_DAEMONSET" = "1" ]; then
+  # On its own line rather than inside the loop below, because it is a DaemonSet and
+  # because a mount that never comes up should report as itself rather than as two
+  # planes that mysteriously failed to roll out.
+  "${KUBECTL[@]}" rollout status daemonset/seaweedfs-mount -n "$NS" --timeout="$DEFAULT_TIMEOUT" ||
+    die "the SeaweedFS FUSE mount did not come up — without it there is no large-object tier.
+  kubectl --context $PROFILE logs -n $NS daemonset/seaweedfs-mount
+  A privileged container and /dev/fuse on the node are both required (ADR-0051)."
+
+  # Only now, and only here, do the consumers get the mount. The DaemonSet on its own
+  # is a mount nobody reads: the consumers' committed manifests set the five S3
+  # variables and no mount root, so applying the DaemonSet alone leaves both planes on
+  # the S3 adapter and the mount serving its own probe file and nothing else.
+  #
+  # Patched rather than committed into the manifests, because a hostPath of
+  # `type: Directory` in the tracked YAML would refuse to start git-storaged and the
+  # data plane on every node without the DaemonSet — which is this driver, and the
+  # default path. The patch is re-applied on each run because the `apply` above
+  # restores the committed shape first.
+  #
+  # HostToContainer, not Bidirectional: the consumers read a mount made elsewhere and
+  # must never be privileged. `type: Directory` and not DirectoryOrCreate: a consumer
+  # landing on a node the DaemonSet has not mounted must fail to schedule rather than
+  # write objects onto that node's local disk. And the mount root is preferred over
+  # the S3 variables by the process itself (ADR-0050), so both being set is the
+  # intended state, not a conflict.
+  for target in git-storaged dataplane; do
+    "${KUBECTL[@]}" patch "deployment/$target" -n "$NS" --type=strategic --patch "
+spec:
+  template:
+    spec:
+      containers:
+      - name: $target
+        env:
+        - name: GITFROK_SEAWEEDFS_MOUNT
+          value: /mnt/seaweedfs
+        volumeMounts:
+        - name: seaweedfs-mount
+          mountPath: /mnt/seaweedfs
+          mountPropagation: HostToContainer
+      volumes:
+      - name: seaweedfs-mount
+        hostPath:
+          path: /mnt/seaweedfs
+          type: Directory
+" >/dev/null
+    echo "  $target now reads the object tier through the mount at /mnt/seaweedfs"
+  done
+fi
 for d in $DEPLOYMENTS; do
   "${KUBECTL[@]}" rollout status "deployment/$d" -n "$NS" --timeout="$DEFAULT_TIMEOUT"
 done
 # Kept last and given its own budget: first boot is init + migrations + FirstInstance setup.
 "${KUBECTL[@]}" rollout status deployment/zitadel -n "$NS" --timeout="$ZITADEL_TIMEOUT"
+
+# ------------------------------------------------------------------ object-tier bucket
+# SeaweedFS answers **200 to a PUT into a bucket that does not exist**, and the object is not there
+# afterwards. Worse, a bucket written to before it was registered stays poisoned: reads return
+# NoSuchBucket permanently and there is no repair, only a new bucket name. Both were found against a
+# live gateway during T-0018, which is why this runs before anything can write.
+#
+# `s3.bucket.create` is idempotent, so this converges like every other step here.
+step "Object-tier bucket '$S3_BUCKET'"
+if echo "s3.bucket.create -name $S3_BUCKET" |
+     "${KUBECTL[@]}" exec -i -n "$NS" deployment/seaweedfs -- weed shell >/dev/null 2>&1; then
+  echo "bucket $S3_BUCKET present"
+else
+  # Not fatal: the cluster is otherwise usable and LFS is the only thing affected. Saying so beats
+  # dying here, and beats letting the first LFS push discover it.
+  echo "WARNING: could not create the bucket $S3_BUCKET — LFS writes will be accepted and lost." >&2
+  echo "  echo 's3.bucket.create -name $S3_BUCKET' | kubectl --context $PROFILE exec -i -n $NS deployment/seaweedfs -- weed shell" >&2
+fi
 
 # ---------------------------------------------------------------------------- host DNS
 IP=$(minikube ip -p "$PROFILE")

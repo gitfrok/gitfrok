@@ -15,18 +15,19 @@ of the remaining work:
 | Exit criterion | State |
 |---|---|
 | all Phase-1 tasks Done | **met** |
-| the end-to-end Minikube scenario passes | **not met** — four blockers, none of them missing code |
+| the end-to-end Minikube scenario passes | **not met** — three blockers, none of them missing code |
 | CI gates green per `ci-gates.md` | **met on every merged PR**, with the two skip-without-infrastructure gaps that file records |
 
-The four blockers, in the order they are cheapest to close:
+The three blockers, in the order they are cheapest to close:
 
-1. **No object tier is wired into any deployment**, so the dev cluster serves no LFS. Wiring
-   `GITFROK_SEAWEEDFS_MOUNT` per ADR-0050 is a super-repo manifest change — see
-   [`deploy/MVP-RUNBOOK.md` step 6](deploy/MVP-RUNBOOK.md).
-2. **Database migrations are applied by hand** (runbook step 4).
-3. **No gVisor RuntimeClass under rootless podman**, so CI dispatch is unconfigured in the dev
+*(The object tier was the fourth and is now closed: `deploy/dev` wires the S3 adapter, `dev-up`
+creates its bucket, and backend's live suite passes against the cluster. ADR-0050's FUSE mount
+cannot propagate to the node on this driver — the measurement is in `deploy/dev/README.md`.)*
+
+1. **Database migrations are applied by hand** (runbook step 4).
+2. **No gVisor RuntimeClass under rootless podman**, so CI dispatch is unconfigured in the dev
    cluster. Recorded against T-0017.
-4. **One git node**, so the durability quorum and failover promotion cannot be demonstrated in the
+3. **One git node**, so the durability quorum and failover promotion cannot be demonstrated in the
    cluster. Both are proved by T-0012's tests and T-0018's two-node integration suite; what is
    missing is a second physical node and an attached volume — T-0003's cluster lane.
 
@@ -51,6 +52,18 @@ fakes. They are worth knowing because each one had passed review:
    denied. The acceptance criterion had "passed" only because nobody could import.
 3. SeaweedFS answers **200 to a PUT into a bucket that does not exist**. The object tier now reads
    back before acknowledging a write.
+
+**ADR-0051 (Proposed 2026-08-11)** follows from wiring that mount into `deploy/dev`: producing a FUSE
+mount in Kubernetes requires a privileged container somewhere, because kubelet rejects
+`mountPropagation: Bidirectional` on anything unprivileged. It proposes one privileged DaemonSet per
+node rather than a sidecar per consumer. Running it found that this driver never propagates the mount
+to the node at all — so the dev cluster runs the S3 adapter ADR-0050 decision 6 keeps for exactly
+that case, and the DaemonSet is opt-in behind `MOUNT_DAEMONSET=1`.
+
+Two more defects came out of that, both found only by running it: the filer's **gRPC port 18888** was
+never exposed by the Service, so the mount client retried forever against a healthy filer; and the S3
+credentials were attached to SeaweedFS's `anonymous` identity, which meant **the gateway served every
+object to unsigned requests**. Both fixed.
 
 The lesson the record keeps: a test against a fake proves the control flow, not the claim.
 

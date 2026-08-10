@@ -71,6 +71,29 @@ for d in postgres valkey redpanda seaweedfs zitadel hello git-storaged dataplane
   fi
 done
 
+# The large-object mount is a DaemonSet, so the loop above cannot see it — and if it
+# is deployed and broken, git-storaged and the data plane still report Available
+# while LFS is silently dead (ADR-0050, ADR-0051). It is optional here
+# (MOUNT_DAEMONSET in dev-up.sh; this driver cannot propagate a mount to the node),
+# so it is asserted when present and reported as absent when not, never skipped in
+# silence.
+#
+# numberReady, not desiredNumberScheduled: the pod's probes write and read through
+# the mount, so Ready means a mount that serves bytes rather than a running `weed`.
+desired=$("${KUBECTL[@]}" get daemonset/seaweedfs-mount -n "$NS" \
+            -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || true)
+ready=$("${KUBECTL[@]}" get daemonset/seaweedfs-mount -n "$NS" \
+          -o jsonpath='{.status.numberReady}' 2>/dev/null || true)
+if [ -z "$desired" ]; then
+  echo "  note  daemonset/seaweedfs-mount is not deployed — the object tier is the S3 adapter"
+  echo "        (ADR-0050 decision 6). MOUNT_DAEMONSET=1 in dev-up.sh deploys the FUSE mount."
+elif [ "${desired:-0}" -ge 1 ] && [ "${ready:-0}" = "$desired" ] 2>/dev/null; then
+  ok "daemonset/seaweedfs-mount ready on $ready/$desired node(s) — the object tier has a live mount"
+else
+  report "daemonset/seaweedfs-mount is ${ready:-0}/${desired:-0} ready — it is deployed and not serving.
+    kubectl --context $PROFILE logs -n $NS daemonset/seaweedfs-mount"
+fi
+
 # ------------------------------------------------------- AC2: running images match versions.env
 # dev-up.sh asserts this against the manifest text; this asserts it against what the cluster is
 # actually running, which is the claim AC2 makes. A stale ReplicaSet or a hand-edited deployment

@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSIONS=deploy/dev/versions.env
-MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml bff.yaml webfrontend.yaml"
+MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml seaweedfs-mount.yaml zitadel.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml bff.yaml webfrontend.yaml"
 
 fail=0
 report() { echo "DEV-IMAGE DRIFT: $1"; fail=1; }
@@ -40,6 +40,10 @@ expected_images() { # expected_images <manifest>
     valkey.yaml)    printf '%s\n' "$VALKEY_IMAGE" ;;
     redpanda.yaml)  printf '%s\n' "$REDPANDA_IMAGE" ;;
     seaweedfs.yaml) printf '%s\n' "$SEAWEEDFS_IMAGE" ;;
+    # The FUSE mount DaemonSet (ADR-0051) runs the same SeaweedFS pin as the filer,
+    # deliberately: a mount client and a server on different versions is a class of
+    # bug nobody would look for.
+    seaweedfs-mount.yaml) printf '%s\n' "$SEAWEEDFS_IMAGE" ;;
     # Zitadel's db-wait init container is busybox, so this manifest legitimately carries two.
     zitadel.yaml)   printf '%s\n' "$ZITADEL_IMAGE" "$BUSYBOX_IMAGE" ;;
     hello.yaml)     printf '%s\n' "$BUSYBOX_IMAGE" ;;
