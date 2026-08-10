@@ -376,7 +376,11 @@ build_if_absent() { # build_if_absent <ref> <dockerfile> <context-dir>
     echo "  present: $ref"
   else
     echo "  building $ref from $ctx/$dockerfile into node"
-    if ! minikube image build -p "$PROFILE" -t "$ref" -f "$ctx/$dockerfile" "$ctx"; then
+    # The dockerfile path is relative to the build context (the node receives
+    # the context contents at its build root). minikube < 1.38 accepted
+    # `-f $ctx/$dockerfile`; the 1.38 context transfer flattens the context, so
+    # the prefixed path resolves to nothing on the node.
+    if ! minikube image build -p "$PROFILE" -t "$ref" -f "$dockerfile" "$ctx"; then
       die "could not build $ref — see output above"
     fi
   fi

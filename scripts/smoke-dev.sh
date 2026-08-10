@@ -80,7 +80,8 @@ running=$("${KUBECTL[@]}" get pods -n "$NS" -o \
   jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{range .spec.initContainers[*]}{.image}{"\n"}{end}{end}' \
   2>/dev/null | sed '/^$/d' | sort -u)
 expected=$(printf '%s\n' "$POSTGRES_IMAGE" "$VALKEY_IMAGE" "$REDPANDA_IMAGE" \
-  "$SEAWEEDFS_IMAGE" "$ZITADEL_IMAGE" "$BUSYBOX_IMAGE" "$DATAPLANE_IMAGE" "$CONTROLPLANE_IMAGE" | sort -u)
+  "$SEAWEEDFS_IMAGE" "$ZITADEL_IMAGE" "$BUSYBOX_IMAGE" "$DATAPLANE_IMAGE" "$CONTROLPLANE_IMAGE" \
+  "$GIT_STORAGED_IMAGE" "$BFF_IMAGE" "$WEBFRONTEND_IMAGE" | sort -u)
 
 unexpected=$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$running"))
 missing=$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$running"))
