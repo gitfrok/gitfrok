@@ -475,11 +475,49 @@ if [ "$MOUNT_DAEMONSET" = "1" ]; then
   # write objects onto that node's local disk. And the mount root is preferred over
   # the S3 variables by the process itself (ADR-0050), so both being set is the
   # intended state, not a conflict.
+  #
+  # THE INIT CONTAINER IS THE LOAD-BEARING PART, and it is ADR-0051 decision 3. The
+  # DaemonSet's own readiness proves only that `weed` can serve its own mount inside
+  # its own mount namespace — which stays true when Bidirectional propagation to the
+  # node fails, and that is exactly the case measured on this driver. `type: Directory`
+  # does not catch it either: the directory exists on the host whether or not anything
+  # is mounted over it. Nor does the application: objectstore.NewMount probes that the
+  # root is a writable directory, and a plain host directory passes.
+  #
+  # So each consumer asserts, from inside its OWN mount namespace, that the path is a
+  # fuse.seaweedfs mount, and refuses to start when it is not. Without this the pods
+  # come up on the mount path and write objects to node-local disk, invisible to the
+  # filer and to every other node, with every check green — the failure this whole
+  # design exists to prevent.
   for target in git-storaged dataplane; do
     "${KUBECTL[@]}" patch "deployment/$target" -n "$NS" --type=strategic --patch "
 spec:
   template:
     spec:
+      initContainers:
+      - name: await-object-mount
+        image: $BUSYBOX_IMAGE
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -c
+        - |
+          # Field 5 of mountinfo is the mount point and the filesystem type follows
+          # the ' - ' separator, so this asks the kernel what THIS namespace has at
+          # the path — not whether the path exists, and not what some other pod sees.
+          for i in \$(seq 1 60); do
+            if awk '\$5 == \"/mnt/seaweedfs\"' /proc/self/mountinfo | grep -q 'fuse.seaweedfs'; then
+              echo 'object mount present'; exit 0
+            fi
+            sleep 2
+          done
+          echo 'no fuse.seaweedfs mount at /mnt/seaweedfs in this pod - the DaemonSet mount did not propagate to the node' >&2
+          echo 'starting anyway would write objects to node-local disk (ADR-0050, ADR-0051)' >&2
+          exit 1
+        volumeMounts:
+        - name: seaweedfs-mount
+          mountPath: /mnt/seaweedfs
+          mountPropagation: HostToContainer
       containers:
       - name: $target
         env:

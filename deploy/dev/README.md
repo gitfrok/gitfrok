@@ -441,7 +441,16 @@ the data plane onto it — a `HostToContainer` hostPath of `type: Directory` and
 `GITFROK_SEAWEEDFS_MOUNT=/mnt/seaweedfs`, which the process prefers over the S3 variables. That
 patch is deliberately not in the committed manifests: a `type: Directory` hostPath in the tracked
 YAML would refuse to start both planes on every node without the DaemonSet, which is the default
-path here. ADR-0050 decision 6 keeps the S3 adapter for exactly this case —
+path here.
+
+**Each consumer gets an init container that refuses to start unless `/mnt/seaweedfs` is a
+`fuse.seaweedfs` mount in its own namespace** (ADR-0051 decision 3), and it is the load-bearing part
+of that patch. Nothing else catches the failure above: the DaemonSet's readiness proves only that
+`weed` serves its own mount inside its own namespace, `type: Directory` passes because the host
+directory exists whether or not anything is mounted over it, and `objectstore.NewMount` probes for a
+writable directory, which a plain host directory is. `smoke-dev.sh` reports the two claims
+separately for the same reason — the mount pod being Ready and the consumers actually having a
+propagated mount are not the same statement. ADR-0050 decision 6 keeps the S3 adapter for exactly this case —
 "how a deployment without a mount runs" — and this is that deployment. `smoke-dev.sh` reports which
 tier is in use rather than staying silent about it.
 
