@@ -15,6 +15,14 @@ cd "$(dirname "$0")/.."
 VERSIONS=deploy/dev/versions.env
 MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml zitadel.yaml hello.yaml"
 
+# First-party plane manifests carry a placeholder, not a tag: dev-up.sh substitutes
+# a digest before applying, from a local build or from the published release
+# (ADR-0035). They are checked for the opposite property to the third-party ones —
+# that they name no image at all — because a tag appearing here would be a plane
+# that can change without its manifest changing.
+PLANE_MANIFESTS="dataplane.yaml"
+PLANE_PLACEHOLDERS="GITFROK_IMAGE_DATAPLANE GITFROK_IMAGE_CI_RUNNER"
+
 fail=0
 report() { echo "DEV-IMAGE DRIFT: $1"; fail=1; }
 
@@ -56,10 +64,36 @@ for file in $MANIFESTS; do
   fi
 done
 
+for file in $PLANE_MANIFESTS; do
+  path="deploy/dev/$file"
+  if [ ! -f "$path" ]; then
+    report "$file is missing"
+    continue
+  fi
+  plane_refs=$(grep -E '^[[:space:]]*image:' "$path" |
+                 sed -E 's/^[[:space:]]*image:[[:space:]]*//' | sort -u)
+  bad=0
+  while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    case " $PLANE_PLACEHOLDERS " in
+      *" $ref "*) ;;
+      *) report "$file names the image '$ref'; a plane manifest must carry a placeholder dev-up.sh resolves to a digest (ADR-0035)"; bad=1 ;;
+    esac
+  done <<EOF
+$plane_refs
+EOF
+  [ "$bad" -eq 1 ] || echo "  ok    $file (placeholders resolved at apply time)"
+done
+
 # Every manifest image must be mapped above — a new service whose tag nobody records would
 # otherwise pass silently, which is the exact gap this check exists to close.
 all_actual=$(grep -hE '^[[:space:]]*image:' deploy/dev/*.yaml |
                sed -E 's/^[[:space:]]*image:[[:space:]]*//' | sort -u)
+# Placeholders are checked above by shape; they are deliberately absent from
+# versions.env, which records tags rather than references built at bring-up.
+for placeholder in $PLANE_PLACEHOLDERS; do
+  all_actual=$(printf '%s\n' "$all_actual" | grep -vxF "$placeholder" || true)
+done
 all_want=$(for file in $MANIFESTS; do expected_images "$file"; done | sort -u)
 unmapped=$(comm -13 <(printf '%s\n' "$all_want") <(printf '%s\n' "$all_actual"))
 [ -z "$unmapped" ] || report "images in deploy/dev with no $VERSIONS entry: $(echo "$unmapped" | tr '\n' ' ')"

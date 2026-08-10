@@ -82,7 +82,14 @@ KUBECTL=(kubectl --context "$PROFILE")
 
 # Deployments to wait on, and how long each gets. Zitadel runs schema migrations on first boot, so
 # it is slow in a way the others are not.
-DEPLOYMENTS="postgres valkey redpanda seaweedfs hello"
+DEPLOYMENTS="postgres valkey redpanda seaweedfs hello dataplane"
+
+# Where the first-party plane images come from. "local" builds them into this
+# minikube profile; "registry" uses the published release named in versions.env.
+# Either way the manifests are applied with a digest and never a tag (ADR-0035),
+# so what runs is identifiable after the fact in both modes.
+IMAGE_SOURCE="${GITFROK_DEV_IMAGE_SOURCE:-local}"
+PAT_SECRET=gitfrok-pat-verifier
 ZITADEL_TIMEOUT=420s
 DEFAULT_TIMEOUT=240s
 
@@ -353,12 +360,79 @@ printf '  mount it at %s and set %s to that path.\n' "$POLICY_MOUNT" "$POLICY_EN
 printf '  No workload consumes it yet: deploy/dev/ has no dataplane manifest, and backend/ has no\n'
 printf '  Dockerfile to build one from. See deploy/dev/README.md ("Policy bundle").\n'
 
+# ------------------------------------------------------------------- plane images
+# ADR-0035 wants first-party images pinned by digest. A tag would let the running
+# plane change without the manifest changing, which is exactly what a digest is
+# for — and it is no less true of a local build than of a published one.
+step "Plane images ($IMAGE_SOURCE)"
+plane_image() {
+  # $1 = image basename (dataplane-app), $2 = Dockerfile, $3 = build context
+  case "$IMAGE_SOURCE" in
+  local)
+    minikube -p "$PROFILE" image build -t "gitfrok/$1:dev" -f "$2" "$3" >/dev/null ||
+      die "building $1 into minikube failed"
+    # `image ls` prints repo:tag; the digest comes from inspecting what was built.
+    digest=$(minikube -p "$PROFILE" ssh -- \
+      "sudo ctr -n k8s.io images ls name==docker.io/gitfrok/$1:dev -q" 2>/dev/null |
+      head -1 | tr -d '\r')
+    [ -n "$digest" ] ||
+      die "built $1 but could not resolve its digest — refusing to apply a tag (ADR-0035)"
+    printf 'gitfrok/%s@%s' "$1" "$digest"
+    ;;
+  registry)
+    digest=$(crane digest "$GITFROK_IMAGE_REGISTRY/$1:$GITFROK_RELEASE" 2>/dev/null) ||
+      die "no published $1:$GITFROK_RELEASE — publish the release or use GITFROK_DEV_IMAGE_SOURCE=local"
+    printf '%s/%s@%s' "$GITFROK_IMAGE_REGISTRY" "$1" "$digest"
+    ;;
+  *)
+    die "GITFROK_DEV_IMAGE_SOURCE must be 'local' or 'registry', got '$IMAGE_SOURCE'"
+    ;;
+  esac
+}
+
+DATAPLANE_IMAGE=$(plane_image dataplane-app backend/Dockerfile.dataplane backend)
+echo "dataplane: $DATAPLANE_IMAGE"
+
+# The CI runner image is not built here: nothing in the tree produces one yet, and
+# the plane refuses a runner reference that is not digest-pinned. Until it exists,
+# the plane runs with CI dispatch unconfigured, which records jobs and launches
+# nothing — a state it handles deliberately rather than by accident.
+CI_RUNNER_IMAGE=""
+
+# -------------------------------------------------------------------- PAT verifier
+# Generated, never committed, for the same reason as the TLS key: a credential in
+# the tree is a credential every clone of the tree holds.
+step "PAT verifier key secret '$PAT_SECRET'"
+"${KUBECTL[@]}" create secret generic "$PAT_SECRET" -n "$NS" \
+  --from-literal=key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')" \
+  --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+
+# ---------------------------------------------------------------------------- KEDA
+# Applied from the upstream release rather than vendored (ADR-0039). Without the
+# operator a ScaledObject is an inert custom resource and T-0017 AC2 cannot be
+# demonstrated at all.
+step "KEDA $KEDA_VERSION"
+"${KUBECTL[@]}" apply --server-side -f \
+  "https://github.com/kedacore/keda/releases/download/v$KEDA_VERSION/keda-$KEDA_VERSION.yaml" ||
+  die "installing KEDA failed"
+"${KUBECTL[@]}" rollout status deployment/keda-operator -n keda --timeout="$DEFAULT_TIMEOUT"
+
 # ---------------------------------------------------------------------------- workloads
 # Ingress last: it is the only object that depends on the Services and the TLS secret existing.
 step "Applying manifests"
 for m in postgres valkey redpanda seaweedfs zitadel hello ingress; do
   "${KUBECTL[@]}" apply -f "deploy/dev/$m.yaml"
 done
+
+# The plane manifest carries placeholders rather than tags, so that applying it
+# without resolving them fails loudly instead of running something mutable.
+sed -e "s|GITFROK_IMAGE_DATAPLANE|$DATAPLANE_IMAGE|" \
+    -e "s|GITFROK_IMAGE_CI_RUNNER|$CI_RUNNER_IMAGE|" \
+    deploy/dev/dataplane.yaml | "${KUBECTL[@]}" apply -f -
+
+# The ScaledObject goes on after the Deployment it targets, so KEDA never sees a
+# scale target that is not there yet.
+"${KUBECTL[@]}" apply -f deploy/dev/ci-scaledobject.yaml
 
 step "Waiting for rollouts"
 for d in $DEPLOYMENTS; do

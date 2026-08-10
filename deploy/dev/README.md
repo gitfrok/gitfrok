@@ -10,9 +10,11 @@ Kubernetes manifests for the local Minikube dev environment per ADR-0024.
 > directory used to rest on.
 >
 > What is **not** verified is narrow and named: AC1's create path (blocked on one `sysctl`), AC3's
-> `*.gitsaas.test` routing from the host (blocked on rootless podman), and AC4's macOS half. There
-> is also no dataplane manifest here — `backend/` has no Dockerfile — so the policy bundle this
-> directory publishes has no consumer yet.
+> `*.gitsaas.test` routing from the host (blocked on rootless podman), and AC4's macOS half.
+>
+> `dataplane.yaml` and `ci-scaledobject.yaml` are **written but not yet run in a cluster**: this
+> host cannot bring one up. Treat them as unverified until someone applies them — the same standard
+> the nine defects above earned.
 > See [What is not done yet](#what-is-not-done-yet).
 
 ## Service Architecture
@@ -22,6 +24,8 @@ Local Services (Minikube + ingress-dns)
 ├── postgres:5432          — PostgreSQL 18 (tenancy + RLS, T-0004)
 ├── valkey:6379            — Valkey 9.1 (replaces Redis, ADR-0023)
 ├── redpanda:9092          — Redpanda v26.2 (event broker; ADR-0023 floor is 26.1)
+├── dataplane:8080/9090    — the data plane (T-0021 image, T-0017 CI metric on :9102)
+├── keda (ns: keda)        — autoscales the data plane on CI queue depth (T-0017 AC2)
 │   ├── :8081              — Schema Registry
 │   ├── :8082              — PandaProxy (HTTP proxy)
 │   ├── :9644              — Admin API (readiness)
@@ -90,7 +94,7 @@ A ConfigMap full of Rego committed here would be a second author for something i
 say governance alone owns, and it would drift silently. Same reasoning as the mkcert key, which
 `dev-up.sh` also generates rather than commits.
 
-### The contract a dataplane manifest must honour
+### The contract the dataplane manifest honours
 
 ```yaml
     env:
@@ -106,10 +110,9 @@ say governance alone owns, and it would drift silently. Same reasoning as the mk
       name: gitfrok-policy-bundle
 ```
 
-**Nothing consumes it yet, and that is not an oversight to fix here.** `deploy/dev/` has no
-dataplane manifest, and `backend/` has no Dockerfile to build an image from — so there is no pod to
-mount it into. The ConfigMap exists so that the bundle is already correct and already verified when
-that image lands; wiring it is the consumer's one-time cost, not a new investigation.
+`dataplane.yaml` consumes it. That manifest honours the contract above, and the plane refuses to
+start without the mount, so a bundle that failed to build is a rollout that does not come up rather
+than a cluster that denies every request for reasons nobody can see.
 
 ### Two ways this goes silently wrong
 
@@ -385,6 +388,27 @@ driver (`minikube start --driver=podman --container-runtime=containerd`), profil
 | AC2 — all services come up from these manifests using `versions.env` tags | **VERIFIED** — all six deployments Available, and `smoke-dev.sh` confirmed all six running images come from `versions.env`. Getting here took **seven manifest fixes** (below); as written, three of the five services could never have started. |
 | AC3 — services reachable at `*.gitsaas.test` over HTTPS via a mkcert wildcard secret | **verified over the real ingress path, under rootless podman, with no `port-forward`** — `GET https://hello.gitsaas.test/` returns `http_code=200`, `ssl_verify_result=0` (validated against the mkcert CA, never `curl -k`) and the hello fixture, hitting `127.0.0.1:443`. **The previous conclusion here was wrong and is retracted:** it said the rootless node IP being unroutable meant AC3 "needs a rootful driver or KVM". It needed the node's 80/443 *published to the host* — `minikube start --ports=80:80,443:443`, which the podman driver supports and this script now passes by default (`MINIKUBE_PORTS`). Binding those ports rootless also needs `net.ipv4.ip_unprivileged_port_start=0`; the create path checks for it and prints the fix. Still root-requiring, and still not automated: the **host DNS** half. Until `*.gitsaas.test` resolves to `127.0.0.1`, the 200 above is reached with `curl --resolve`. |
 | AC4 — no OrbStack, no Docker Compose; macOS and Linux | **verified on both, 2026-08-09** — no compose files exist and every OrbStack/Compose mention in the tree is a prohibition. The macOS half is no longer inference: a `macos-latest` lane in all five repos parses every tracked script under **bash 3.2.57** on `arm64-apple-darwin25` and runs the fitness gates against Darwin's **own BSD userland** — including `governance/scripts/check-docs.sh`, the gate the 2026-08 audit found would have aborted outright on macOS via `find -printf`. Two genuinely macOS-fatal defects had been found and fixed by the audit this replaces: that one, and `bench-storage.sh` using `stat -f -c %T` with the error swallowed by `2>/dev/null \|\| echo unknown`, leaving its RAM-disk guard **silently inert on macOS**. The audit is now a standing gate (`check-shell-portability.sh`, SPEC-0014) rather than something someone remembers to run. `sort -z` is **resolved**: Darwin accepts it, so it was never a defect — dropping it from `dev-up.sh` was still right, being cosmetic there. **What is not verified is a cluster bring-up on a Mac**, which needs a hypervisor a hosted runner has not got; see [What is verified about macOS, and what is not](#what-is-verified-about-macos-and-what-is-not). |
+
+### The plane workloads, and what is not proven about them
+
+`dataplane.yaml` and `ci-scaledobject.yaml` land here as part of T-0017 AC2, along with the KEDA
+install and the image resolution `dev-up.sh` now performs. **None of it has run in a cluster** — the
+host that wrote it cannot bring one up. Given what a first real run cost the manifests below, treat
+that as a warning rather than a formality.
+
+Three things about them are worth stating plainly rather than discovering later:
+
+1. **Images are digest-pinned in both modes.** `GITFROK_DEV_IMAGE_SOURCE=local` (the default) builds
+   the plane into the minikube profile and resolves the digest of what it just built;
+   `=registry` uses the published release in `versions.env`. The manifest carries a placeholder, so
+   `kubectl apply -f deploy/dev/dataplane.yaml` on its own fails — deliberately, because the
+   alternative is a mutable tag.
+2. **The ScaledObject cannot yet demonstrate real autoscaling.** The dev job queue is in-process, so
+   each replica reports the depth of its own queue and a new replica starts empty. The scaler,
+   the metric, and the trigger are correct and in place; dividing the work needs the durable queue.
+3. **There is no `git-storaged` workload.** `backend/` builds no image for it — it needs `git` on the
+   path, so the scratch base the other planes use will not do. Until that exists the plane runs
+   without a Git transport, which is why `dataplane.yaml` configures no SSH door.
 
 ### The seven defects the first run found
 
