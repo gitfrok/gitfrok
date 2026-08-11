@@ -119,8 +119,9 @@ no in-place path down. Moving up rolls out on the existing volume untouched.
 
 ## Resources, probes, storage
 
-Requests total **1.36 CPU / 1.39 GB** (limits 2.8 CPU / 2.78 GB), so `dev-up` defaults the VM to
-4 CPU / 6144 MiB — Minikube's 2/2 default cannot fit this plus the ingress controller. Redpanda gets
+Requests across the applied manifests total **1.66 CPU / 2000 MiB** (`seaweedfs-mount.yaml` is opt-in
+and excluded), so `dev-up` defaults the VM to 4 CPU / 6144 MiB — Minikube's 2/2 default cannot fit this
+plus the ingress controller. Redpanda gets
 `--memory=768M` against a 1Gi limit: Seastar pre-reserves what it is told, and a value equal to the
 limit gets the pod OOMKilled.
 

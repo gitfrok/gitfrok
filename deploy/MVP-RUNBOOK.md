@@ -7,8 +7,10 @@ T-0003's cluster lane, none of which this file covers.
 `governance/` decides; this file only sequences it (ADR-0001). Per-manifest detail and the defect
 record are in [`dev/README.md`](dev/README.md); where the work stands is [`../HANDOFF.md`](../HANDOFF.md).
 
-**Three steps need root or a human and are not automated:** host DNS (step 3), database migrations
-(step 4), the Zitadel OIDC client (step 5). Everything else is `make dev-up`.
+**One step is not automated: host DNS (step 3), which needs root.** Everything else is `make dev-up` —
+including the database migrations and the Zitadel OIDC client, which `dev-up.sh` converges by calling
+`scripts/dev-provision.sh` at the end. Steps 4 and 5 document what that script does and how to do it by
+hand when it fails.
 
 ## 0. Prerequisites
 
@@ -16,7 +18,7 @@ record are in [`dev/README.md`](dev/README.md); where the work stands is [`../HA
 |---|---|
 | `minikube`, `kubectl`, `mkcert` on `PATH` | `dev-up.sh` refuses to start without all three |
 | rootless podman or docker | `--driver` is left to minikube unless `MINIKUBE_DRIVER` is set |
-| ~4 CPU / 6 GiB free | the manifests request 1.36 CPU / 1.39 GB; the ingress controller needs the rest |
+| ~4 CPU / 6 GiB free | the manifests request 1.66 CPU / 2000 MiB; the ingress controller needs the rest |
 | `git`; Go ≥ 1.26 / Node ≥ 26 to rebuild images | floors in `.tool-versions` and `versions.env` |
 
 ```bash
@@ -81,10 +83,12 @@ done, `make dev-smoke` reaches the ingress with `curl --resolve` and reports the
 distinct failure. On the verified host (dnsmasq + systemd-resolved) `dev-smoke` passes every host by
 name.
 
-## 4. Apply the database migrations (manual)
+## 4. Database migrations — `dev-provision` applies them
 
-**Nothing in the cluster applies them.** `deploy/dev/postgres.yaml` creates the T-0004 tenancy
-baseline from its own ConfigMap; three migration directories in `backend/` are applied by hand:
+`deploy/dev/postgres.yaml` creates the T-0004 tenancy baseline from its own ConfigMap, and
+`scripts/dev-provision.sh` (which `dev-up` runs, and `make dev-provision` re-runs idempotently) applies
+the three backend migrations as the postgres superuser. Nothing in the *cluster* applies them, so a
+`kubectl apply` without the script leaves you to do it by hand:
 
 ```
 backend/platform/db/migrations/0001_tenancy_baseline.sql
@@ -104,10 +108,15 @@ manifest — that hides the drift instead of shrinking it.
 binds the table owner only when forced; a DSN pointing at `postgres` makes tenant isolation inert
 while still reporting as enabled.
 
-## 5. Create the Zitadel OIDC client (manual)
+## 5. Zitadel OIDC client — `dev-provision` creates it
 
-`dev-up` deploys Zitadel and creates nothing inside it. The BFF expects an application with client ID
-`bff`, matching `deploy/dev/bff.yaml`:
+`dev-provision.sh` creates the BFF's OIDC web application if it does not exist, driving the admin login
+headlessly through the same API surface the Login V2 UI uses — no browser, no console. It writes the
+resulting client ID into the ConfigMap `gitfrok-oidc`, restarts the BFF, and then **verifies the full
+code flow against the real issuer**, which is the scenario's "OIDC login" step proved rather than
+assumed.
+
+Its configuration, matching `deploy/dev/bff.yaml`:
 
 | Variable | Value |
 |---|---|
@@ -116,16 +125,25 @@ while still reporting as enabled.
 | `GITFROK_OIDC_REDIRECT_URI` | `https://app.gitsaas.test/callback` |
 | `GITFROK_OIDC_SCOPE` | `openid profile email` |
 
-Log in at `https://zitadel.gitsaas.test` as `admin@gitsaas.test` / `ChangeMe123!` and create a web
-application with exactly that client ID and redirect URI, PKCE as the auth method (ADR-0045).
-Sessions are `GITFROK_SESSION_STORE=memory` here; ADR-0049 decision 5 names Valkey for a shared
-store and wiring it is outstanding.
+To do it by hand after a provisioning failure: log in at `https://zitadel.gitsaas.test` as
+`admin@gitsaas.test` / `ChangeMe123!` and create a web application with exactly that client ID and
+redirect URI, PKCE as the auth method (ADR-0045). Sessions are `GITFROK_SESSION_STORE=memory` here;
+ADR-0049 decision 5 names Valkey for a shared store, and wiring it is outstanding.
 
 ## 6. The object tier — nothing to do
 
 `dev-up` wires it: `git-storaged` and the data plane get the five `GITFROK_SEAWEEDFS_S3_*` variables,
 the credentials are upserted as a Secret, and the `gitfrok` bucket is created before anything can
 write. LFS works.
+
+**Bucket creation is the one step `dev-up` warns about instead of dying on** — the cluster is otherwise
+usable and only LFS is affected, but writes into a missing bucket are *accepted and lost*. If you see
+that warning, run the command it prints:
+
+```bash
+echo 's3.bucket.create -name gitfrok' |
+  kubectl --context gitfrok exec -i -n default deployment/seaweedfs -- weed shell
+```
 
 What runs here is the **S3 adapter**, not ADR-0050's FUSE mount, because the mount does not propagate
 to the node on this driver — measured, with the full evidence and the two defects it exposed in

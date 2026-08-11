@@ -41,7 +41,9 @@ yet, so the first move is a plan under `governance/docs/plans/` — not code.
    proofs skip without `TEST_DATABASE_URL`, so two tasks' central claims rest on a local run only.
 3. **Two sources of schema truth** — `deploy/dev/postgres.yaml`'s ConfigMap creates the T-0004
    tenancy schema independently of `backend/`'s migration files. They agree; nothing enforces it.
-4. Database migrations are applied by hand (runbook step 4).
+4. Host DNS for `*.gitsaas.test` is the one dev step nothing automates — it needs root, so `dev-up.sh`
+   prints the snippet rather than applying it. Migrations and the Zitadel OIDC client are converged by
+   `scripts/dev-provision.sh`.
 5. Per-consumer codegen gating is impossible: each consumer's `buf.gen.yaml` reads
    `../governance/contracts`, a sibling checkout that exists only in this composition, so contract
    freshness is gated at the super-repo pin bump rather than in the consumer's own CI.
@@ -60,11 +62,15 @@ yet, so the first move is a plan under `governance/docs/plans/` — not code.
 
 ## The lesson the record keeps
 
-A test against a fake proves the control flow, not the claim. Proving T-0018 and the object tier
-against live infrastructure found six defects that had all passed review — imports that produced
-unreachable repositories, an `authz.rego` that granted `repository.import` to no role, a SeaweedFS
-gateway serving every object to unsigned requests, and three more in `deploy/dev/README.md`'s record.
-Prefer a live proof for anything an acceptance criterion rests on.
+A test against a fake proves the control flow, not the claim. Proving T-0018's AC1 and AC2 against
+live infrastructure found three defects that had all passed review — a `git fetch` with no refspec
+that landed no branches, so imports produced repositories nothing could reach; an `authz.rego` that
+granted `repository.import` to no role, so AC20 had "passed" only because nobody could import; and a
+SeaweedFS PUT into a missing bucket answering 200 and keeping nothing. Wiring the object tier found a
+fourth: the S3 gateway served every object to unsigned requests, because the credentials sat on
+SeaweedFS's `anonymous` identity. Prefer a live proof for anything an acceptance criterion rests on —
+and see `deploy/dev/README.md` for the eleven separate defects that only a real cluster bring-up
+exposed.
 
 ## Hard rules
 
