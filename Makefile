@@ -14,11 +14,11 @@ trust-bundle-check: ## verify versioned public Cosign verification keys (ADR-004
 	@./scripts/check-image-trust-bundle.sh
 bench-storage: ## T-0007: benchmark git on SeaweedFS-FUSE vs a block-backed dir + probe POSIX semantics
 	@./scripts/bench-storage.sh
-rulesets: ## show what the ADR-0031 merge-enforcement rulesets would do (read-only)
+rulesets: ## ADR-0031 rulesets, read-only (INERT under ADR-0053 — no rulesets on private repos here)
 	@./scripts/apply-rulesets.sh plan
-rulesets-apply: ## apply the ADR-0031 rulesets to all repos + drop legacy protection (needs an admin token)
+rulesets-apply: ## apply the ADR-0031 rulesets (inert here; ready if the repos go public or org buys Team)
 	@./scripts/apply-rulesets.sh apply
-rulesets-check: ## fail if any repo drifted from ADR-0031 (T-0002 AC5); not in CI — needs admin scope
+rulesets-check: ## check ADR-0031 drift; reports UNAVAILABLE on this plan (ADR-0053)
 	@./scripts/apply-rulesets.sh check
 codegen-check: ## fail if any consumer's gen/ drifted from the pinned contracts (T-0020, ADR-0032)
 	@./scripts/check-codegen-fresh.sh

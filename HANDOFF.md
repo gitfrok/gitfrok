@@ -79,14 +79,21 @@ exposed.
 - Decisions, contracts and policies change **only** in `governance/` (invariants 21–25).
 - Dependency direction is one-way: `webfrontend → bff → backend → governance`.
 - **One commit never spans two submodules.** The super-repo stores **pins**, never in-place edits to
-  a submodule path; pins move in their own commit after the submodule PR merges.
+  a submodule path; pins move in their own commit, after the submodule commit is on its `main`.
 - New decision → **Proposed ADR and stop.** New behaviour → **spec first.** API change → governance
-  PR first, additive only.
+  first, additive only.
 - Every query tenant-scoped; authZ through the PDP; audit append-only.
-- **Four-eyes review is mandatory** — an approving review from an account other than the author,
-  owners included (ADR-0031). There is no `--admin` path around it.
-- After a PR merges, delete the branch locally (`-D`; squash merges make `-d` refuse) **and** on the
-  remote, then `git remote prune origin`. Delete-branch-on-merge is not enabled on these repos.
+- **Work lands directly on `main`** (ADR-0053). No pull request or review is required — these are
+  private repos on a plan that gives them neither rulesets nor branch protection, so nothing enforced
+  the old gate and the tree no longer claims it did. A pull request is available for anything worth
+  discussing first; it is a choice, not a gate.
+- **CI on push is the only gate, so run the local gates before you push** — `make verify`, the repo's
+  own tests, its fitness functions. A red `main` is a stop-everything condition: the next commit fixes
+  it or reverts it, and nothing else proceeds until it is green.
+- Declare SPEC-0012's ceremony tier as a `Ceremony:` trailer in the commit message. Its gate reads a
+  PR body, so it is inert on a push until taught to read the commit (ADR-0053, open question).
+- If you do use a branch, delete it locally (`-D`; squash merges make `-d` refuse) **and** on the
+  remote once it lands, then `git remote prune origin`.
 
 ## Tool entry points
 

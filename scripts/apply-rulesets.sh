@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Super-repo operational gate: apply the ADR-0031 merge-enforcement rulesets to every repo.
 #
+# INERT SINCE 2026-08-12 (ADR-0053). These repos are private on a plan that gives a private repo
+# neither rulesets nor branch protection, so every mode below reports UNAVAILABLE and exits 0. Work
+# lands directly on the default branch and CI on push is the only gate. Everything after that probe
+# is preserved for the day the repos go public or the org buys Team.
+#
 # ADR-0031 splits `main` protection into two rulesets so admin bypass covers the human gate and
 # never the machine gate:
 #   main-integrity — PR required (0 approvals), required status checks, no force-push, no deletion,
@@ -58,6 +63,26 @@ done
 case "$MODE" in
   plan|apply|check) ;;
   *) echo "usage: $0 [plan|apply|check]"; exit 2 ;;
+esac
+
+# ADR-0053: the repos are private, and this plan gives a private repo neither rulesets nor branch
+# protection — every rulesets call answers 403 "Upgrade to GitHub Pro or make this repository public".
+#
+# Reporting that as drift would be a lie in the other direction: nothing has drifted, the mechanism is
+# simply unavailable. So say which it is and stop, with 0 — a missing capability is not a failing gate,
+# and a red exit here would make `make rulesets-check` permanently broken rather than honestly inert.
+#
+# The rest of this script is kept intact deliberately. The day these repos go public, or the org buys
+# Team, restoring ADR-0031's enforcement is one `apply` away instead of an archaeology exercise.
+probe=$(gh api "/repos/$ORG/gitfrok/rulesets" 2>&1 || true)
+case "$probe" in
+  *"Upgrade to GitHub Pro"*)
+    echo "rulesets: UNAVAILABLE — $ORG's repos are private on a plan without rulesets or branch"
+    echo "  protection (GitHub answers 403 on both). ADR-0031's enforcement cannot be applied or"
+    echo "  verified here; ADR-0053 supersedes it: work lands on the default branch and CI on push is"
+    echo "  the gate. This script stays ready for a public repo or a paid plan."
+    exit 0
+    ;;
 esac
 
 fail=0
