@@ -22,15 +22,16 @@ disagree, governance wins (ADR-0001). The per-manifest detail and the full defec
 | All ten Phase-1 tasks (T-0010…T-0018, T-0021) | **Done** |
 | Cluster bring-up on Linux (`make dev-up` → `make dev-smoke`) | **verified**, including the create path |
 | Cluster bring-up on macOS | **not verified** — needs a hypervisor no hosted runner has |
-| Host DNS for `*.gitsaas.test` | **manual, needs root** — the script prints, it does not apply |
+| Host DNS for `*.gitsaas.test` | **manual, needs root** — the script prints, it does not apply; wired and `dev-smoke`-green by name on the verified host |
 | Database migrations | **manual** — nothing in the cluster applies them |
 | Zitadel OIDC client for the BFF | **manual** — `dev-up` deploys Zitadel, it does not configure an app |
 | LFS / artifact / image object tier | **wired to S3 and proved live**; ADR-0050's FUSE mount cannot propagate on this driver — see [step 6](#6-the-object-tier-adr-0050--adr-0051) |
 | CI sandbox dispatch (gVisor) | **unavailable** under rootless podman |
 | Durability quorum and failover | **proved in tests, not demonstrable here** — one node |
 
-The last three rows are the whole of what stands between this runbook and the Phase-1 exit
-scenario. None of them is missing code.
+The last two rows are the whole of what stands between this runbook and a full end-to-end
+demonstration of the Phase-1 exit scenario. Neither is missing code, and Phase 1 closed with both
+recorded as limits of this host against T-0003's cluster lane (governance #130).
 
 ---
 

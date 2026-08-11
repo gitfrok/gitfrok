@@ -27,32 +27,38 @@ and this file is stale.** Read this file first for where a session left off; rea
 of them, closed 2026-08-11 with 23 of its 24 acceptance criteria met and AC19 — the **evidence-pack**
 criterion — formally moved to Phase 2, because no evidence-pack surface exists yet to satisfy it.
 
-Phase 1 is **not** exited. Its first exit criterion is met; the second is not, and that is the whole
-of the remaining work:
+**Phase 1 is Complete, closed 2026-08-11** by governance #130 — `docs/plans/phase-1-mvp.md` and
+`docs/roadmap/README.md` both read **Complete (2026-08-11)**:
 
 | Exit criterion | State |
 |---|---|
-| all Phase-1 tasks Done | **met** |
-| the end-to-end Minikube scenario passes | **not met** — three blockers, none of them missing code |
+| all Phase-1 tasks Done | **met** — T-0018 was the last |
+| the end-to-end Minikube scenario passes | **met except two infrastructure-bound steps** — the full MR flow was verified live 2026-08-11 and host DNS is closed on the verified host (`make dev-smoke` green by name); CI dispatch and the durability-quorum/failover demonstration are recorded as limits of this host, not as open code work |
 | CI gates green per `ci-gates.md` | **met on every merged PR**, with the two skip-without-infrastructure gaps that file records |
 
-The three blockers, in the order they are cheapest to close:
+The two remaining limits belong to T-0003's cluster lane, and neither is missing code:
 
-*(The object tier was the fourth and is now closed: `deploy/dev` wires the S3 adapter, `dev-up`
-creates its bucket, and backend's live suite passes against the cluster. ADR-0050's FUSE mount
-cannot propagate to the node on this driver — the measurement is in `deploy/dev/README.md`.)*
-
-1. **Database migrations are applied by hand** (runbook step 4).
-2. **No gVisor RuntimeClass under rootless podman**, so CI dispatch is unconfigured in the dev
-   cluster. Recorded against T-0017.
-3. **One git node**, so the durability quorum and failover promotion cannot be demonstrated in the
+1. **No gVisor RuntimeClass under rootless podman**, so CI dispatch is unconfigured in the dev
+   cluster. The sandbox model and the K8s Job path are implemented. Recorded against T-0017.
+2. **One git node**, so the durability quorum and failover promotion cannot be demonstrated in the
    cluster. Both are proved by T-0012's tests and T-0018's two-node integration suite; what is
-   missing is a second physical node and an attached volume — T-0003's cluster lane.
+   missing is a second physical node and an attached volume.
+
+Two earlier blockers are closed. **Host DNS** is wired on the verified host — dnsmasq plus
+systemd-resolved answer `*.gitsaas.test` at the loopback, and it stays a manual root step by design
+(`dev-up.sh` prints the snippet, it does not apply it). **The object tier** is wired to the S3
+adapter, `dev-up` creates its bucket, and backend's live suite passes against the cluster; ADR-0050's
+FUSE mount cannot propagate to the node on this driver — the measurement is in `deploy/dev/README.md`.
+Database migrations are still applied by hand (runbook step 4); that is a runbook ergonomic, not an
+exit criterion.
+
+**Next work is Phase 2** — see `governance/docs/roadmap/README.md` §Phase 2. It has no plan file,
+epics or tasks yet, so the first move is a plan under `governance/docs/plans/`, not code.
 
 **Start at [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md)** if the task is to get something running.
 Start at `governance/docs/plans/phase-1-mvp.md` if the task is to decide what to build next.
 
-### Known gaps, beyond the Phase-1 blockers above
+### Known gaps, beyond the two Phase-1 limits above
 
 Tracked in PRD §12 except the last, which is observed in the tree:
 
