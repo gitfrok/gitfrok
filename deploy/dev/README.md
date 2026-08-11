@@ -39,7 +39,7 @@ Every image tag is asserted against `versions.env` by `scripts/check-dev-images.
 | File | Service | Notes |
 |---|---|---|
 | `postgres.yaml` | PostgreSQL 18 | T-0004 RLS baseline + `gitfrok_app` role from its own ConfigMap |
-| `valkey.yaml` | Valkey 9.1 | RDB + AOF; no `maxmemory`, so a large working set is an OOMKill |
+| `valkey.yaml` | Valkey 9.1 | RDB + AOF; holds the BFF's browser sessions (ADR-0049); no `maxmemory`, so a large working set is an OOMKill — and now that sessions live here, an eviction is a logout |
 | `redpanda.yaml` | Redpanda v26.2 | single broker, TLS off, config via `rpk` flags only |
 | `seaweedfs.yaml` | SeaweedFS 4.40 | master + filer + S3 in one pod; S3 identity `gitfrok` |
 | `seaweedfs-mount.yaml` | ADR-0051 mount DaemonSet | **not applied by default** — `MOUNT_DAEMONSET=1` |
@@ -47,7 +47,7 @@ Every image tag is asserted against `versions.env` by `scripts/check-dev-images.
 | `git-storaged.yaml` | Git storage tier | block-volume PVC; writable root filesystem (git needs it) |
 | `dataplane.yaml` | data plane | healthz 200 with the policy bundle, **exits** without it (AC4) |
 | `controlplane.yaml` | control plane | healthz-only baseline |
-| `bff.yaml` | BFF | aggregation only (invariant 18) |
+| `bff.yaml` | BFF | aggregation only (invariant 18); browser sessions in Valkey (ADR-0049/0052), with a `valkey-wait` init container |
 | `webfrontend.yaml` | web app (SSR) | reaches the BFF only (invariant 22) |
 | `hello.yaml` | smoke fixture | busybox `httpd` over a ConfigMap, non-root, read-only root |
 | `ci-scaledobject.yaml` | KEDA `ScaledObject` | written, never exercised in a cluster |

@@ -127,8 +127,12 @@ Its configuration, matching `deploy/dev/bff.yaml`:
 
 To do it by hand after a provisioning failure: log in at `https://zitadel.gitsaas.test` as
 `admin@gitsaas.test` / `ChangeMe123!` and create a web application with exactly that client ID and
-redirect URI, PKCE as the auth method (ADR-0045). Sessions are `GITFROK_SESSION_STORE=memory` here;
-ADR-0049 decision 5 names Valkey for a shared store, and wiring it is outstanding.
+redirect URI, PKCE as the auth method (ADR-0045).
+
+Browser sessions live in **Valkey** (`GITFROK_SESSION_STORE=valkey`, ADR-0049 decision 5), which the
+BFF opens itself under the single waiver ADR-0052 grants. A configured store it cannot reach is fatal
+at startup, so a broken cache shows up as a BFF that refuses to start rather than one that silently
+logs everyone out; an init container waits for `valkey:6379` so a cold cluster does not race it.
 
 ## 6. The object tier — nothing to do
 

@@ -59,6 +59,8 @@ yet, so the first move is a plan under `governance/docs/plans/` — not code.
   `deploy/dev/README.md`.
 - **Transfers proxy through the plane** under `repo.lfs.read` / `repo.lfs.write`, and every read is
   verified against the digest in the object's name (SPEC-0023, as amended by ADR-0050).
+- **Browser sessions: Valkey** (ADR-0049), opened by the BFF itself under the one datastore waiver
+  ADR-0052 grants. Every other cache or database client in the BFF still fails its boundary gate.
 
 ## The lesson the record keeps
 
