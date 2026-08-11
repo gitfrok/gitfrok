@@ -29,26 +29,11 @@ jobs:
       # SUBMODULES_TOKEN is a token that can read the sibling repos — contents: read on backend, bff,
       # governance and webfrontend is sufficient. Without it this step cannot succeed, and the
       # fallback keeps the failure message the same rather than pretending otherwise.
-      # Runs before checkout deliberately: without this, a missing or unusable token surfaces as four
-      # "Repository not found" clone failures, which is what GitHub says for a private repo you cannot
-      # read — indistinguishable from a repo that does not exist, and it names neither cause nor fix.
-      - name: submodule token present
-        env:
-          SUBMODULES_TOKEN: ${{ secrets.SUBMODULES_TOKEN }}
-        run: |
-          if [ -z "$SUBMODULES_TOKEN" ]; then
-            echo "::error::SUBMODULES_TOKEN is empty, so the four private submodules cannot be cloned."
-            echo "Fix: add it as a REPOSITORY secret on this repo (Settings -> Secrets and variables"
-            echo "  -> Actions -> New repository secret). An ORGANISATION secret does not work here:"
-            echo "  on this plan org secrets are not available to private repositories, the same"
-            echo "  limitation that made ADR-0031's rulesets unavailable (see ADR-0053)."
-            echo "The token needs read access to backend, bff, governance and webfrontend:"
-            echo "  - classic PAT with the 'repo' scope, or"
-            echo "  - fine-grained PAT with contents: read on all four, approved by the org."
-            exit 1
-          fi
-          echo "SUBMODULES_TOKEN present (${#SUBMODULES_TOKEN} chars)"
-
+      # Every gate here reads a submodule, so the checkout brings all four. The default GITHUB_TOKEN is
+      # scoped to this repository, which is enough while the four are public — it clones them
+      # anonymously and that works. It stopped working for the hours they were private (GitHub answers
+      # "Repository not found" for a private repo you cannot read), so the token falls back through
+      # SUBMODULES_TOKEN: set that secret and this keeps working if they ever go private again.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
@@ -225,26 +210,11 @@ jobs:
       # SUBMODULES_TOKEN is a token that can read the sibling repos — contents: read on backend, bff,
       # governance and webfrontend is sufficient. Without it this step cannot succeed, and the
       # fallback keeps the failure message the same rather than pretending otherwise.
-      # Runs before checkout deliberately: without this, a missing or unusable token surfaces as four
-      # "Repository not found" clone failures, which is what GitHub says for a private repo you cannot
-      # read — indistinguishable from a repo that does not exist, and it names neither cause nor fix.
-      - name: submodule token present
-        env:
-          SUBMODULES_TOKEN: ${{ secrets.SUBMODULES_TOKEN }}
-        run: |
-          if [ -z "$SUBMODULES_TOKEN" ]; then
-            echo "::error::SUBMODULES_TOKEN is empty, so the four private submodules cannot be cloned."
-            echo "Fix: add it as a REPOSITORY secret on this repo (Settings -> Secrets and variables"
-            echo "  -> Actions -> New repository secret). An ORGANISATION secret does not work here:"
-            echo "  on this plan org secrets are not available to private repositories, the same"
-            echo "  limitation that made ADR-0031's rulesets unavailable (see ADR-0053)."
-            echo "The token needs read access to backend, bff, governance and webfrontend:"
-            echo "  - classic PAT with the 'repo' scope, or"
-            echo "  - fine-grained PAT with contents: read on all four, approved by the org."
-            exit 1
-          fi
-          echo "SUBMODULES_TOKEN present (${#SUBMODULES_TOKEN} chars)"
-
+      # Every gate here reads a submodule, so the checkout brings all four. The default GITHUB_TOKEN is
+      # scoped to this repository, which is enough while the four are public — it clones them
+      # anonymously and that works. It stopped working for the hours they were private (GitHub answers
+      # "Repository not found" for a private repo you cannot read), so the token falls back through
+      # SUBMODULES_TOKEN: set that secret and this keeps working if they ever go private again.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
