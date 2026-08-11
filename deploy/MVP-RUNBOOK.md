@@ -265,7 +265,7 @@ trail → git-node failover promotes the in-sync replica.**
 | failover promotes the in-sync replica | **no** — one node |
 | LFS push/fetch through the plane | **yes** — the object tier is wired and its live suite passes against this cluster |
 
-Three of those four gaps are the same gap: **this host is one node without a hypervisor.** Closing
+Two of those three gaps are the same gap: **this host is one node without a hypervisor.** Closing
 them is T-0003's cluster lane — a second physical node running SPEC-0018's production coordinator,
 and an attached volume rather than a local partition.
 
