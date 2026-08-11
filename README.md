@@ -1,29 +1,31 @@
-# git-saas — super-repo
+# gitfrok — super-repo
 
-Multi-tenant Git SaaS (GitLab-Ultimate governance, GitHub UX, flat-rate, BYO-Kubernetes),
-delivered with **AGDD** (ADR-0028) across **four git submodules** (ADR-0027).
+Multi-tenant Git SaaS (GitLab-Ultimate governance, GitHub UX, flat rate, BYO-Kubernetes), built with
+**AGDD** (ADR-0028) across four submodules (ADR-0027). This repo holds **pinned submodule commits and
+dev orchestration only** — no product code.
 
 ```
-git-saas/                 super-repo (pinned submodule commits + dev orchestration)
-├── governance/  [sub]    control surface: ADRs, specs, contracts/, policies/, process, agent rules
-├── backend/     [sub]    Go modular monolith (one binary per plane) — ADR-0025
-├── bff/         [sub]     Go BFF (aggregation only)
-└── webfrontend/ [sub]    Astro + React SSR
+governance/    [sub]  control surface: ADRs, specs, contracts/, policies/, process, agent rules
+backend/       [sub]  Go modular monolith, one binary per plane (ADR-0025)
+bff/           [sub]  Go BFF, aggregation only
+webfrontend/   [sub]  Astro + React SSR
 ```
 
 ## Quickstart
+
 ```bash
-git clone --recurse-submodules <this-super-repo>
-make bootstrap      # init submodules + install toolchain floors (.tool-versions)
-make dev-up         # Minikube dev cluster (*.gitsaas.test, mkcert TLS) — ADR-0024
+git clone --recurse-submodules <this-repo>
+make bootstrap      # init submodules + report toolchain floors (.tool-versions)
+make dev-up         # Minikube dev cluster on *.gitsaas.test with mkcert TLS (ADR-0024)
+make dev-smoke      # assert the cluster is actually serving
 ```
 
 ## Where to look
-- **Picking up a session, or where things stand:** [`HANDOFF.md`](HANDOFF.md).
-- **Agents:** `AGENTS.md` (this repo), then `governance/AGENTS.md` + `governance/docs/`.
-- **Decisions (SoT):** `governance/docs/adr/README.md`.
-- **How work flows:** `governance/docs/process/agdd.md` (framework) + `agentic-sdlc.md` (loop).
-- **Topology & submodule workflow:** `governance/docs/architecture/04-repository-topology.md`.
-- **Deploy / run the dev cluster:** [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md).
 
-Configure real submodule URLs in `.gitmodules` (placeholders provided).
+- **[`HANDOFF.md`](HANDOFF.md)** — where work stands, and the one page a new session should read.
+- **`AGENTS.md`** (this repo) → **`governance/AGENTS.md`** — the rules, in that order.
+- **`governance/docs/adr/README.md`** — decisions; governance is the Source of Truth (ADR-0001).
+- **[`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md)** — run the dev cluster, step by step.
+- **`governance/docs/architecture/04-repository-topology.md`** — submodule workflow.
+
+Submodule URLs are relative (`../<repo>.git`), so SSH and HTTPS clones both work unmodified.

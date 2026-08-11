@@ -56,7 +56,9 @@ expected_images() { # expected_images <manifest>
     dataplane.yaml) printf '%s\n' "$DATAPLANE_IMAGE" ;;
     git-storaged.yaml) printf '%s\n' "$GIT_STORAGED_IMAGE" ;;
     controlplane.yaml) printf '%s\n' "$CONTROLPLANE_IMAGE" ;;
-    bff.yaml) printf '%s\n' "$BFF_IMAGE" ;;
+    # The BFF's valkey-wait init container is busybox, same shape as zitadel's db-wait:
+    # it refuses to start without its session store (ADR-0052), so it waits for one.
+    bff.yaml) printf '%s\n' "$BFF_IMAGE" "$BUSYBOX_IMAGE" ;;
     webfrontend.yaml) printf '%s\n' "$WEBFRONTEND_IMAGE" ;;
     *) echo "unmapped manifest: $1" >&2; return 1 ;;
   esac

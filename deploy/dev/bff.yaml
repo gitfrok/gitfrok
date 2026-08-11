@@ -39,6 +39,24 @@ spec:
       - ip: "192.168.49.2"
         hostnames:
         - zitadel.gitsaas.test
+      initContainers:
+      # The BFF refuses to start without its configured session store (ADR-0052
+      # decision 4), which is correct and would otherwise show up as a CrashLoop
+      # race on a cold cluster: both are applied in the same pass and Valkey is
+      # not ready the instant the BFF is. Waiting here keeps the failure meaning
+      # "Valkey is broken" rather than "Valkey was slow", the same shape as
+      # zitadel's db-wait.
+      - name: valkey-wait
+        image: docker.io/library/busybox:1.35.0
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z valkey 6379; do
+              echo "Waiting for Valkey..."
+              sleep 2
+            done
+            echo "Valkey is ready"
       containers:
       - name: bff
         # Image mirrors deploy/dev/versions.env (BFF_IMAGE); dev-up.sh loads it
@@ -73,10 +91,16 @@ spec:
         # the ID token carries no owner and every login maps to no tenant.
         - name: GITFROK_OIDC_SCOPE
           value: "openid profile email urn:zitadel:iam:user:resourceowner"
-        # ADR-0049 decision 5 names Valkey for the session store; the in-memory
-        # store is the dev posture until a shared store is wired.
+        # The session store ADR-0049 decision 5 names, opened by the BFF itself
+        # under the one waiver ADR-0052 grants. Valkey rather than memory even in
+        # dev, because memory is what makes a rollout log every user out — and a
+        # store that cannot be reached is fatal at startup rather than a silent
+        # fallback (ADR-0052 decision 4), so a broken cache surfaces here as a
+        # BFF that refuses to start instead of one that quietly forgets people.
         - name: GITFROK_SESSION_STORE
-          value: "memory"
+          value: "valkey"
+        - name: GITFROK_SESSION_VALKEY_ADDR
+          value: "valkey:6379"
         - name: SSL_CERT_DIR
           value: "/etc/ssl/gitsaas"
         volumeMounts:
