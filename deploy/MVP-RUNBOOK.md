@@ -268,6 +268,55 @@ Three of those four gaps are the same gap: **this host is one node without a hyp
 them is T-0003's cluster lane — a second physical node running SPEC-0018's production coordinator,
 and an attached volume rather than a local partition.
 
+### 8a. Verified end-to-end run (2026-08-11)
+
+The full MVP flow was executed live against this cluster and passed: PAT issuance over the gRPC door,
+push, protected-ref direct push **denied and audited**, `SetBranchProtection` forwarded to the storage
+node, MR open (refs announced cross-process via `GitStorage.SubscribeRefUpdates`), review approve,
+merge, `main` moved, audit chain intact.
+
+```bash
+# 1. PAT via the identity door (port-forward dataplane 9090)
+grpcurl -plaintext -import-path ../governance/contracts \
+  -proto proto/identity/v1/identity.proto \
+  -d '{"tenant_id":"dev","actor_id":"user-admin","label":"phase1",
+       "scope_labels":["repo.read","repo.write"],"roles":["owner"]}' \
+  127.0.0.1:9090 gitsaas.identity.v1.CredentialAuthenticator.IssuePAT
+
+# 2. push / protected-ref denial (smart HTTP over the ingress; TLS CA NOT in system store)
+export GIT_SSL_CAINFO="$(mkcert -CAROOT)/rootCA.pem"
+git remote set-url origin "https://admin:$PAT@git.gitsaas.test/git/dev/acme.git"
+git push origin main        # first push, no protection yet
+grpcurl -plaintext -import-path ../governance/contracts \
+  -proto proto/codereview/v1/codereview.proto \
+  -d '{"context":{"tenant_id":"dev","repository_id":"acme","actor_id":"user-admin",
+       "request_id":"r1","actor_roles":["owner"]},
+       "target_ref":"refs/heads/main","required_approvals":1}' \
+  127.0.0.1:9090 gitsaas.codereview.v1.MergeRequestService.SetBranchProtection
+git push origin main        # now rejected: "refs/heads/main is protected"
+
+# 3. MR flow (refs are FULL names — "main" is rejected, "refs/heads/main" works)
+git push -u origin feature/mr-flow
+grpcurl … CreateMergeRequest   # source_ref:"refs/heads/feature/mr-flow" target_ref:"refs/heads/main"
+grpcurl … SubmitReview         # REVIEW_DISPOSITION_APPROVE, expected_version:1
+grpcurl … MergeMergeRequest    # expected_version:2 → state MERGED, main moves
+
+# 4. Audit chain (RLS-scoped read; dev denies without SET)
+kubectl exec deploy/postgres -- psql -U gitfrok_app -d gitfrok -c \
+  "SET app.tenant_id='dev'; SELECT tenant_seq, action, outcome, left(hash,12)
+   FROM audit.entries ORDER BY tenant_seq;"
+# entry 1 is the genesis root (prev_hash NULL); every later row chains.
+```
+
+Gotchas that cost an afternoon each:
+- **`build_if_absent`**: `minikube image rm` while a pod uses the image fails silently — scale the
+  deployment to 0 first, then `rm`, then `dev-up`. Otherwise the cluster keeps running the previous
+  build and "new" behavior never appears.
+- **In-memory stores reset with the plane**: a dataplane/git-storaged restart clears the ref
+  projection, protection rules, and every issued PAT. Re-create the bare repo (or re-push), re-apply
+  `SetBranchProtection`, and re-issue the PAT before re-running the flow.
+- **MR open needs full ref names** (`refs/heads/...`); short names are denied before any store lookup.
+
 ## 9. Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -281,6 +330,10 @@ and an attached volume rather than a local partition.
 | the data plane exits at boot | no loadable policy bundle | re-run `dev-up`, which republishes the ConfigMap from `governance/policies` |
 | every authorization decision denies | the bundle loaded with zero `.rego` files | `dev-up` refuses this now; confirm the ConfigMap has the rules, not just `.manifest` |
 | an RWO-backed pod deadlocks on rollout | `RollingUpdate` against a single-writer volume | `strategy: Recreate` (already set on the four stateful deployments) |
+| rebuilt image has no effect | `build_if_absent` — the pod still runs the old build | scale replicas to 0, `minikube image rm docker.io/gitfrok/<plane>:0.1.0`, re-run `dev-up` |
+| data plane crash-loops: `RegisterService called after Server.Serve` | the policy gRPC door raced registration | fixed in `ServePolicy()` (backend #54); rebuild the dataplane image |
+| fresh repo pushes but MR open/`refs` lookups fail | plane restart cleared the ref projection | re-create or re-push the bare repo, re-apply `SetBranchProtection`, re-issue the PAT |
+| MR open denied despite valid refs | short ref names (`main`) instead of full (`refs/heads/main`) | always pass full ref names in codereview RPCs |
 
 ## 10. Teardown
 
