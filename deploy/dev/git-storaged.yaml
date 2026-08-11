@@ -82,6 +82,11 @@ spec:
           value: /var/lib/gitfrok/repositories
         - name: GITFROK_GIT_STORAGE_LISTEN_ADDR
           value: ":9000"
+        # The audit sink (ADR-0007 composition): the node's DSN onto the
+        # tenant-scoped Postgres trail. The role must be gitfrok_app — db.Open
+        # refuses superuser, because RLS has to actually bind.
+        - name: GITFROK_DATABASE_URL
+          value: "postgres://gitfrok_app:gitfrok_app@postgres:5432/gitfrok"
         - name: GITFROK_POLICY_BUNDLE_DIR
           value: /etc/gitfrok/policy
         # The large-object tier: LFS objects today, CI artifacts and image blobs

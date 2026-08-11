@@ -48,6 +48,11 @@ spec:
           value: /etc/gitfrok/policy
         - name: GITFROK_LISTEN_ADDR
           value: ":8080"
+        # The audit sink (ADR-0007 composition): the plane's DSN onto the
+        # tenant-scoped Postgres trail. The role must be gitfrok_app — db.Open
+        # refuses superuser, because RLS has to actually bind.
+        - name: GITFROK_DATABASE_URL
+          value: "postgres://gitfrok_app:gitfrok_app@postgres:5432/gitfrok"
         - name: GITFROK_GIT_STORAGE_ADDR
           value: "git-storaged:9000"
         - name: GITFROK_GIT_HTTP_ADDR
