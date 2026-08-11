@@ -34,6 +34,19 @@ recorded as limits of this host against T-0003's cluster lane, neither missing c
 **Next work is Phase 2** (`governance/docs/roadmap/README.md`). It has no plan file, epics or tasks
 yet, so the first move is a plan under `governance/docs/plans/` — not code.
 
+## Blocking now
+
+**Super-repo CI cannot check out its submodules, so `main` is red** (first failure `c82627e`,
+2026-08-11). The repos went private and the default `GITHUB_TOKEN` is scoped to the super-repo alone,
+so `actions/checkout` clones the four siblings anonymously and gets `Repository not found`. Nothing in
+the tree can fix it: it needs a **secret**.
+
+Create a token with `contents: read` on `backend`, `bff`, `governance` and `webfrontend` and store it
+as `SUBMODULES_TOKEN` on the super-repo (or as an org secret visible to it). The workflow already
+prefers it and falls back to `github.token`, so adding the secret is the whole fix — no code change.
+Until then every super-repo gate is unrun, which under ADR-0053 means the only gate this repo has is
+whatever was run locally before the push.
+
 ## Known gaps
 
 1. Phase-2/3 have no plan files; their requirements (`PR-13`…`PR-23`) have no epics, specs or tasks.

@@ -21,10 +21,19 @@ jobs:
       # fetch-depth: 0 so `make ceremony-check` below has a merge base to diff against. With the
       # default depth of 1 it exits 3 rather than passing quietly — SPEC-0012 AC6 refuses to
       # certify a diff it cannot see, and a shallow clone is exactly that case.
+      # Every gate in this repo reads a submodule, so the checkout has to bring all four. The default
+      # GITHUB_TOKEN is scoped to *this* repository, which was enough while the four were public and
+      # is not now that they are private: it clones them as anonymous and GitHub answers "Repository
+      # not found" (which is what a 404-instead-of-403 for a private repo looks like).
+      #
+      # SUBMODULES_TOKEN is a token that can read the sibling repos — contents: read on backend, bff,
+      # governance and webfrontend is sufficient. Without it this step cannot succeed, and the
+      # fallback keeps the failure message the same rather than pretending otherwise.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - name: submodule pins under review
         run: git submodule status
@@ -188,10 +197,19 @@ jobs:
     name: macOS portability
     runs-on: macos-latest
     steps:
+      # Every gate in this repo reads a submodule, so the checkout has to bring all four. The default
+      # GITHUB_TOKEN is scoped to *this* repository, which was enough while the four were public and
+      # is not now that they are private: it clones them as anonymous and GitHub answers "Repository
+      # not found" (which is what a 404-instead-of-403 for a private repo looks like).
+      #
+      # SUBMODULES_TOKEN is a token that can read the sibling repos — contents: read on backend, bff,
+      # governance and webfrontend is sufficient. Without it this step cannot succeed, and the
+      # fallback keeps the failure message the same rather than pretending otherwise.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       # Part 3 of the gate asserts the bash and the userland before anything else runs, so a runner
       # image that put Homebrew's GNU coreutils ahead of /usr/bin fails loudly here instead of
