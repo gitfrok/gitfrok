@@ -34,6 +34,7 @@ spec:
     - s3.gitsaas.test
     - filer.gitsaas.test
     - app.gitsaas.test
+    - git.gitsaas.test
     secretName: gitsaas-tls
   rules:
   # The T-0003 smoke-test target (hello.yaml). Kept first and kept trivial: it isolates "is the
@@ -109,3 +110,18 @@ spec:
             name: webfrontend
             port:
               number: 4321
+  # The Git smart-HTTP front door (dataplane.yaml, GITFROK_GIT_HTTP_ADDR). The
+  # same mkcert wildcard cert terminates here, so a git client on the host talks
+  # to the plane the way a browser talks to the web app: one ingress, one CA,
+  # one certificate. LFS and ref transport share this host; the door itself
+  # tenant-scopes by the /git/{tenant}/{repository}.git path.
+  - host: git.gitsaas.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dataplane
+            port:
+              number: 8081
