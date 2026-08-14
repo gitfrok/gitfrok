@@ -87,14 +87,32 @@ name.
 
 `deploy/dev/postgres.yaml` creates the T-0004 tenancy baseline from its own ConfigMap, and
 `scripts/dev-provision.sh` (which `dev-up` runs, and `make dev-provision` re-runs idempotently) applies
-the three backend migrations as the postgres superuser. Nothing in the *cluster* applies them, so a
-`kubectl apply` without the script leaves you to do it by hand:
+the full backend migration set — the Phase-0/1 baseline and every Phase-2 migration, in dependency
+order — as the postgres superuser. Nothing in the *cluster* applies them, so a `kubectl apply` without
+the script leaves you to do it by hand:
 
 ```
 backend/platform/db/migrations/0001_tenancy_baseline.sql
 backend/modules/audit/internal/adapters/postgres/migrations/0001_audit_log.sql
+backend/modules/audit/internal/adapters/postgres/migrations/0002_audit_evidence_indexes.sql
 backend/modules/identity/internal/adapters/postgres/migrations/0001_identity_credentials.sql
+backend/modules/identity/internal/adapters/postgres/migrations/0002_identity_auditor_grants.sql
+backend/modules/policy/internal/adapters/postgres/migrations/0001_policy_decision_records.sql
+backend/modules/security/internal/adapters/postgres/migrations/0001_security_findings.sql
+backend/modules/security/internal/adapters/postgres/migrations/0002_security_triage.sql
+backend/modules/security/internal/adapters/postgres/migrations/0003_security_scan_report.sql
 ```
+
+Order matters: the tenancy baseline creates the schemas and the `gitfrok_app` role the module
+migrations grant to; audit 0002 indexes the tables audit 0001 creates; identity 0002 and policy 0001
+build on the baseline's RLS pattern; security 0002/0003 extend 0001's tables. The provisioning script
+verifies after applying — schemas `tenant/audit/identity/policy/security` present, and one table per
+Phase-2 migration (including `policy.decision_records` and the security scan/triage set).
+
+Skipping the Phase-2 set is not a partial state: the pinned backend selects Postgres-backed stores
+whenever `GITFROK_DATABASE_URL` is set (`deploy/dev/dataplane.yaml` sets it), and policy `Decide`
+fails closed when `policy.decision_records` is missing — a plane provisioned without it denies every
+protected action.
 
 ```bash
 kubectl --context gitfrok exec -i deploy/postgres -- \
@@ -107,6 +125,25 @@ manifest — that hides the drift instead of shrinking it.
 **The application connects as `gitfrok_app`, never `postgres`.** RLS does not bind a superuser, and
 binds the table owner only when forced; a DSN pointing at `postgres` makes tenant isolation inert
 while still reporting as enabled.
+
+### 4a. Operational notes for the Phase-2 schema
+
+- **The security merge gate engages on every storage-backed plane.** Once the security migrations are
+  applied, merge decisions compose the findings facts and deny any merge whose head or base revision
+  lacks an ingested, complete scan. Rollout prerequisite: **scan coverage before enabling the gate on
+  existing repositories** — every repo that must keep merging needs a scan ingested first, or its
+  merges fail closed. In dev there is **no scan-dispatch path at all** (no gVisor RuntimeClass on this
+  host; scans can only be ingested by RPC), so the gate can deny everything a CI flow would otherwise
+  have gated; that dispatch capability is T-0003's cluster lane.
+- **The MR-findings projection is in-process memory.** A dataplane restart drops the per-MR findings
+  projection, and MRs opened before the restart merge-block until a new push or retarget re-emits the
+  events that rebuild it. Rollout impact: after any dataplane restart, open MRs need a touch (push or
+  retarget) before their merge decisions see findings facts again. Follow-up: seed the projection at
+  startup from the durable stores (tracked against the findings plane, not a dev-env item).
+- **Decision-record append is on the `Decide` hot path and fail-closed.** Every enforced decision
+  appends to `policy.decision_records` in the deciding path; a failed append fails the decision. That
+  is an operational availability contract as much as an evidence one: **monitor decision-record append
+  failures** — a sick database here reads as a plane that denies everything, not as missing audit data.
 
 ## 5. Zitadel OIDC client — `dev-provision` creates it
 

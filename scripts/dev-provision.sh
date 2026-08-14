@@ -8,9 +8,11 @@
 # through the BFF itself, which is the Phase-1 exit bar (MVP-RUNBOOK §6).
 #
 # What it does:
-#   1. Applies the three backend migrations against the app database `gitfrok`
-#      (tenant baseline, audit, identity) — all CREATE/GRANT idempotent, applied as
-#      the postgres superuser like the postgres-init ConfigMap does.
+#   1. Applies ALL backend migrations (Phase 0/1 tenancy baseline, audit, identity;
+#      Phase 2 audit evidence indexes, identity auditor grants, policy decision
+#      records, security findings/triage/scan-report) against the app database
+#      `gitfrok` — all CREATE/GRANT idempotent, applied as the postgres superuser
+#      like the postgres-init ConfigMap does.
 #   2. Creates the Zitadel OIDC web application for the BFF, if it does not exist:
 #      admin login is driven headlessly through the same API surface the Login V2
 #      UI uses (session check API with the setup-written login-client PAT, then
@@ -51,11 +53,23 @@ http() {
 base64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 # ------------------------------------------------------------------ 1. migrations
-step "Database migrations (tenant, audit, identity)"
+# Phase 0/1 baseline first, then the Phase-2 set in dependency order:
+# tenancy baseline → audit → identity → policy decision records → security.
+# The pinned backend selects Postgres-backed stores whenever GITFROK_DATABASE_URL
+# is set (dataplane.yaml sets it), and policy Decide fails closed when
+# policy.decision_records is missing — a plane provisioned without the Phase-2
+# set denies every protected action, so ALL of these apply here.
+step "Database migrations (tenant, audit, identity, policy, security)"
 for m in \
   backend/platform/db/migrations/0001_tenancy_baseline.sql \
   backend/modules/audit/internal/adapters/postgres/migrations/0001_audit_log.sql \
-  backend/modules/identity/internal/adapters/postgres/migrations/0001_identity_credentials.sql; do
+  backend/modules/audit/internal/adapters/postgres/migrations/0002_audit_evidence_indexes.sql \
+  backend/modules/identity/internal/adapters/postgres/migrations/0001_identity_credentials.sql \
+  backend/modules/identity/internal/adapters/postgres/migrations/0002_identity_auditor_grants.sql \
+  backend/modules/policy/internal/adapters/postgres/migrations/0001_policy_decision_records.sql \
+  backend/modules/security/internal/adapters/postgres/migrations/0001_security_findings.sql \
+  backend/modules/security/internal/adapters/postgres/migrations/0002_security_triage.sql \
+  backend/modules/security/internal/adapters/postgres/migrations/0003_security_scan_report.sql; do
   [ -f "$m" ] || die "migration not found: $m"
   echo "  applying $m"
   "${KUBECTL[@]}" exec -i deployment/postgres -n "$NS" -- \
@@ -64,11 +78,34 @@ done
 schema_list=$("${KUBECTL[@]}" exec deployment/postgres -n "$NS" -- psql -U postgres -d gitfrok -tAc \
   "SELECT schema_name FROM information_schema.schemata") || die "cannot list schemas"
 missing=""
-for s in tenant audit identity; do
+for s in tenant audit identity policy security; do
   printf '%s\n' "$schema_list" | grep -qx "$s" || missing="$missing $s"
 done
 [ -z "$missing" ] || die "schemas missing after migrations:$missing"
-echo "  schemas tenant/audit/identity present"
+echo "  schemas tenant/audit/identity/policy/security present"
+# Table-level check, the same shape as the schema guard: one table per Phase-2
+# migration, so a silently truncated migration set is caught before the plane
+# starts denying on a missing decision_records or scan table.
+table_list=$("${KUBECTL[@]}" exec deployment/postgres -n "$NS" -- psql -U postgres -d gitfrok -tAc \
+  "SELECT table_schema || '.' || table_name FROM information_schema.tables") || die "cannot list tables"
+missing=""
+for t in \
+  audit.entries \
+  identity.auditor_grants \
+  identity.auditor_grant_transitions \
+  policy.decision_records \
+  security.scans \
+  security.findings \
+  security.scan_chunks \
+  security.scan_staged_findings \
+  security.triages \
+  security.triage_requests \
+  security.repository_ownership \
+  security.scan_report; do
+  printf '%s\n' "$table_list" | grep -qx "$t" || missing="$missing $t"
+done
+[ -z "$missing" ] || die "tables missing after migrations:$missing"
+echo "  all Phase-2 tables present"
 
 # ------------------------------------------------------------------ 2. Zitadel client
 step "Zitadel OIDC client for the BFF (headless, idempotent)"
