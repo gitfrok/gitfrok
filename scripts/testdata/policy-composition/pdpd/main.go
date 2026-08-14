@@ -43,6 +43,9 @@ func main() {
 	fmt.Printf("pdpd listening on %s with bundle %s\n", lis.Addr(), bundleDir)
 
 	s := grpc.NewServer()
-	policyv1.RegisterPolicyDecisionPointServer(s, policy.NewGRPCServer(pdp))
+	// records is nil on purpose: this check proves the Decide path across the repos. The
+	// provenance RPCs T-0025 added (EvaluateDryRun/GetDecision) report Unimplemented without a
+	// decision-record store, which is the truthful answer for a harness that has none.
+	policyv1.RegisterPolicyDecisionPointServer(s, policy.NewGRPCServer(pdp, nil))
 	log.Fatal(s.Serve(lis))
 }

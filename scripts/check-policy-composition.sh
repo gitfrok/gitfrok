@@ -154,6 +154,8 @@ reader-other-tenant DENY
 no-roles DENY
 anonymous DENY
 unknown-role DENY
+merge-findings-clean ALLOW
+merge-findings-missing-facts DENY
 CASES
 
 # Both verdicts must occur. Without this the case table above could be satisfied by a policy stuck
@@ -179,8 +181,9 @@ fi
 
 # --- denials never reached the data --------------------------------------------------------------------
 
-# Two of the six cases are allowed, so exactly two reads should have happened. More would mean a
-# denied request still touched the repository — the guard running after the fetch instead of before.
+# Two of the six repo-read cases are allowed, so exactly two reads should have happened. More
+# would mean a denied request still touched the repository — the guard running after the fetch
+# instead of before. The two T-0025 merge-gate cases decide only and never read.
 reads=$(awk '$1=="READS" {print $2}' <<<"$output")
 if [ "$reads" != "2" ]; then
   report "the backing store was read $reads times for 2 allowed cases — a denied request reached the data"

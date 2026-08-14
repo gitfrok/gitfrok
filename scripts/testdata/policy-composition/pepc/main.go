@@ -79,6 +79,46 @@ func main() {
 		}
 	}
 
+	// The T-0025 security merge gate over the wire: one allow/deny pair straight from
+	// SPEC-0029/SPEC-0030. The facts ride context exactly the way valid_approvals does; the pair
+	// proves the severity rule allows a clean merge and fails CLOSED when the gate is engaged but
+	// its findings facts did not assemble. Decide-only — the backing store is never touched, so
+	// the READS assertion below is unaffected.
+	owner := pep.Subject{ID: "u-3", TenantID: "acme", Roles: []string{"owner"}}
+	mergeCases := []struct {
+		name    string
+		context map[string]string
+	}{
+		{"merge-findings-clean", map[string]string{
+			"findings_gate":             "true",
+			"findings_highest_severity": "MEDIUM",
+			"valid_approvals":           "1",
+			"required_approvals":        "1",
+		}},
+		{"merge-findings-missing-facts", map[string]string{
+			"findings_gate":      "true",
+			"valid_approvals":    "1",
+			"required_approvals": "1",
+		}},
+	}
+	for _, c := range mergeCases {
+		decision, err := enforcer.Decide(ctx, pep.Request{
+			TenantID: "acme",
+			Subject:  owner,
+			Action:   "merge_request.merge",
+			Resource: pep.Resource{Type: "merge_request", ID: "mr-1"},
+			Context:  c.context,
+		})
+		switch {
+		case err != nil:
+			fmt.Printf("CASE %s ERROR %v\n", c.name, err)
+		case decision.Allowed:
+			fmt.Printf("CASE %s ALLOW\n", c.name)
+		default:
+			fmt.Printf("CASE %s DENY\n", c.name)
+		}
+	}
+
 	// The revision must survive the whole path — policy manifest, PDP, wire, PEP. It is what the
 	// cache keys its invalidation on, so an empty one here would mean caching silently does not work.
 	decision, err := enforcer.Decide(ctx, pep.Request{
