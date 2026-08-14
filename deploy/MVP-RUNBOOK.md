@@ -140,10 +140,17 @@ while still reporting as enabled.
   events that rebuild it. Rollout impact: after any dataplane restart, open MRs need a touch (push or
   retarget) before their merge decisions see findings facts again. Follow-up: seed the projection at
   startup from the durable stores (tracked against the findings plane, not a dev-env item).
-- **Decision-record append is on the `Decide` hot path and fail-closed.** Every enforced decision
-  appends to `policy.decision_records` in the deciding path; a failed append fails the decision. That
-  is an operational availability contract as much as an evidence one: **monitor decision-record append
-  failures** — a sick database here reads as a plane that denies everything, not as missing audit data.
+- **Decision-record append is async and fail-closed at admission.** Appends run off the `Decide`
+  hot path through a bounded queue (`backend/modules/policy/internal/app/recorder.go`): an enforced
+  decision that cannot be admitted — the queue saturated — still fails the decision, exactly as a
+  failing synchronous append did. Once admitted, a store failure inside the worker can no longer fail
+  the decision: it is counted and logged. SPEC-0029 AC1 ("every enforced decision is recorded and
+  retrievable") therefore holds up to store availability, plus a queue-depth window on a non-clean
+  exit (a graceful shutdown drains the queue; the `os.Exit(1)` paths skip the drain). That is an
+  operational availability contract as much as an evidence one: **alert on decision-record lag** —
+  monitor the `FailedRecords` (records the store refused inside the worker) and `DroppedRecords`
+  (dry-run records shed under backpressure) counters, because a sick database now reads as missing
+  audit data behind admission refusals, not as a plane that denies everything.
 
 ## 5. Zitadel OIDC client — `dev-provision` creates it
 
