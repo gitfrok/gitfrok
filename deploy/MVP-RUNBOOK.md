@@ -144,6 +144,29 @@ while still reporting as enabled.
   derived findings/scans/audit records untouched; `GITFROK_CI_SCAN_SWEEP_INTERVAL` = 5m — each tick
   runs the backfill (idempotent re-ingest) first, then the retention sweep. Scan dispatch itself
   still awaits the cluster lane (gVisor), so on this host reports arrive only by RPC as above.
+- **The agent gateway is wired and closed by default; its operational defaults are mirrored here
+  (invariant 13).** T-0030 (backend 8e5d013) mounts the door only when `GITFROK_AGENT_GRPC_ADDR` is
+  set — empty means the door stays closed and nothing listens. The rest are per-environment
+  configuration with these defaults: `GITFROK_AGENT_SERVER_NAMES` = localhost,
+  `GITFROK_AGENT_CERT_LIFETIME` = 1h, `GITFROK_AGENT_ROTATION_LEAD` = 20m,
+  `GITFROK_AGENT_ROTATION_RETRY` = 1m, `GITFROK_AGENT_STALE_AFTER` = 5m,
+  `GITFROK_AGENT_TOKEN_MAX_LIFETIME` = 24h, `GITFROK_AGENT_HEARTBEAT_INTERVAL` = 30s,
+  `GITFROK_AGENT_CLOCK_SKEW_LEEWAY` = 5m. One symptom to know: **clock skew disconnects healthy
+  data planes and reads as a network fault** — tokens and heartbeats outside the leeway are refused,
+  so check clock sync before chasing network issues.
+- **Residency detection's operational defaults are mirrored here (invariant 13).** T-0033 (backend
+  c630a1e) reads `GITFROK_RESIDENCY_DETECTION_WINDOW` and `GITFROK_RESIDENCY_MAX_REPORT_INTERVAL`;
+  unset → 0 is fail-safe, but it makes every residency section of an evidence pack render a gap.
+  Operators must set both for complete evidence packs.
+- **Fair-use metering's operational defaults are mirrored here (invariant 13).** T-0034 (backend
+  d3f4ad6, bff e2344de) opens the usage door only when `GITFROK_USAGE_GRPC_ADDR` is set — empty
+  means the door stays closed; the BFF mounts its usage routes only when `GITFROK_USAGE_ADDR` is
+  set — empty means the routes stay unmounted. The metering limits are per-environment configuration
+  with these defaults: `GITFROK_METERING_GAP_AFTER` = 15m,
+  `GITFROK_METERING_DIVERGENCE_TOLERANCE` = 0.05, `GITFROK_METERING_THROTTLED_CONCURRENCY` = 2,
+  `GITFROK_METERING_QUEUE_DEPTH_CAP` = 50, `GITFROK_METERING_CI_MINUTES_NOTIFY` = 8000,
+  `GITFROK_METERING_CI_MINUTES_ENVELOPE` = 10000. Enforcement is **throttle-and-notify only — git
+  is never blocked**; read-only enforcement is deferred to PR-7 per ADR-0061.
 - **The MR-findings projection is in-process memory.** A dataplane restart drops the per-MR findings
   projection, and MRs opened before the restart merge-block until a new push or retarget re-emits the
   events that rebuild it. Rollout impact: after any dataplane restart, open MRs need a touch (push or
