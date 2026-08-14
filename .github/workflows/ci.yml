@@ -188,6 +188,17 @@ jobs:
       - name: make policy-check
         run: make policy-check
 
+      # --- SPEC-0029 AC3: the merge gate's severity threshold, checked against the reviewed rego ---
+      # The third check that can only exist here, and it had been written as if it lived in backend.
+      # backend/modules/security/internal/app/threshold_parity_test.go reads
+      # governance/policies/gitsaas/authz/authz.rego through a relative path that resolves only when
+      # governance is a sibling checkout, and skips itself when it is not — which is every backend CI
+      # run, because that workflow checks out no governance tree. A gate that skips is not a gate, so
+      # it runs here, where `submodules: recursive` has already put both trees on disk, and the make
+      # target fails loudly rather than skipping if the bundle is somehow absent.
+      - name: make threshold-parity
+        run: make threshold-parity
+
   # SPEC-0014, T-0003 AC4. "Works on macOS and Linux" had never been run on macOS; what stood in for
   # it was a bash:3.2 container that is Alpine plus busybox, with no lineage to Darwin. This is the
   # real thing, and it is free because the repo is public.

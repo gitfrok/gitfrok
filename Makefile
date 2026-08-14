@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check
+.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23)
@@ -24,6 +24,10 @@ codegen-check: ## fail if any consumer's gen/ drifted from the pinned contracts 
 	@./scripts/check-codegen-fresh.sh
 policy-check: ## T-0005: run the real authz path — bff PEP → gRPC → backend PDP → governance/policies
 	@./scripts/check-policy-composition.sh
+threshold-parity: ## fail if the merge gate's Go severity threshold drifted from the reviewed rego (SPEC-0029 AC3)
+	@test -f governance/policies/gitsaas/authz/authz.rego || \
+	  { echo "threshold-parity: governance/policies/gitsaas/authz/authz.rego is absent — run 'make submodules' first"; exit 1; }
+	@cd backend && go test -count=1 -run TestSecurityGateSeverityThresholdMatchesReviewedRego ./modules/security/internal/app/
 surfaces-check: ## fail if any repo's agent surfaces drifted from governance/canonical (ADR-0037)
 	@./scripts/check-agent-surfaces-fresh.sh
 surfaces: ## regenerate every agent surface from governance/canonical (ADR-0037)
