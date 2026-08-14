@@ -41,7 +41,13 @@ portability-check: ## fail if any tracked script would break on macOS (SPEC-0014
 codegen: ## regenerate Go (backend, bff) + TS (webfrontend) from governance/contracts (ADR-0022)
 	@cd backend && buf generate
 	@cd bff && buf generate
-	@cd webfrontend && buf generate
+	@# webfrontend's protoc-gen-es is a devDependency, not a global binary, so its own
+	@# node_modules/.bin goes on PATH for this run only — the same shape
+	@# scripts/check-codegen-fresh.sh uses, which is why the freshness gate passed while
+	@# this target failed with "protoc-gen-es: executable file not found in $$PATH".
+	@[ -x webfrontend/node_modules/.bin/protoc-gen-es ] || \
+	  { echo "codegen: webfrontend/node_modules is absent — run 'npm ci --prefix webfrontend' first"; exit 1; }
+	@cd webfrontend && PATH="$$PWD/node_modules/.bin:$$PATH" buf generate
 submodules: ## init/update all submodules
 	git submodule update --init --recursive
 dev-up: ## start the Minikube dev cluster: addons + mkcert TLS + manifests (T-0003, ADR-0024)
