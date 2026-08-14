@@ -1,11 +1,24 @@
 {{- if .Values.operator.enabled }}
-# The Operator seam (ADR-0013, SPEC-0039). T-0031 lays the shape: namespace-scoped
-# permissions and the workload slot. The reconcile loop that converges desired/actual
-# versions, gates health and rolls back arrives with T-0032 — enabling this block
-# before that binary exists is an operator misconfiguration, hence the required image.
+# The Operator seam (ADR-0013, SPEC-0039 AC3-AC7). T-0031 laid the shape: namespace-scoped
+# permissions and the workload slot. T-0032 names what the reconcile loop this Deployment
+# runs must do, and mounts its trust root:
+#
+#   - It reads spec.version from the DataPlane CR as the DESIRED release (the control plane
+#     publishes it over the agent channel; the Operator never invents it).
+#   - It applies ONLY a release whose signature verifies against the release-signing trust
+#     bundle mounted below (SPEC-0039 AC3, ADR-0044). An unsigned/mis-signed release is
+#     refused, never half-applied.
+#   - It converges the workload idempotently: the same desired version applied twice causes
+#     no second rollout, and it writes status.observedVersion / status.phase / status.message
+#     / status.lastHeartbeatTime from the rollout report back, never a version it was not
+#     told is running (SPEC-0039 AC4/AC6). A failed upgrade rolls back to the prior signed
+#     release and says why (AC5); a pinned/deferred window is honored, not silently forced
+#     (AC7).
 #
 # PERMISSIONS ARE NAMESPACE-SCOPED on purpose: SPEC-0039 assumes exactly that, and a
 # cluster-admin requirement would be a decision (an ADR), not a detail smuggled in here.
+# This Deployment renders NO inbound surface: the reconcile loop reaches the control plane
+# only via the data plane's own outbound agent channel (ADR-0011, SPEC-0039 out-of-scope).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -85,4 +98,17 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        # The reconcile loop's release trust root: it verifies every release against these
+        # public keys before applying it (SPEC-0039 AC3). With no key it can verify, the
+        # operator refuses releases rather than applying unverified ones.
+        - name: GITFROK_RELEASE_TRUST_DIR
+          value: /etc/gitfrok/release-trust
+        volumeMounts:
+        - name: release-trust
+          mountPath: /etc/gitfrok/release-trust
+          readOnly: true
+      volumes:
+      - name: release-trust
+        configMap:
+          name: {{ required "operator.releaseTrust.configMap is required when operator.enabled: the ConfigMap holding the release-signing trust bundle (*.pub)" .Values.operator.releaseTrust.configMap | quote }}
 {{- end }}

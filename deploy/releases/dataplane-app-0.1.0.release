@@ -1,0 +1,5 @@
+component=dataplane-app
+version=0.1.0
+oci_ref=docker.io/gitfrok/dataplane-app
+digest=sha256:e936d8e0f1ffdce7f834149ef71405efc5582589b96905a8fa3c8a922db127fb
+signature=MEQCIAPYzCKBAZ9X3me117Zey1q9XEFfVKwOYxtOYU2TXJJ2AiBpN7i8b7bl4d1xG1mF/3Dee/1dH0ZktKUqyZlSOsHh2A==

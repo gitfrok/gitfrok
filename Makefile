@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check
+.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check signed-releases-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8)
@@ -7,6 +7,7 @@ verify: ## super-repo fitness gates: dependency direction + version floors + dev
 	@./scripts/check-version-floors.sh
 	@./scripts/check-dev-images.sh
 	@./scripts/check-image-trust-bundle.sh
+	@./scripts/check-signed-releases.sh
 	@./scripts/check-byo-chart.sh
 lint-shell: ## shellcheck the fitness scripts (T-0009); CI gates this on every PR
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed: https://shellcheck.net"; exit 1; }
@@ -15,6 +16,8 @@ trust-bundle-check: ## verify versioned public Cosign verification keys (ADR-004
 	@./scripts/check-image-trust-bundle.sh
 byo-chart-check: ## T-0031: the BYO chart carries no secret, token is reference-only, no inbound path (SPEC-0039 install scope)
 	@./scripts/check-byo-chart.sh
+signed-releases-check: ## T-0032: no unsigned/mis-signed release is applicable; release trust bundle intact (SPEC-0039 AC3, ADR-0044)
+	@./scripts/check-signed-releases.sh
 bench-storage: ## T-0007: benchmark git on SeaweedFS-FUSE vs a block-backed dir + probe POSIX semantics
 	@./scripts/bench-storage.sh
 rulesets: ## show what the ADR-0054 main-guard ruleset would do, read-only (needs an admin token)

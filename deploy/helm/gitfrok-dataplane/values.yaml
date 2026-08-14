@@ -66,6 +66,13 @@ operator:
   image:
     repository: ""
     tag: ""
+  # The release-signing trust bundle the reconcile loop verifies every release against
+  # BEFORE applying it (SPEC-0039 AC3, ADR-0044). Name of an EXISTING ConfigMap holding
+  # the bundle's *.pub verification keys (see deploy/releases/trust). Required when the
+  # operator is enabled: a reconcile loop that cannot pin the release trust root must
+  # not converge a workload — an unsigned release is never applicable.
+  releaseTrust:
+    configMap: ""
   # Renders the DataPlane CR for this install (spec only — the CR's status is the
   # operator's to write and never carries credential material).
   createCR: false

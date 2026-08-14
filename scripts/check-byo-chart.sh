@@ -131,7 +131,32 @@ if [ "$missing" -eq 0 ]; then
   done
 fi
 
-# --- 7. rendered assertions (only with helm) -------------------------------------------------------
+# --- 7. AC3/AC4/AC6 (T-0032): the reconcile contract is named, not implied ----------------------
+# The Operator converges spec.version onto the workload and reports actual state back. These
+# tripwires hold the CRD/chart to that contract so it cannot silently regress:
+#   - spec.version is the desired-state driver (the control plane publishes it, AC4).
+#   - status carries exactly the rollout-report fields the backend feeds back (AC6):
+#     observedVersion, phase, message, lastHeartbeatTime — never a version invented here.
+#   - the operator mounts the release-signing trust bundle: signed-before-apply (AC3).
+if ! grep -qE '^[[:space:]]+version:' "$crd"; then
+  report "CRD spec has no version field — reconcile has no desired-state driver (SPEC-0039 AC4)"
+fi
+for fld in observedVersion phase message lastHeartbeatTime; do
+  if ! printf '%s\n' "${status_block:-}" | grep -q "$fld:"; then
+    report "CRD status schema lacks $fld — the rollout report has nowhere to land (SPEC-0039 AC6)"
+  fi
+done
+op="$templates/operator.yaml"
+if [ -f "$op" ]; then
+  if ! grep -q 'GITFROK_RELEASE_TRUST_DIR' "$op"; then
+    report "operator template does not mount a release trust root — it could apply an unsigned release (AC3)"
+  fi
+  if ! grep -q 'releaseTrust.configMap' "$op"; then
+    report "operator template does not source the release trust bundle from operator.releaseTrust.configMap"
+  fi
+fi
+
+# --- 8. rendered assertions (only with helm) -------------------------------------------------------
 if command -v helm >/dev/null 2>&1; then
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/byo-chart.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
