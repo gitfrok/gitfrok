@@ -135,6 +135,15 @@ while still reporting as enabled.
   merges fail closed. In dev there is **no scan-dispatch path at all** (no gVisor RuntimeClass on this
   host; scans can only be ingested by RPC), so the gate can deny everything a CI flow would otherwise
   have gated; that dispatch capability is T-0003's cluster lane.
+- **CI scan-report ingest is wired; its operational defaults are mirrored here (invariant 13).**
+  T-0029 (backend 49d6bfa) has `CIJobFinished` events drive Security's ingester — the runner
+  persists the raw report and findings/scans land under the job's own principal. The limits are
+  per-environment configuration with these defaults: `GITFROK_CI_SCAN_REPORT_MAX_BYTES` = 16777216
+  (16 MiB) — an oversized report is refused at write, never truncated;
+  `GITFROK_CI_SCAN_REPORT_RETENTION_DAYS` = 30 — the sweep deletes report objects only, leaving the
+  derived findings/scans/audit records untouched; `GITFROK_CI_SCAN_SWEEP_INTERVAL` = 5m — each tick
+  runs the backfill (idempotent re-ingest) first, then the retention sweep. Scan dispatch itself
+  still awaits the cluster lane (gVisor), so on this host reports arrive only by RPC as above.
 - **The MR-findings projection is in-process memory.** A dataplane restart drops the per-MR findings
   projection, and MRs opened before the restart merge-block until a new push or retarget re-emits the
   events that rebuild it. Rollout impact: after any dataplane restart, open MRs need a touch (push or
