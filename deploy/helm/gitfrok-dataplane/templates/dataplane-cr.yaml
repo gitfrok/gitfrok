@@ -1,0 +1,23 @@
+{{- if .Values.operator.createCR }}
+# The DataPlane CR for this install. Spec only — status is the Operator's to write.
+# Enrolment enters as a REFERENCE to the operator-held Secret; the schema itself
+# refuses a credential value in the CR (crds/dataplanes-crd.yaml).
+apiVersion: byo.gitfrok.dev/v1alpha1
+kind: DataPlane
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "gitfrok-dataplane.labels" . | nindent 4 }}
+spec:
+  cloud: {{ .Values.cloud | quote }}
+  region: {{ required "region is required" .Values.region | quote }}
+  gatewayAddr: {{ required "agent.gatewayAddr is required" .Values.agent.gatewayAddr | quote }}
+  version: {{ .Values.image.tag | quote }}
+  {{- if .Values.cloudSettings }}
+  cloudSettings:
+    {{- toYaml .Values.cloudSettings | nindent 4 }}
+  {{- end }}
+  enrolmentSecretRef:
+    name: {{ required "enrolment.existingSecret.name is required" .Values.enrolment.existingSecret.name | quote }}
+    key: {{ .Values.enrolment.existingSecret.key | quote }}
+{{- end }}

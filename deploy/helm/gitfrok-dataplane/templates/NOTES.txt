@@ -1,0 +1,17 @@
+gitfrok data plane "{{ .Release.Name }}" installed (T-0031, SPEC-0039).
+
+The data plane now dials the control plane OUTBOUND and self-registers with the
+one-time enrolment token. Nothing in this release opened an inbound path into
+your cluster, and nothing in it persists the token.
+
+1. Verify self-registration:
+     kubectl -n {{ .Release.Namespace }} logs deploy/{{ .Release.Name }}-dataplane
+
+2. The enrolment token is ONE-SHOT: once the data plane reports Enrolled on the
+   control plane's fleet view, delete the Secret you supplied:
+     kubectl -n {{ .Release.Namespace }} delete secret {{ .Values.enrolment.existingSecret.name }}
+
+3. What this chart intentionally does NOT contain: no Service, no Ingress, no
+   Secret of its own, no credential material. Conformance evidence — what was
+   verified in a harness versus a real cluster — is recorded per row in
+   deploy/conformance/byo-dataplane.md of the super-repo.

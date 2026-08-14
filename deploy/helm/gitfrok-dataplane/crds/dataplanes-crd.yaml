@@ -1,0 +1,109 @@
+# The DataPlane CR (ADR-0013, SPEC-0039, T-0031).
+#
+# This CRD is the Operator seam's contract. Two anti-faking properties are BAKED INTO
+# THE SCHEMA, not merely promised by convention:
+#
+#  1. Enrolment enters as enrolmentSecretRef — a {name, key} REFERENCE to a Secret the
+#     operator holds. additionalProperties: false means the schema rejects any other
+#     field, so a token VALUE can never be written into a CR (SPEC-0039 non-functional,
+#     SPEC-0038 AC2).
+#  2. The status schema carries no credential-shaped field at all. The Operator writes
+#     status; the control plane never guesses it (SPEC-0039 "data owned").
+#
+# The reconcile loop that converges spec onto the workload and reports actual versions
+# is T-0032's surface; this schema already names the fields it will read and write.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dataplanes.byo.gitfrok.dev
+spec:
+  group: byo.gitfrok.dev
+  names:
+    kind: DataPlane
+    listKind: DataPlaneList
+    plural: dataplanes
+    singular: dataplane
+    shortNames: ["dp"]
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Cloud
+      type: string
+      jsonPath: .spec.cloud
+    - name: Region
+      type: string
+      jsonPath: .spec.region
+    - name: Version
+      type: string
+      jsonPath: .spec.version
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: ["spec"]
+        properties:
+          spec:
+            type: object
+            required: ["cloud", "region", "gatewayAddr", "version", "enrolmentSecretRef"]
+            properties:
+              # Where this data plane runs. G7 residency: SPEC-0040 holds the registry
+              # to exactly what is declared here.
+              cloud:
+                type: string
+                enum: ["gke", "eks", "aks"]
+              region:
+                type: string
+                minLength: 1
+              # The control-plane AgentGateway endpoint the data plane dials OUTBOUND.
+              gatewayAddr:
+                type: string
+                minLength: 1
+              # The version this install should run. T-0032's reconcile loop converges
+              # the workload onto it and reports actual state back over the agent channel.
+              version:
+                type: string
+                minLength: 1
+              # The driver seam's required per-cloud settings (string values only).
+              cloudSettings:
+                type: object
+                additionalProperties:
+                  type: string
+              # A REFERENCE to the operator-held Secret carrying the one-time enrolment
+              # token. Nothing but {name, key} is accepted — the schema itself refuses
+              # a credential value in the CR.
+              enrolmentSecretRef:
+                type: object
+                required: ["name"]
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                    minLength: 1
+                  key:
+                    type: string
+                    default: token
+          # The Operator's report. No credential material may ever appear here: these
+          # are the only properties the schema accepts (additionalProperties false).
+          status:
+            type: object
+            additionalProperties: false
+            properties:
+              # Pending | Installing | Enrolled | Upgrading | Failed | RolledBack.
+              phase:
+                type: string
+              # The version the workload is actually running, as observed by the
+              # Operator — never invented, only reported.
+              observedVersion:
+                type: string
+              message:
+                type: string
+              lastHeartbeatTime:
+                type: string
+                format: date-time

@@ -1,0 +1,88 @@
+{{- if .Values.operator.enabled }}
+# The Operator seam (ADR-0013, SPEC-0039). T-0031 lays the shape: namespace-scoped
+# permissions and the workload slot. The reconcile loop that converges desired/actual
+# versions, gates health and rolls back arrives with T-0032 — enabling this block
+# before that binary exists is an operator misconfiguration, hence the required image.
+#
+# PERMISSIONS ARE NAMESPACE-SCOPED on purpose: SPEC-0039 assumes exactly that, and a
+# cluster-admin requirement would be a decision (an ADR), not a detail smuggled in here.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-operator
+  labels:
+    {{- include "gitfrok-dataplane.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-operator
+  labels:
+    {{- include "gitfrok-dataplane.labels" . | nindent 4 }}
+rules:
+# The CRs it owns (spec read, status write).
+- apiGroups: ["byo.gitfrok.dev"]
+  resources: ["dataplanes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["byo.gitfrok.dev"]
+  resources: ["dataplanes/status"]
+  verbs: ["get", "patch", "update"]
+# Converging the data plane's workload.
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+# Reading the install's references only — the enrolment Secret is the operator's and
+# is deleted after enrolment; the operator needs no write on credential material.
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-operator
+  labels:
+    {{- include "gitfrok-dataplane.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-operator
+subjects:
+- kind: ServiceAccount
+  name: {{ .Release.Name }}-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-operator
+  labels:
+    {{- include "gitfrok-dataplane.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gitfrok-dataplane-operator
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gitfrok-dataplane-operator
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-operator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+      - name: operator
+        image: "{{ required "operator.image.repository is required when operator.enabled" .Values.operator.image.repository }}:{{ required "operator.image.tag is required when operator.enabled" .Values.operator.image.tag }}"
+        env:
+        - name: GITFROK_OPERATOR_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+{{- end }}

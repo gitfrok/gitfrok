@@ -1,0 +1,17 @@
+# T-0031 (SPEC-0039, ADR-0013): the BYO data-plane install chart.
+#
+# One `helm install` plus an enrolment token brings up a data plane that self-registers
+# with the control plane over an OUTBOUND-only channel (ADR-0011). This chart therefore
+# renders exactly one Deployment (plus the Operator seam when enabled) and NO inbound
+# surface: no Service, no Ingress, nothing with a cloud load balancer behind it.
+#
+# The chart carries NO secret (SPEC-0039 non-functional): the enrolment token is supplied
+# at install time as a reference to a Secret the operator creates out-of-band
+# (enrolment.existingSecret), and the operator deletes that Secret after enrolment — the
+# token is one-shot and is never persisted by this chart.
+apiVersion: v2
+name: gitfrok-dataplane
+description: gitfrok BYO data plane — installs, self-registers outbound, opens no inbound path
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

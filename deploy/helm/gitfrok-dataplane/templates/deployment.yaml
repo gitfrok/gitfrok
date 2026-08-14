@@ -1,0 +1,119 @@
+# T-0031 (SPEC-0039 AC1): the data plane that self-registers on install.
+#
+# This is the ONLY workload the chart installs, and it renders NO inbound surface —
+# no Service, no Ingress. The containerPort exists for kubelet probes alone; nothing
+# outside the pod can reach it, and the agent inside dials the control plane OUT
+# (ADR-0011), never the other way around.
+#
+# Token secrecy (SPEC-0038 AC2): GITFROK_ENROLMENT_TOKEN is sourced by secretKeyRef
+# from the operator-held Secret named in values. The token VALUE never enters this
+# manifest; only the reference does.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-dataplane
+  labels:
+    {{- include "gitfrok-dataplane.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "gitfrok-dataplane.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gitfrok-dataplane.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+      - name: dataplane
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: GITFROK_LISTEN_ADDR
+          value: ":8080"
+        # The OPA bundle the customer's cluster received from governance (ADR-0006,
+        # invariant 2). The plane exits without one — an unanswerable authorization
+        # surface is a rollout failure, not a runtime surprise.
+        - name: GITFROK_POLICY_BUNDLE_DIR
+          value: /etc/gitfrok/policy
+        # --- install-time self-registration (T-0030/T-0031, ADR-0060) ---
+        - name: GITFROK_AGENT_GATEWAY_ADDR
+          value: {{ required "agent.gatewayAddr is required: the control-plane endpoint the data plane dials OUTBOUND" .Values.agent.gatewayAddr | quote }}
+        {{- if .Values.agent.serverName }}
+        - name: GITFROK_AGENT_SERVER_NAME
+          value: {{ .Values.agent.serverName | quote }}
+        {{- end }}
+        # The one-time enrolment token: a REFERENCE to the operator-held Secret, never
+        # a literal. The agent presents it on first Connect and the control plane burns
+        # it; the operator deletes the Secret after enrolment.
+        - name: GITFROK_ENROLMENT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ required "enrolment.existingSecret.name is required: the operator-held Secret carrying the one-time token" .Values.enrolment.existingSecret.name | quote }}
+              key: {{ .Values.enrolment.existingSecret.key | quote }}
+        # Where this data plane is. G7 residency: the install declares cloud and region,
+        # and SPEC-0040 then holds the registry to them.
+        - name: GITFROK_CLOUD
+          value: {{ .Values.cloud | quote }}
+        - name: GITFROK_REGION
+          value: {{ required "region is required: an install that does not say where it is cannot be held to residency" .Values.region | quote }}
+        # Trust anchor for the gateway and every issued/rotated credential. Required:
+        # an agent that cannot pin the control plane's CA must not connect.
+        - name: GITFROK_AGENT_CA_BUNDLE
+          value: /etc/gitfrok/trust/ca.pem
+        - name: GITFROK_AGENT_CREDENTIAL_PATH
+          value: {{ .Values.agent.credentialPath | quote }}
+        - name: GITFROK_AGENT_CLOCK_SKEW_LEEWAY
+          value: {{ .Values.agent.clockSkewLeeway | quote }}
+        - name: GITFROK_AGENT_HEARTBEAT_INTERVAL
+          value: {{ .Values.agent.heartbeatInterval | quote }}
+        # The driver seam's per-cloud settings, flattened to key=value pairs. Which
+        # keys a provider requires is the backend driver's decision; a missing one
+        # refuses the install (platform/clouddriver.Select).
+        {{- if .Values.cloudSettings }}
+        - name: GITFROK_CLOUD_SETTINGS
+          value: {{- $pairs := list }}{{- range $k, $v := .Values.cloudSettings }}{{- $pairs = append $pairs (printf "%s=%s" $k (toString $v)) }}{{- end }} {{ join "," $pairs | quote }}
+        {{- end }}
+        ports:
+        # Kubelet probes only. Nothing renders a Service for this port.
+        - name: health
+          containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+        volumeMounts:
+        - name: policy-bundle
+          mountPath: /etc/gitfrok/policy
+          readOnly: true
+        - name: agent-trust
+          mountPath: /etc/gitfrok/trust
+          readOnly: true
+        # Pod-local credential storage: the issued PEM bundle never touches durable
+        # storage in the customer's cluster.
+        - name: agent-credential
+          mountPath: {{ dir .Values.agent.credentialPath | quote }}
+      volumes:
+      - name: policy-bundle
+        configMap:
+          name: {{ required "policy.bundleConfigMap is required: the ConfigMap holding the OPA bundle from governance" .Values.policy.bundleConfigMap | quote }}
+      - name: agent-trust
+        configMap:
+          name: {{ required "agent.caBundleConfigMap is required: the ConfigMap holding the pinned control-plane CA bundle (key ca.pem)" .Values.agent.caBundleConfigMap | quote }}
+      - name: agent-credential
+        emptyDir: {}

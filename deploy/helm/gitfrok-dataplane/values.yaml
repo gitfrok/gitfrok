@@ -1,0 +1,71 @@
+# gitfrok-dataplane default values (T-0031, SPEC-0039).
+#
+# This file carries NO secret and NO credential. The enrolment token is install-time
+# input: the operator creates their own Secret out-of-band, hands this chart only its
+# NAME (enrolment.existingSecret), and deletes it after the data plane self-registers.
+# Nothing here, and nothing this chart renders, ever persists the token value.
+
+image:
+  # Same artifact deploy/dev/versions.env pins for the data plane (DATAPLANE_IMAGE).
+  repository: docker.io/gitfrok/dataplane-app
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# The cloud this data plane runs on: gke | eks | aks. Drives the backend driver seam
+# (SPEC-0039 AC2) and the enrolment record's cloud (G7 residency — SPEC-0040 holds us
+# to what is declared here).
+cloud: gke
+
+# Region the data plane runs in. Required: an install that does not say where it is
+# cannot be held to residency.
+region: ""
+
+# The driver seam's required per-cloud settings, rendered into GITFROK_CLOUD_SETTINGS
+# as comma-separated key=value pairs. Which keys are required is the backend driver's
+# decision (platform/clouddriver), and a missing one refuses the install rather than
+# half-working:
+#   gke: gke.workloadIdentityServiceAccount
+#   eks: eks.irsaRoleArn
+#   aks: aks.entraClientId
+cloudSettings: {}
+
+# The OPA policy bundle governance ships with the release (ADR-0006, invariant 2).
+policy:
+  # Name of an EXISTING ConfigMap holding the bundle files. Required: the plane exits
+  # without a bundle — every authorization decision must be answerable.
+  bundleConfigMap: ""
+
+agent:
+  # Control-plane AgentGateway endpoint the data plane dials OUTBOUND (T-0030). Required.
+  gatewayAddr: ""
+  # TLS server name the gateway certificate must carry. Derived from gatewayAddr's host
+  # when empty — never invented.
+  serverName: ""
+  # Name of an EXISTING ConfigMap (key ca.pem) holding the pinned control-plane CA
+  # bundle. Required: an agent that cannot pin the control plane's CA must not connect.
+  caBundleConfigMap: ""
+  # Where the agent stores its issued credential. Pod-local emptyDir: the credential
+  # lives only as long as the enrolment record on the control plane says it does.
+  credentialPath: /var/lib/gitfrok/agent/credential.pem
+  clockSkewLeeway: 5m
+  heartbeatInterval: 30s
+
+enrolment:
+  # Reference to the operator-held Secret carrying the one-time enrolment token. The
+  # chart renders only this reference (secretKeyRef); the value never enters a manifest.
+  existingSecret:
+    name: ""
+    key: token
+
+# The Operator seam (ADR-0013 day-2). T-0031 lays the CRD (crds/), namespace-scoped
+# RBAC and the DataPlane CR shape; the reconcile loop that converges versions arrives
+# with T-0032 and is deliberately NOT part of this install.
+operator:
+  # Renders ServiceAccount + namespace-scoped Role/RoleBinding + operator Deployment.
+  enabled: false
+  image:
+    repository: ""
+    tag: ""
+  # Renders the DataPlane CR for this install (spec only — the CR's status is the
+  # operator's to write and never carries credential material).
+  createCR: false
