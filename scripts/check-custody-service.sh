@@ -20,6 +20,9 @@
 #   wired consumer    the backend production composition root reads its custody posture
 #                     from env and constructs no dev CA — the deployment-side mirror of
 #                     SPEC-0044 AC1/AC3 fitness (backend b0ab32e).
+#   consumer pairing  if the controlplane manifest opens the agent door, the custody env
+#                     must be paired with it (see section 6) — vacuous while the door is
+#                     closed, biting the image bump that opens it.
 #   image pin         delegated to check-dev-images.sh (openbao.yaml is a mapped
 #                     manifest there), which asserts the tag against versions.env and,
 #                     with CHECK_IMAGE_RESOLVE=1, that the registry resolves it.
@@ -126,7 +129,28 @@ else
   echo "custody-service: note: $backend_root absent (submodule not checked out) — wired-consumer assertion NOT run, declared"
 fi
 
-# --- 6. rendered assertion: the chart, templated, still carries no custody ----------------------
+# --- 6. consumer env pairing: an open agent door implies the custody env -----------------------
+# The production composition root constructs ONLY the custody-backed CA (SPEC-0044 AC1), and
+# since backend 28f729f its startup REFUSES without both GITFROK_CUSTODY_OPENBAO_ADDR and
+# GITFROK_CUSTODY_SNAPSHOT_FILE. So the moment the controlplane manifest opens the agent door
+# (GITFROK_AGENT_GRPC_ADDR set), both custody variables must be present in the same manifest.
+# Today the door is CLOSED (the dev deployment still pins the pre-custody image), so this
+# assertion passes vacuously — it is written to bite on the future image bump that opens the
+# door without the custody env.
+controlplane_manifest="$root/deploy/dev/controlplane.yaml"
+if [ -f "$controlplane_manifest" ] && grep -q 'GITFROK_AGENT_GRPC_ADDR' "$controlplane_manifest"; then
+  if ! grep -q 'GITFROK_CUSTODY_OPENBAO_ADDR' "$controlplane_manifest"; then
+    report "controlplane.yaml opens the agent door without GITFROK_CUSTODY_OPENBAO_ADDR — the custody CA cannot compose (SPEC-0044 AC1)"
+  fi
+  if ! grep -q 'GITFROK_CUSTODY_SNAPSHOT_FILE' "$controlplane_manifest"; then
+    report "controlplane.yaml opens the agent door without GITFROK_CUSTODY_SNAPSHOT_FILE — startup refuses without it (backend 28f729f)"
+  fi
+  echo "  ok    agent door open in controlplane.yaml: custody env paired (OPENBAO_ADDR + SNAPSHOT_FILE)"
+else
+  echo "custody-service: note: agent door closed in controlplane.yaml (no GITFROK_AGENT_GRPC_ADDR) — custody-env pairing assertion vacuously holds; it bites when the door opens"
+fi
+
+# --- 7. rendered assertion: the chart, templated, still carries no custody ----------------------
 if command -v helm >/dev/null 2>&1; then
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/custody-chart.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT

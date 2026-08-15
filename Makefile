@@ -1,8 +1,8 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check signed-releases-check
+.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check runbook-check signed-releases-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
-verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5)
+verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5) + runbook completeness (T-0040 AC4)
 	@./scripts/check-dep-direction.sh
 	@./scripts/check-version-floors.sh
 	@./scripts/check-dev-images.sh
@@ -10,6 +10,7 @@ verify: ## super-repo fitness gates: dependency direction + version floors + dev
 	@./scripts/check-signed-releases.sh
 	@./scripts/check-byo-chart.sh
 	@./scripts/check-custody-service.sh
+	@./scripts/check-runbook.sh
 lint-shell: ## shellcheck the fitness scripts (T-0009); CI gates this on every PR
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed: https://shellcheck.net"; exit 1; }
 	@shellcheck scripts/*.sh && echo "shellcheck: OK"
@@ -19,6 +20,8 @@ byo-chart-check: ## T-0031: the BYO chart carries no secret, token is reference-
 	@./scripts/check-byo-chart.sh
 custody-check: ## T-0040 AC5: custody service is 3-node Raft, control-plane-side, Shamir-only, credential-free; no data-plane chart references it (ADR-0066 decisions 5–7)
 	@./scripts/check-custody-service.sh
+runbook-check: ## T-0040 AC4: runbook carries rotation (§6b), unseal (§6a), seal/custody-outage and clock-skew (§4a) entries, and §6b's cross-references resolve
+	@./scripts/check-runbook.sh
 signed-releases-check: ## T-0032: no unsigned/mis-signed release is applicable; release trust bundle intact (SPEC-0039 AC3, ADR-0044)
 	@./scripts/check-signed-releases.sh
 bench-storage: ## T-0007: benchmark git on SeaweedFS-FUSE vs a block-backed dir + probe POSIX semantics

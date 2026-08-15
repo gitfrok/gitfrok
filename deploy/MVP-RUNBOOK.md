@@ -397,26 +397,40 @@ references and public certificates only, never key material (SPEC-0044 AC1) — 
 mounted or volume-backed in a real deployment. Startup branches on what it finds: snapshot
 present → Restore (the window comes back exactly where the fleet last saw it); snapshot absent
 → Bootstrap, which persists its own stage through the change hook wired before it; custody
-still holds the key but the snapshot is gone → re-attach through the key's public half, logged
-loudly. A corrupt or partial snapshot fails startup loudly — it never falls through to a
-silent re-bootstrap against a custody service that kept its keys.
+still holds the key but the snapshot is gone → re-attach through the key's public half (fresh
+revision, loudly logged). A corrupt or partial snapshot fails startup loudly by design — it never
+falls through to a silent re-bootstrap against a custody service that kept its keys. The file
+must sit on a PERSISTENT volume to survive pod rescheduling: the current
+`deploy/dev/controlplane.yaml` declares NO PVC, so that is a named deployment requirement for
+the custody-enabled image when it moves — honestly carried, not added now.
 
 ### Rotate the CA — stage → overlap → remove
+
+**What executes today vs. the named follow-up (board #20, honest):** the dual-validate window, the
+distribution of staged bundles over reconcile, and removal-precondition enforcement WHEN removal
+is invoked are proven in the shipped composition (T-0040's exit record names the suites).
+Runtime rotation actuation is the NAMED follow-up: `Bundle.Stage` and `Bundle.RemoveRoot` have
+NO production caller in the shipped binary — the rotation suites exercise them, but no operator
+surface invokes them yet; the actuation seam rides with T-0041/T-0042. The procedure below is
+written as it will run once the seam exists; every property it names is proven on the
+distribution and window side today.
 
 1. **Stage.** Stage the next custody key (name `agent-ca-<generation>`; created through the
    same custody seam — the policy's key-create capability admits it, so staging needs no
    manual `bao write`) into the bundle. From that instant the dual-validate window is open: BOTH roots
    validate, and new issuance chains to the NEW root. The reconcile channel distributes the change
-   as `DesiredState.ca_trust_bundle` — revision is the staging epoch, so data planes see both
-   roots during the window without re-enrolment.
+   as `DesiredState.ca_trust_bundle` — revision is the staging epoch, and the CHANNEL distributes
+   BOTH roots during the window. Honest limit today: no data-plane consumer applies the bundle
+   yet — that application half rides with T-0041/T-0042 — so "no re-enrolment" is the window's
+   designed property, proven on the distribution side, not behaviour data planes already execute.
 2. **Overlap.** Wait out every certificate the OLD root issued. Leaf lifetime is
    `GITFROK_AGENT_CERT_LIFETIME` (default 1h, §4a), so an overlap beyond that bound drains the
    old root's live certificates on its own — no per-plane action.
 3. **Remove — the precondition is named:** the old root leaves ONLY after every certificate it
    signed has expired. Removal before then is REFUSED (`ErrRootStillNeeded`), changes nothing and
    distributes nothing — including while a signature for that root is still in flight. After the
-   overlap, removal lands, the staging revision advances, and the fleet converges on the
-   surviving root.
+   overlap, removal lands, the staging revision advances, and the channel converges on the
+   surviving root (data-plane application of that convergence is the T-0041/T-0042 carry above).
 
 A control-plane restart mid-window changes nothing: the window state (roots, ledger, staging
 revision) persists to the configured `GITFROK_CUSTODY_SNAPSHOT_FILE` — written atomically
