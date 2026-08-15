@@ -1,8 +1,8 @@
 # Handoff — start here
 
-One page for an incoming session. **`governance/` is the Source of Truth (ADR-0001);** where this
-file disagrees with it, governance is right and this file is stale. This file says *where work
-stands*; governance says *what and why*.
+One page for an incoming session or a new agent. **`governance/` is the Source of Truth (ADR-0001);**
+where this file disagrees with it, governance is right and this file is stale. This file says *where
+work stands*; governance says *what and why*.
 
 ## Navigate
 
@@ -14,45 +14,106 @@ stands*; governance says *what and why*.
 | a task to pick up | `governance/docs/tasks/` — one file each, own `Status:` and `Repo(s):` |
 | phase intent and exit criteria | `governance/docs/roadmap/README.md`, `governance/docs/plans/` |
 | how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md`, `ci-gates.md` |
+| what a review already found | `phase-2-code-review.md`, `phase-2-code-review-wave2.md`, `phase-3-code-review.md`, `phase-3.1-plan-review.md` (this repo's root) |
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
 
-## Where work stands (2026-08-12)
+## Where work stands (2026-08-15)
 
-**Phase 0 Closed. Phase 1 Complete (2026-08-11, governance #130.)** Every Phase-1 task —
-T-0010…T-0018, T-0021 — is Done; T-0018 closed with 23 of 24 acceptance criteria and AC19
-(evidence pack) moved to Phase 2. Exit criteria per `governance/docs/plans/phase-1-mvp.md`: tasks
-Done **met**; CI gates **met** on every merged PR with the skip-without-infrastructure gaps
-`ci-gates.md` records; the end-to-end scenario **met except two infrastructure-bound steps**, both
-recorded as limits of this host against T-0003's cluster lane, neither missing code:
+Pins at super-repo `6bf9c7d`: **governance `43a46d6`**, **backend `da45212`**, **bff `e2344de`**,
+**webfrontend `0e80261`**.
 
-1. **No gVisor RuntimeClass under rootless podman** — CI dispatch is unconfigured in the dev cluster
-   (T-0017). The sandbox model and the K8s Job path are implemented.
-2. **One git node** — the durability quorum and failover promotion cannot be *demonstrated* there.
-   Both are proved by T-0012's tests and T-0018's two-node integration suite.
+**Phases 0, 1 and 2 are Complete.** **Phase 3 (BYO) is implementation-complete** — T-0030…T-0034 all
+Done against SPEC-0038…SPEC-0041, each acceptance criterion proven by named tests at the exit pins.
+Its fifth exit criterion is **carried, not met**: the whole install → self-register → upgrade → meter
+path has never run on a real customer-shaped cluster, so every real-cluster row of
+`deploy/conformance/byo-dataplane.md` reads "not run". That is recorded against T-0003's cluster lane
+the way Phase 1 and Phase 2 recorded their host limits.
 
-**Next work is Phase 2** (`governance/docs/roadmap/README.md`). It has no plan file, epics or tasks
-yet, so the first move is a plan under `governance/docs/plans/` — not code.
+**Phase 3.1 is planned and nothing in it has started.** Every task is `Todo`. It turns Phase 3's
+recorded limits into production posture under **ADR-0062…ADR-0067** (all Accepted) and
+**SPEC-0042…SPEC-0046** (all Approved), as epics EP-19…EP-23 and tasks **T-0036…T-0044** —
+`governance/docs/plans/phase-3-byo-v2.md` carries the dependency spine and the exit criteria.
 
-## Known gaps
+**Start here if you are picking up work:** M1 is unblocked and gates the rest.
 
-1. Phase-2/3 have no plan files; their requirements (`PR-13`…`PR-23`) have no epics, specs or tasks.
-2. **Backend integration tests do not run in CI** — T-0004's isolation proofs and T-0006's tamper
-   proofs skip without `TEST_DATABASE_URL`, so two tasks' central claims rest on a local run only.
-3. **Two sources of schema truth** — `deploy/dev/postgres.yaml`'s ConfigMap creates the T-0004
-   tenancy schema independently of `backend/`'s migration files. They agree; nothing enforces it.
-4. Host DNS for `*.gitsaas.test` is the one dev step nothing automates — it needs root, so `dev-up.sh`
-   prints the snippet rather than applying it. Migrations and the Zitadel OIDC client are converged by
-   `scripts/dev-provision.sh`.
-5. Per-consumer codegen gating is impossible: each consumer's `buf.gen.yaml` reads
-   `../governance/contracts`, a sibling checkout that exists only in this composition, so contract
-   freshness is gated at the super-repo pin bump rather than in the consumer's own CI.
-6. First-party images are pinned by tag, not digest (ADR-0035 decision 4).
+| Next | Task | Why it is first |
+|---|---|---|
+| 1 | **T-0036** — durable agent stores (Postgres adapters for the enrolment-token store and registry) | EP-19 lands the adapter/migration pattern once; everything above it grows the registry or cites the pack |
+| 2 | **T-0037** — durable residency declarations + pack assembly from durable projections | repeats T-0036's pattern; SPEC-0043's own assumption is that this lands before the Declare surface |
+| ∥ | **T-0040** — agent-CA custody: deploy OpenBao, sign through it, staged rotation | EP-21 runs parallel to EP-20; within it, deploy the custody service **before** swapping the composition root |
+
+Two tasks are blocked on something no code can unblock: **T-0042** (real GKE/EKS/AKS clusters, on
+T-0003's lane) and **T-0043** (on **T-0035**, the envelope throttle's data-plane half, which is still
+`Todo` on Phase 3's books).
+
+## Read the reviews before you re-derive them
+
+Four review reports live at this repo's root, each naming the pins it was taken at. They are records,
+not governance — but they will save you from re-finding the same things:
+
+- **`phase-3.1-plan-review.md`** — the most recent, and the one that shapes current work. Seven
+  findings on the planning artifacts, all acted on, plus the ADR-0067 decision they produced. Worth
+  reading in full before touching a Phase 3.1 spec or task.
+- **`phase-3-code-review.md`** — the CA trust-ordering defect (fixed at backend `e722046`) and the
+  carried envelope-throttle half that opened T-0035.
+- **`phase-2-code-review.md`** and **`phase-2-code-review-wave2.md`** — seventeen findings, then seven
+  on the fixes themselves, then two residuals.
+
+## What Phase 3.1 decided that changes how you build
+
+- **Durability** (ADR-0062, SPEC-0042). The agent and residency stores become Postgres adapters behind
+  the ports that already exist. Two things the spec now states rather than leaves to the adapter:
+  the enrolment-token hash lookup is the **one named RLS exemption** (enrolment resolves the tenant
+  *from* the token, so `TokenByHash`/`ClaimToken` cannot be tenant-scoped — the exemption is bounded
+  to one row and enumerated by test), and a **failed signature may not silently consume a token**
+  (AC6), because durable spend plus a remote signer turns an availability event into a dead
+  credential.
+- **The Declare surface verifies its caller** (SPEC-0043 AC6). `residency/v1` writes control state, so
+  it does not inherit SPEC-0002's limit (d) — the posture where the subject is the caller's assertion.
+  No tenant, actor or role field exists in those messages, by contract test.
+- **A tenant-scoped platform operator may declare** (ADR-0067, SPEC-0043 AC7). It reuses ADR-0046's
+  `platform_operator` principal rather than adding a cross-tenant path: the tenant is a property of
+  the verified principal. The Rego grant and its bundle-revision bump ship under T-0038 — **until then
+  bundle 0.9.0 is owner-only in fact.**
+- **Custody is OpenBao** (ADR-0066, SPEC-0044 AC5). Control-plane-side only, three-node Raft, Shamir
+  quorum unseal, Kubernetes auth, image pinned per ADR-0034. Deploying it is T-0040's scope, not an
+  assumption it inherits. Nothing in `deploy/` references it yet.
+- **Two trust bundles, named apart.** The **CA trust bundle** (agent identity roots, ADR-0064,
+  SPEC-0044 AC2, T-0040) is not the **release trust bundle** (cosign release-signing keys, ADR-0044 /
+  ADR-0065, SPEC-0045 AC2, T-0041). Both ride the reconcile path and both stage with a dual-validate
+  overlap; neither one's test may stand in for the other's.
+
+## Known gaps and carried limits
+
+1. **Proxy-only egress is unsolved and can block a sale outright** (ADR-0017's remaining follow-up). A
+   customer whose egress permits only an HTTP proxy cannot install. Outside Phase 3.1's scope.
+2. **The cluster lane is the standing blocker** for every infrastructure-bound proof since Phase 1: no
+   gVisor RuntimeClass under rootless podman (CI dispatch), one git node (durability quorum and
+   failover), measured scan and index freshness, and now the whole real-cluster conformance matrix
+   (T-0042) plus SPEC-0039 AC8's forward/backward migration proof on real state.
+3. **The dataplane gRPC door is unauthenticated** — Phase-2 limit (d). Every Phase-2 RPC takes tenant,
+   actor and roles off the wire, so the PDP decides correctly about a caller-asserted subject; today's
+   mitigation is network isolation plus RLS. SPEC-0043 AC6 gives the *new* admin surface a verified
+   caller; whether that seam generalizes to the older doors is undecided and recorded in the ADR
+   index's follow-ups.
+4. **Phase-2 in-process state does not survive a restart** — the attribution projection, pack assembly
+   state and the code-search index, which also has no per-tenant or global cap (limit (e)).
+5. **Backend integration tests skip without `TEST_DATABASE_URL`**, so some isolation and tamper proofs
+   rest on a local run.
+6. **Two sources of schema truth** — `deploy/dev/postgres.yaml`'s ConfigMap creates the tenancy schema
+   independently of `backend/`'s migrations. They agree; nothing enforces it.
+7. **Per-consumer codegen gating is impossible** while each `buf.gen.yaml` reads
+   `../governance/contracts`, so contract freshness is gated at the super-repo pin bump.
+8. First-party images in `deploy/dev` are pinned by tag, not digest (ADR-0035 decision 4).
+9. Host DNS for `*.gitsaas.test` needs root, so `dev-up.sh` prints the snippet rather than applying it.
+10. `helm` is not on this host's PATH, so `make verify`'s byo-chart **rendered** assertions skip; its
+    static assertions still bind. Say so when you report a green run.
 
 ## The storage picture, in one place
 
-- **Live bare repositories: block volumes** (ADR-0033). `git-storaged` refuses a FUSE repository
-  root outright (invariant 7).
+- **Live bare repositories: block volumes** (ADR-0033). `git-storaged` refuses a FUSE repository root
+  outright (invariant 7).
 - **LFS, CI artifacts, image blobs: ADR-0050** puts them on a SeaweedFS FUSE mount, produced by
   ADR-0051's privileged node DaemonSet. That mount **does not propagate on this driver**, so the dev
   cluster runs the S3 adapter ADR-0050 decision 6 keeps for that case. Measured, not assumed —
@@ -62,33 +123,44 @@ yet, so the first move is a plan under `governance/docs/plans/` — not code.
 - **Browser sessions: Valkey** (ADR-0049), opened by the BFF itself under the one datastore waiver
   ADR-0052 grants. Every other cache or database client in the BFF still fails its boundary gate.
 
-## The lesson the record keeps
+## The lessons the record keeps
 
-A test against a fake proves the control flow, not the claim. Proving T-0018's AC1 and AC2 against
-live infrastructure found three defects that had all passed review — a `git fetch` with no refspec
-that landed no branches, so imports produced repositories nothing could reach; an `authz.rego` that
-granted `repository.import` to no role, so AC20 had "passed" only because nobody could import; and a
-SeaweedFS PUT into a missing bucket answering 200 and keeping nothing. Wiring the object tier found a
-fourth: the S3 gateway served every object to unsigned requests, because the credentials sat on
-SeaweedFS's `anonymous` identity. Prefer a live proof for anything an acceptance criterion rests on —
-and see `deploy/dev/README.md` for the eleven separate defects that only a real cluster bring-up
-exposed.
+**A test against a fake proves the control flow, not the claim.** Proving T-0018's AC1 and AC2 against
+live infrastructure found three defects that had all passed review — a `git fetch` with no refspec that
+landed no branches; an `authz.rego` that granted `repository.import` to no role, so its criterion had
+"passed" only because nobody could import; and a SeaweedFS PUT into a missing bucket answering 200 and
+keeping nothing. Wiring the object tier found a fourth: the S3 gateway served every object to unsigned
+requests. Prefer a live proof for anything an acceptance criterion rests on — and see
+`deploy/dev/README.md` for the eleven defects only a real cluster bring-up exposed.
+
+**A green gate is not a correct spec.** Every Phase 3.1 review finding passed `check-docs.sh`. Two of
+them — an unimplementable RLS rule and an unauthenticated write surface — would have shipped as written
+and been discovered in code. When a spec says "no exception exists", check the port signature before
+believing it.
+
+**Write the limit down.** Every phase here carried something it could not finish, and each one is
+readable because it was recorded against the spec it bounds rather than left as silence. A row that
+says "not run" is worth more than a row that implies it passed.
 
 ## Hard rules
 
 - Decisions, contracts and policies change **only** in `governance/` (invariants 21–25).
 - Dependency direction is one-way: `webfrontend → bff → backend → governance`.
-- **One commit never spans two submodules.** The super-repo stores **pins**, never in-place edits to
-  a submodule path; pins move in their own commit, after the submodule commit is on its `main`.
+- **One commit never spans two submodules.** The super-repo stores **pins**, never in-place edits to a
+  submodule path; pins move in their own commit, after the submodule commit is on its `main`
+  (invariant 25).
 - New decision → **Proposed ADR and stop.** New behaviour → **spec first.** API change → governance
   first, additive only.
+- **Accepted ADRs are immutable** — supersede, never edit. Approved specs *may* be amended in place,
+  with the amendment noted in the `Status:` line (see SPEC-0042…0045 for the shape).
 - Every query tenant-scoped; authZ through the PDP; audit append-only.
 - **Work lands directly on `main`** (ADR-0053, ADR-0054). No pull request and no review — four-eyes is
   removed by decision. `main` carries one ruleset, `main-guard`: no force-push, no deletion, nothing
   else. A pull request is available for anything worth discussing first; it is a choice, not a gate.
-- **CI on push is the only gate, so run the local gates before you push** — `make verify`, the repo's
-  own tests, its fitness functions. A red `main` is a stop-everything condition: the next commit fixes
-  it or reverts it, and nothing else proceeds until it is green.
+- **CI on push is the only gate, so run the local gates before you push** — `make verify`,
+  `make surfaces-check`, `make codegen-check`, the repo's own tests and fitness functions, and
+  `governance/scripts/check-docs.sh` for a governance change. A red `main` is a stop-everything
+  condition: the next commit fixes it or reverts it, and nothing else proceeds until it is green.
 - Declare SPEC-0012's ceremony tier as a `Ceremony:` trailer in the commit message. Its gate reads a
   PR body, so it is inert on a push until taught to read the commit (ADR-0053, open question).
 - If you do use a branch, delete it locally (`-D`; squash merges make `-d` refuse) **and** on the
@@ -96,8 +168,7 @@ exposed.
 
 ## Tool entry points
 
-`CLAUDE.md` → `AGENTS.md` for Claude Code; `AGENTS.md` for Codex, OpenCode (+ `opencode.json`) and
-any other agent; `.cursor/rules/agdd.mdc` for Cursor; `.github/copilot-instructions.md` for Copilot.
-All of them are **generated** from `governance/canonical/agent-surfaces/` by
-`scripts/gen-agent-surfaces.sh` (ADR-0037) — edit the canonical source and regenerate; CI fails on
-drift.
+`CLAUDE.md` → `AGENTS.md` for Claude Code; `AGENTS.md` for Codex, OpenCode (+ `opencode.json`) and any
+other agent; `.cursor/rules/agdd.mdc` for Cursor; `.github/copilot-instructions.md` for Copilot. All of
+them are **generated** from `governance/canonical/agent-surfaces/` by `scripts/gen-agent-surfaces.sh`
+(ADR-0037) — edit the canonical source and regenerate; CI fails on drift.
