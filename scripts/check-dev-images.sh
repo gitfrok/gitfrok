@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSIONS=deploy/dev/versions.env
-MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml seaweedfs-mount.yaml zitadel.yaml zitadel-login.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml bff.yaml webfrontend.yaml"
+MANIFESTS="postgres.yaml valkey.yaml redpanda.yaml seaweedfs.yaml seaweedfs-mount.yaml zitadel.yaml zitadel-login.yaml hello.yaml dataplane.yaml controlplane.yaml git-storaged.yaml bff.yaml webfrontend.yaml openbao.yaml"
 
 fail=0
 report() { echo "DEV-IMAGE DRIFT: $1"; fail=1; }
@@ -60,6 +60,10 @@ expected_images() { # expected_images <manifest>
     # it refuses to start without its session store (ADR-0052), so it waits for one.
     bff.yaml) printf '%s\n' "$BFF_IMAGE" "$BUSYBOX_IMAGE" ;;
     webfrontend.yaml) printf '%s\n' "$WEBFRONTEND_IMAGE" ;;
+    # The custody service (T-0040 AC5, ADR-0066). Third-party but control-plane-side,
+    # so unlike the first-party images above it IS published to a registry and its pin
+    # is probed for resolvability like every other third-party entry.
+    openbao.yaml)     printf '%s\n' "$OPENBAO_IMAGE" ;;
     *) echo "unmapped manifest: $1" >&2; return 1 ;;
   esac
 }

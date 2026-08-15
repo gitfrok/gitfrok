@@ -18,7 +18,7 @@ hand when it fails.
 |---|---|
 | `minikube`, `kubectl`, `mkcert` on `PATH` | `dev-up.sh` refuses to start without all three |
 | rootless podman or docker | `--driver` is left to minikube unless `MINIKUBE_DRIVER` is set |
-| ~4 CPU / 6 GiB free | the manifests request 1.66 CPU / 2000 MiB; the ingress controller needs the rest |
+| ~4 CPU / 6 GiB free | the manifests request 1.81 CPU / 2384 MiB; the ingress controller needs the rest |
 | `git`; Go ≥ 1.26 / Node ≥ 26 to rebuild images | floors in `.tool-versions` and `versions.env` |
 
 ```bash
@@ -234,6 +234,103 @@ in use. On a driver that does propagate mounts: `MOUNT_DAEMONSET=1 make dev-up`.
 Live bare repositories touch neither tier: `GITFROK_GIT_STORAGE_ROOT` stays on the block-backed PVC
 (ADR-0033) and `git-storaged` refuses a FUSE repository root (invariant 7).
 
+## 6a. OpenBao custody service — initialize and quorum unseal (T-0040 AC5)
+
+`dev-up` applies `deploy/dev/openbao.yaml`: three OpenBao 2.6 nodes on integrated Raft storage
+(one PVC per node), control-plane-side only (ADR-0066). The pods boot **sealed** and report
+NotReady until a quorum of share-holders unseals them — that is the intended state, not a failed
+rollout. Nothing in `dev-up` unseals them, and nothing may: unseal is a human quorum act over
+Shamir shares (ADR-0066 decision 4), and no auto-unseal exists anywhere in the deployment.
+
+**Where this sits in the bring-up order.** Nothing in this cluster consumes the custody service
+yet, so today this step may run any time after step 2. Once the agent door's CA signs through
+custody — the composition-root swap is a later wave of T-0040 — **unseal must precede
+control-plane start**: a sealed custody service cannot sign, and after that swap the CA holds no
+other key (the dev CA is unreachable from the production composition root by construction,
+ADR-0064).
+
+### Initialize — once per cluster, ever
+
+```bash
+kubectl --context gitfrok exec -n default openbao-0 -- \
+  bao operator init -key-shares=5 -key-threshold=3
+```
+
+The 5-share / 3-threshold shape is recorded on the StatefulSet
+(`custody.gitsaas/key-shares`, `custody.gitsaas/key-threshold`) so this command and the
+deployment assertion cannot drift apart. The output is five unseal keys and an initial root
+credential, shown once. **Share custody**: split the five keys across distinct operators (dev:
+distinct storage locations you control), distributed **out of band** — never in this repo, never
+in the cluster, never in any environment file. The recovery keys are operator-held and out of
+band by decision; that is distinct from the CA private-key posture, which never leaves the
+barrier at all.
+
+### Unseal — every cold restart, before any consumer starts
+
+Each node needs the threshold of shares, and order matters only for the first node: unseal
+`openbao-0` first so Raft can elect a leader, then the other two, which rejoin automatically via
+their `retry_join` entries.
+
+```bash
+kubectl --context gitfrok exec -it -n default openbao-0 -- bao operator unseal
+# paste the threshold number of distinct shares when prompted; repeat for openbao-1, openbao-2
+```
+
+A share works on every node; a node reports `Sealed: false` once it holds the threshold.
+
+Two sequencing notes from live bring-up:
+
+- A freshly started standby reports `Initialized: false` and refuses unseal until it has pulled
+  the initialized Raft state from the leader — wait for `Initialized: true` before feeding it
+  shares (it arrives on its own via `retry_join`, typically within seconds).
+- **Pod updates** (the StatefulSet uses `OnDelete` because a rolling controller would deadlock
+  on never-Ready sealed nodes): delete standbys first and unseal each before the next, then the
+  leader last — quorum survives the whole sequence.
+
+### Wire Kubernetes auth — after the first unseal
+
+The server-side identity is the pod's own ServiceAccount (`openbao`, granted token-review
+delegation by the manifest). Wiring is two writes under the initial root credential — dev shell
+variable, never persisted:
+
+```bash
+K() { kubectl --context gitfrok exec -i -n default openbao-0 -- env BAO_TOKEN="$ROOT" "$@"; }
+K bao auth enable kubernetes
+K bao write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc:443"
+```
+
+No static credential is persisted anywhere — a caller's service-account JWT is exchanged for a
+short-lived OpenBao credential at login, which is the only client path allowed (ADR-0066
+decision 5). When the CA swap lands, its consumer role is added the same way:
+
+```bash
+K bao write auth/kubernetes/role/agent-ca \
+  bound_service_account_names=<ca-service-sa> bound_service_account_namespaces=default \
+  policies=agent-ca ttl=1h
+```
+
+### Verify
+
+```bash
+kubectl --context gitfrok exec -n default openbao-0 -- bao status     # Sealed false; HA mode active
+kubectl --context gitfrok exec -n default openbao-1 -- bao status     # Sealed false; standby
+kubectl --context gitfrok exec -n default openbao-0 -- bao auth list  # kubernetes/ present
+```
+
+### Seal or custody outage
+
+- **Issuance and rotation stop; certificates already issued remain valid until expiry.** Loss of
+  custody is an availability event, never an integrity event — that bound is the blast radius to
+  plan around (ADR-0066 decision 6).
+- Writes — transit signing included — serialize through the active node. Losing one standby
+  changes nothing; the leader failing promotes a standby automatically. Losing two of three
+  nodes stops writes until a quorum is back.
+- After any cold restart every node is sealed again: repeat the unseal procedure above before
+  starting whatever consumes custody.
+- Loss of enough shares to reach the threshold means the barrier cannot be reconstituted. In dev
+  that is delete the three `data-openbao-*` PVCs and re-initialize; the posture exists precisely
+  so production treats that as a decision, not a command.
+
 ## 7. Verify
 
 ```bash
@@ -348,6 +445,7 @@ projection, protection rules and every issued PAT — re-create or re-push the b
 | data plane crash-loops: `RegisterService called after Server.Serve` | the policy gRPC door raced registration | fixed in `ServePolicy()` (backend #54); rebuild the image |
 | fresh repo pushes but MR open or `refs` lookups fail | a plane restart cleared the ref projection | re-push the bare repo, re-apply protection, re-issue the PAT |
 | MR open denied despite valid refs | short ref names | pass full ref names in codereview RPCs |
+| `openbao-*` pods Never Ready | sealed — the intended state until quorum-unsealed | §6a unseal procedure (init first if the cluster never was) |
 
 ## 10. Teardown
 

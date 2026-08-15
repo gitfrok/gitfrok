@@ -23,6 +23,7 @@ dataplane:8080       data plane — healthz + policy bundle (T-0021)
 controlplane:8080    control plane — healthz baseline (Phase 3 agent gateway)
 bff:8080             BFF — SPEC-0021 browser surface + OIDC login/session (T-0015)
 webfrontend:4321     Astro SSR web app (T-0015)
+openbao:8200         OpenBao 2.6 custody service (T-0040 AC5, ADR-0066) — 3-node Raft STS, sealed until §6a
 hello:8080           busybox httpd — the smoke-test fixture, not a real service
 keda (ns: keda)      autoscales the data plane on CI queue depth (T-0017 AC2)
 ```
@@ -49,6 +50,7 @@ Every image tag is asserted against `versions.env` by `scripts/check-dev-images.
 | `controlplane.yaml` | control plane | healthz-only baseline |
 | `bff.yaml` | BFF | aggregation only (invariant 18); browser sessions in Valkey (ADR-0049/0052), with a `valkey-wait` init container |
 | `webfrontend.yaml` | web app (SSR) | reaches the BFF only (invariant 22) |
+| `openbao.yaml` | custody service | OpenBao 2.6, 3-node Raft STS, control-plane-side only (ADR-0066); Shamir quorum unseal (runbook §6a), no static credential anywhere, asserted by `scripts/check-custody-service.sh` |
 | `hello.yaml` | smoke fixture | busybox `httpd` over a ConfigMap, non-root, read-only root |
 | `ci-scaledobject.yaml` | KEDA `ScaledObject` | written, never exercised in a cluster |
 | `ingress.yaml` | — | `hello`, `zitadel`, `s3`, `filer`, `app`, `git` over the mkcert wildcard |
@@ -119,7 +121,7 @@ no in-place path down. Moving up rolls out on the existing volume untouched.
 
 ## Resources, probes, storage
 
-Requests across the applied manifests total **1.66 CPU / 2000 MiB** (`seaweedfs-mount.yaml` is opt-in
+Requests across the applied manifests total **1.81 CPU / 2384 MiB** (`seaweedfs-mount.yaml` is opt-in
 and excluded), so `dev-up` defaults the VM to 4 CPU / 6144 MiB — Minikube's 2/2 default cannot fit this
 plus the ingress controller. Redpanda gets
 `--memory=768M` against a 1Gi limit: Seastar pre-reserves what it is told, and a value equal to the
@@ -136,6 +138,7 @@ something bound the port.
 | redpanda | 10Gi | `/var/lib/redpanda/data` |
 | seaweedfs | 20Gi | `/data`, including buckets |
 | zitadel | 5Gi | **vestigial** — Zitadel keeps all state in PostgreSQL |
+| openbao | 3×1Gi | one Raft volume per node, from `volumeClaimTemplates` |
 
 All four stateful deployments use `strategy: Recreate`: `RollingUpdate` against an RWO volume
 deadlocks, because the new pod starts before the old releases it.

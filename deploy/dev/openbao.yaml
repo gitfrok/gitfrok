@@ -1,0 +1,302 @@
+---
+# OpenBao 2.6 custody service for the local Minikube dev environment (T-0040 AC5, ADR-0066).
+#
+# The control-plane custody service: the agent CA will sign through a transit-held,
+# non-exportable key it references and never holds (ADR-0066 decision 1). This manifest
+# deploys the service itself; the backend composition-root swap that consumes it is a
+# later wave of T-0040.
+#
+# Posture facts this manifest encodes (all asserted by scripts/check-custody-service.sh):
+#   - Control-plane-side ONLY (the placement label below; the data-plane chart never
+#     references this service). Never deployed in a data plane or customer cluster.
+#   - Three-node Raft integrated storage (ADR-0066 decision 6), one PVC per node.
+#   - Shamir quorum unseal (ADR-0066 decision 4) — no cloud-KMS or other automatic
+#     unseal stanza anywhere, and no step of the unseal is automated. The share shape
+#     chosen at init is 5 shares / threshold 3, recorded in the StatefulSet annotations
+#     so the runbook procedure and
+#     the deployment assertion cannot drift apart. The procedure is MVP-RUNBOOK.md §6a.
+#   - Kubernetes auth (ADR-0066 decision 5): the ServiceAccount and the token-review
+#     delegation below are the server-side half. No static credential exists anywhere in
+#     this manifest — not in env, not in the server config, not in values of any kind.
+#
+# Image tag mirrors deploy/dev/versions.env (ADR-0023/0034) — copied by hand; nothing
+# sources that file.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao
+  namespace: default
+  labels:
+    app: openbao
+    phase: "0"
+    placement: control-plane
+
+---
+# The server-side half of Kubernetes auth (ADR-0066 decision 5): OpenBao validates a
+# caller's service-account JWT by asking the Kubernetes API (TokenReview), which needs
+# this delegation. It grants review rights only — no read access to any other object.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-token-review
+  labels:
+    app: openbao
+    phase: "0"
+    placement: control-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+- kind: ServiceAccount
+  name: openbao
+  namespace: default
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-config
+  namespace: default
+  labels:
+    app: openbao
+    phase: "0"
+    placement: control-plane
+data:
+  server.hcl: |
+    # OpenBao server config — dev cluster (T-0040 AC5, ADR-0066).
+    #
+    # Integrated storage (Raft), three nodes. retry_join lists every peer by its
+    # headless-Service DNS name, so a restarted node rejoins without operator action
+    # once it is unsealed. api_addr / cluster_addr are NOT set here: they differ per
+    # pod and arrive as BAO_API_ADDR / BAO_CLUSTER_ADDR from the StatefulSet env.
+    #
+    # There is deliberately no seal stanza: absence means Shamir, which is the decision
+    # (ADR-0066 decision 4). A cloud-KMS seal stanza here would be a posture violation
+    # and scripts/check-custody-service.sh fails on one.
+    ui = false
+    disable_mlock = true
+
+    listener "tcp" {
+      address         = "[::]:8200"
+      cluster_address = "[::]:8201"
+      # Dev only: in-cluster plaintext on a single-node minikube network. A production
+      # control plane serves TLS on both listener addresses.
+      tls_disable     = true
+    }
+
+    storage "raft" {
+      path = "/openbao/data"
+
+      retry_join {
+        leader_api_addr = "http://openbao-0.openbao-internal:8200"
+      }
+      retry_join {
+        leader_api_addr = "http://openbao-1.openbao-internal:8200"
+      }
+      retry_join {
+        leader_api_addr = "http://openbao-2.openbao-internal:8200"
+      }
+    }
+
+---
+# Headless Service for Raft peer discovery. publishNotReadyAddresses is load-bearing:
+# a sealed node is NOT Ready, and without this its DNS record disappears exactly when
+# its peers need to find it, so an all-sealed cluster could never re-form a quorum.
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao-internal
+  namespace: default
+  labels:
+    app: openbao
+    phase: "0"
+    placement: control-plane
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: api
+    port: 8200
+    targetPort: api
+    protocol: TCP
+  - name: cluster
+    port: 8201
+    targetPort: cluster
+    protocol: TCP
+  selector:
+    app: openbao
+
+---
+# The Service in-cluster consumers address (the CA service, once the swap lands).
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao
+  namespace: default
+  labels:
+    app: openbao
+    phase: "0"
+    placement: control-plane
+spec:
+  type: ClusterIP
+  ports:
+  - name: api
+    port: 8200
+    targetPort: api
+    protocol: TCP
+  selector:
+    app: openbao
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao
+  namespace: default
+  labels:
+    app: openbao
+    phase: "0"
+    placement: control-plane
+  annotations:
+    # The Shamir shape the runbook's init step uses (MVP-RUNBOOK.md §6a). Recorded here
+    # so the deployment assertion and the operator procedure agree on one number.
+    custody.gitsaas/key-shares: "5"
+    custody.gitsaas/key-threshold: "3"
+spec:
+  serviceName: openbao-internal
+  replicas: 3
+  # All three pods boot at once: a Raft cluster has nothing to wait for until init,
+  # and sequential boot triples the time a cold restart spends sealed.
+  podManagementPolicy: Parallel
+  # OnDelete, like the upstream Vault chart: a RollingUpdate waits for each pod to be
+  # Ready before replacing the next, but a sealed or standby node is never Ready to a
+  # rolling controller mid-update, so the rollout would deadlock. With OnDelete the
+  # operator deletes pods explicitly (MVP-RUNBOOK.md §6a: update order — standbys
+  # first, leader last, unseal each before the next) and keeps quorum throughout.
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      app: openbao
+  template:
+    metadata:
+      labels:
+        app: openbao
+        phase: "0"
+        placement: control-plane
+    spec:
+      serviceAccountName: openbao
+      # Every env below is either a pod-identity field reference or a plaintext
+      # endpoint address. There is no credential-shaped variable in this pod spec,
+      # by construction (ADR-0066 decision 5) — check-custody-service.sh asserts it.
+      containers:
+      - name: openbao
+        image: docker.io/openbao/openbao:2.6.1
+        imagePullPolicy: IfNotPresent
+        # `bao server` rather than `server` — load-bearing. The image's entrypoint
+        # special-cases a bare `server` argument into `bao server -dev
+        # -dev-listen-address=0.0.0.0:8200`: dev mode with an in-memory store and a
+        # SECOND listener that collides with ours. Starting with `bao` takes the
+        # entrypoint's passthrough branch, so the command below runs exactly as
+        # written against the mounted config.
+        args:
+        - bao
+        - server
+        - -config=/openbao/config
+        ports:
+        - name: api
+          containerPort: 8200
+          protocol: TCP
+        - name: cluster
+          containerPort: 8201
+          protocol: TCP
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        # Per-pod advertised addresses, templated from the pod's own name. Stated as
+        # env rather than in server.hcl because the config file is shared by all three.
+        - name: BAO_API_ADDR
+          value: "http://$(POD_NAME).openbao-internal:8200"
+        - name: BAO_CLUSTER_ADDR
+          value: "http://$(POD_NAME).openbao-internal:8201"
+        # Where the `bao`/`openbao` CLI inside the pod talks by default — the runbook's
+        # kubectl exec commands rely on it rather than an exported address.
+        - name: BAO_ADDR
+          value: "http://127.0.0.1:8200"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        # Liveness is a TCP poke on purpose: `openbao status` and the HTTP health path
+        # both report failure while sealed, and a liveness that fails on sealed would
+        # restart pods mid-unseal. TCP catches a dead process and nothing else.
+        livenessProbe:
+          tcpSocket:
+            port: api
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        # Readiness is the real state signal: /v1/sys/health answers 503 while sealed,
+        # 200 once unsealed and active, 429 while unsealed-but-standby — standbyok makes
+        # a healthy standby Ready too, otherwise only the Raft leader would ever pass
+        # readiness. A sealed pod is correctly NotReady — that is what makes
+        # `rollout status` wrong for this workload until an operator completes the
+        # quorum unseal of MVP-RUNBOOK.md §6a.
+        readinessProbe:
+          httpGet:
+            path: /v1/sys/health?standbyok=true
+            port: api
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: data
+          mountPath: /openbao/data
+        - name: config
+          mountPath: /openbao/config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: config
+        configMap:
+          name: openbao-config
+      - name: tmp
+        emptyDir: {}
+      # Group ownership of the PVC so the image's non-root user can write its Raft
+      # state without widening permissions beyond the group. runAsUser is numeric on
+      # purpose: the image declares USER openbao by NAME, and kubelet refuses
+      # runAsNonRoot verification against a non-numeric user — so the UID the image
+      # builds that user with (100) is stated here instead.
+      securityContext:
+        runAsUser: 100
+        runAsGroup: 100
+        fsGroup: 100
+        runAsNonRoot: true
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      labels:
+        app: openbao
+        phase: "0"
+        placement: control-plane
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi

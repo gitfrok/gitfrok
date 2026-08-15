@@ -461,7 +461,7 @@ step "KEDA $KEDA_VERSION"
 "${KUBECTL[@]}" rollout status deployment/keda-operator -n keda --timeout="$DEFAULT_TIMEOUT"
 
 step "Applying manifests"
-for m in postgres valkey redpanda seaweedfs zitadel zitadel-login hello git-storaged dataplane controlplane bff webfrontend ingress; do
+for m in postgres valkey redpanda seaweedfs zitadel zitadel-login hello git-storaged dataplane controlplane openbao bff webfrontend ingress; do
   "${KUBECTL[@]}" apply -f "deploy/dev/$m.yaml"
 done
 if [ "$MOUNT_DAEMONSET" = "1" ]; then
@@ -570,6 +570,24 @@ done
 # The Login V2 UI waits for the login-client PAT the API's setup writes (its pat-wait init
 # container), so its rollout only starts meaningfully after the API is up.
 "${KUBECTL[@]}" rollout status deployment/zitadel-login -n "$NS" --timeout="$DEFAULT_TIMEOUT"
+
+# ------------------------------------------------------------------ custody service
+# OpenBao (T-0040 AC5, ADR-0066) is deliberately NOT in the rollout waits above: it boots
+# SEALED and its readiness probe says so, which is the correct state — a custody service
+# nobody has quorum-unsealed must not serve. Waiting on its rollout here would either
+# deadlock dev-up or, worse, teach a script to unseal it, and unseal is a human quorum
+# act (Shamir shares, ADR-0066 decision 4). dev-up asserts only that all three Raft
+# members exist, and leaves the unseal to the operator procedure it names.
+step "Custody service: OpenBao boots sealed (T-0040 AC5, ADR-0066)"
+tries=0
+until [ "$("${KUBECTL[@]}" get statefulset/openbao -n "$NS" \
+        -o jsonpath='{.status.replicas}' 2>/dev/null)" = "3" ]; do
+  tries=$((tries + 1))
+  [ "$tries" -lt 90 ] || die "the openbao StatefulSet never reported its 3 pods"
+  sleep 2
+done
+echo "openbao-0..2 exist and are SEALED — intended (no auto-unseal exists by design)."
+echo "Initialize once per cluster, then quorum unseal: deploy/MVP-RUNBOOK.md §6a."
 
 # ------------------------------------------------------------------ object-tier bucket
 # SeaweedFS answers **200 to a PUT into a bucket that does not exist**, and the object is not there
