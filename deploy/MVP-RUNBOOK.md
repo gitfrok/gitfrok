@@ -331,6 +331,93 @@ kubectl --context gitfrok exec -n default openbao-0 -- bao auth list  # kubernet
   that is delete the three `data-openbao-*` PVCs and re-initialize; the posture exists precisely
   so production treats that as a decision, not a command.
 
+## 6b. Agent CA custody — provisioning and rotation operations (T-0040 AC4)
+
+The control plane composes its CA exclusively through the custody service (backend b0ab32e:
+the production composition root has no dev CA and no key-material path — `internal/arch` fitness
+asserts both, SPEC-0044 AC1/AC3). This section is the operator side of that posture: provisioning
+the key, rotating it, and the failure cases the rotation window creates.
+
+### Provision the CA key — production shape, proven live on this cluster
+
+Under the initial root credential (dev shell variable `ROOT`, never persisted), using the `K`
+wrapper from §6a:
+
+```bash
+K bao secrets enable transit                              # once; this cluster's mount already exists
+K bao write -f transit/keys/agent-ca type=ecdsa-p256 exportable=false
+K bao policy write agent-ca - <<'POLICY'
+path "transit/keys/agent-ca*" { capabilities = ["create", "read", "update"] }
+path "transit/sign/agent-ca*"   { capabilities = ["update"] }
+POLICY
+K bao write auth/kubernetes/role/agent-ca \
+  bound_service_account_names=controlplane bound_service_account_namespaces=default \
+  policies=agent-ca ttl=1h
+```
+
+Posture facts this encodes: `exportable=false` means the private half never leaves the barrier —
+the control plane holds the key REFERENCE and signs DIGESTS through the seam (ADR-0064 decision 2);
+the policy admits key creation (bootstrap/staging), public-half reads and digest signing and
+nothing else — no decrypt, no wrap/unwrap, no secret reads, no deletion; the role binds exactly
+one service account (`controlplane` in `default`) — Kubernetes auth is the only client path
+(ADR-0066 decision 5). A staged rotation key reuses the same policy and role: its name matches
+the `agent-ca*` glob by convention (`agent-ca-<generation>`).
+
+The consumer's env (the custody-enabled control-plane image; the dev deployment still pins the
+pre-custody image 0.1.0 and will take these when it moves): `GITFROK_CUSTODY_OPENBAO_ADDR`
+(https enforced — plain http only on loopback behind an explicit dev flag),
+`GITFROK_CUSTODY_TRANSIT_MOUNT=transit`, `GITFROK_CUSTODY_KUBERNETES_ROLE=agent-ca`,
+`GITFROK_CUSTODY_KEY_NAME=agent-ca`; the login JWT is the pod's projected service-account token,
+never a file an operator hands it. Bootstrap refuses a key that already exists: a control plane
+that restarts re-attaches through Snapshot/Restore, never by re-creating the key.
+
+### Rotate the CA — stage → overlap → remove
+
+1. **Stage.** Create the next custody key (procedure above, name `agent-ca-<generation>`) and
+   stage it into the bundle. From that instant the dual-validate window is open: BOTH roots
+   validate, and new issuance chains to the NEW root. The reconcile channel distributes the change
+   as `DesiredState.ca_trust_bundle` — revision is the staging epoch, so data planes see both
+   roots during the window without re-enrolment.
+2. **Overlap.** Wait out every certificate the OLD root issued. Leaf lifetime is
+   `GITFROK_AGENT_CERT_LIFETIME` (default 1h, §4a), so an overlap beyond that bound drains the
+   old root's live certificates on its own — no per-plane action.
+3. **Remove — the precondition is named:** the old root leaves ONLY after every certificate it
+   signed has expired. Removal before then is REFUSED (`ErrRootStillNeeded`), changes nothing and
+   distributes nothing — including while a signature for that root is still in flight. After the
+   overlap, removal lands, the staging revision advances, and the fleet converges on the
+   surviving root.
+
+A control-plane restart mid-window changes nothing: the window state (roots, ledger, staging
+revision) is Snapshot/Restore durable, and the restarted control plane re-publishes exactly the
+revision the fleet last saw.
+
+### Cold restart of the custody service
+
+Every OpenBao node boots sealed after any restart: the quorum-unseal procedure in **§6a** must
+complete before the control plane can issue or rotate. Unseal order, share custody and the
+standby-initialization wait are all there.
+
+### Seal or custody outage, mid-operation
+
+The blast-radius entry lives in §6a ("Seal or custody outage") and binds here: issuance and
+rotation stop; certificates already issued remain valid to expiry. Availability, never integrity.
+
+### Enrolment in flight when custody is down (SPEC-0042 AC6)
+
+Chosen behaviour, proven by the signer-failure test: **the control plane releases the enrolment
+claim when issuance fails**, so the customer's one-time token stays spendable. Operator action:
+restore custody (§6a unseal), then let the data plane retry with the SAME token — the retry
+re-binds the SAME `data_plane_id` the claim recorded; one token never mints a second identity
+(ADR-0060), whichever side of the failure the retry lands.
+
+### Clock skew, the symptom that reads as a network fault
+
+A skewed CUSTOMER cluster presents as disconnects and failed heartbeats that look like network
+failure — the leeway and the diagnostic order are recorded in §4a's agent-gateway entry
+(`GITFROK_AGENT_CLOCK_SKEW_LEEWAY`, T-0030). Rotation does not change that bound: a data plane
+outside the leeway is refused before trust-bundle state is ever consulted. Check clock sync
+before chasing networks, and before suspecting a rotation.
+
 ## 7. Verify
 
 ```bash

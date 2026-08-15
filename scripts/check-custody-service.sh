@@ -17,6 +17,9 @@
 #                     Kubernetes auth is the only client path (ADR-0066 decision 5),
 #                     whose server-side half (ServiceAccount + token-review delegation)
 #                     must be present in the manifest.
+#   wired consumer    the backend production composition root reads its custody posture
+#                     from env and constructs no dev CA — the deployment-side mirror of
+#                     SPEC-0044 AC1/AC3 fitness (backend b0ab32e).
 #   image pin         delegated to check-dev-images.sh (openbao.yaml is a mapped
 #                     manifest there), which asserts the tag against versions.env and,
 #                     with CHECK_IMAGE_RESOLVE=1, that the registry resolves it.
@@ -104,7 +107,26 @@ if grep -inE '(password|passwd|secret_id|client_secret|access_key|secret_key|api
   report "openbao.yaml carries a credential-shaped assignment — no static credential anywhere (ADR-0066 decision 5)"
 fi
 
-# --- 5. rendered assertion: the chart, templated, still carries no custody ----------------------
+# --- 5. wired-consumer posture: the production composition root is custody-only ----------------
+# The backend composition root (backend b0ab32e onward) composes its CA exclusively through the
+# custody service; internal/arch fitness asserts the same property in-tree. From the deployment
+# side we assert the wiring exists at all: the root reads the custody posture from env and never
+# constructs the dev CA (SPEC-0044 AC1/AC3, mirrored; T-0040 AC5).
+backend_root="$root/backend/cmd/controlplane-app"
+if [ -d "$backend_root" ]; then
+  if ! grep -rq 'GITFROK_CUSTODY_OPENBAO_ADDR' "$backend_root"; then
+    report "backend composition root reads no custody address (GITFROK_CUSTODY_OPENBAO_ADDR) — the CA is not wired through the custody service"
+  fi
+  if grep -rl 'NewDevCA(' "$backend_root" --include='*.go' 2>/dev/null | grep -v '_test\.go$' | grep -q .; then
+    report "backend composition root constructs the dev CA in a non-test source — custody must be the only CA path (SPEC-0044 AC3)"
+  else
+    echo "  ok    control-plane composition root is custody-only (no dev CA in non-test sources)"
+  fi
+else
+  echo "custody-service: note: $backend_root absent (submodule not checked out) — wired-consumer assertion NOT run, declared"
+fi
+
+# --- 6. rendered assertion: the chart, templated, still carries no custody ----------------------
 if command -v helm >/dev/null 2>&1; then
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/custody-chart.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
@@ -135,4 +157,4 @@ if [ "$fail" -ne 0 ]; then
   echo "custody-service: FAIL — T-0040 AC5 / SPEC-0044 AC5 (ADR-0066 decisions 5–7)."
   exit 1
 fi
-echo "custody-service: OK — 3-node Raft, control-plane-side, Shamir-only unseal, no static credential"
+echo "custody-service: OK — 3-node Raft, control-plane-side, Shamir-only unseal, no static credential, custody-only consumer"
