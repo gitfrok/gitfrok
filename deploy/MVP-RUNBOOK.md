@@ -242,12 +242,14 @@ NotReady until a quorum of share-holders unseals them — that is the intended s
 rollout. Nothing in `dev-up` unseals them, and nothing may: unseal is a human quorum act over
 Shamir shares (ADR-0066 decision 4), and no auto-unseal exists anywhere in the deployment.
 
-**Where this sits in the bring-up order.** Nothing in this cluster consumes the custody service
-yet, so today this step may run any time after step 2. Once the agent door's CA signs through
-custody — the composition-root swap is a later wave of T-0040 — **unseal must precede
-control-plane start**: a sealed custody service cannot sign, and after that swap the CA holds no
-other key (the dev CA is unreachable from the production composition root by construction,
-ADR-0064).
+**Where this sits in the bring-up order.** The composition-root swap has landed (backend
+b0ab32e, T-0040 Wave 3b): the control plane composes its CA exclusively through custody, and
+the moment it is deployed with the agent door configured (`GITFROK_AGENT_GRPC_ADDR` set),
+**unseal must precede control-plane start** — a sealed custody service cannot sign, and the
+production composition root holds no other key (the dev CA is unreachable from it by
+construction, SPEC-0044 AC1/AC3; fitness-asserted in `internal/arch`). The current dev
+deployment still runs the Phase-1 healthz-only image, so on this cluster the step may still run
+any time after step 2 until the custody-enabled image ships.
 
 ### Initialize — once per cluster, ever
 
@@ -264,6 +266,13 @@ distinct storage locations you control), distributed **out of band** — never i
 in the cluster, never in any environment file. The recovery keys are operator-held and out of
 band by decision; that is distinct from the CA private-key posture, which never leaves the
 barrier at all.
+
+**The initial root credential is the dev-only bootstrap authority.** It authorizes exactly the
+one-time wiring below — enabling Kubernetes auth, the consumer role and policy, the transit
+mount and the CA key — and nothing else: it is held as a shell variable (`ROOT`), never written
+to disk, never persisted, and no runtime path uses it (Kubernetes auth is the only client path,
+ADR-0066 decision 5). Provisioning the CA key through it, and everything it does NOT authorize,
+is §6b.
 
 ### Unseal — every cold restart, before any consumer starts
 
@@ -287,27 +296,36 @@ Two sequencing notes from live bring-up:
   on never-Ready sealed nodes): delete standbys first and unseal each before the next, then the
   leader last — quorum survives the whole sequence.
 
-### Wire Kubernetes auth — after the first unseal
+### Wire Kubernetes auth and the CA consumer — after the first unseal
 
 The server-side identity is the pod's own ServiceAccount (`openbao`, granted token-review
-delegation by the manifest). Wiring is two writes under the initial root credential — dev shell
-variable, never persisted:
+delegation by the manifest). Wiring is a few writes under the initial root credential — dev
+shell variable `ROOT`, never persisted:
 
 ```bash
 K() { kubectl --context gitfrok exec -i -n default openbao-0 -- env BAO_TOKEN="$ROOT" "$@"; }
 K bao auth enable kubernetes
 K bao write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc:443"
+K bao secrets enable transit
+K bao write -f transit/keys/agent-ca type=ecdsa-p256 exportable=false
+K bao policy write agent-ca - <<'POLICY'
+path "transit/keys/agent-ca*" { capabilities = ["create", "read", "update"] }
+path "transit/sign/agent-ca*"   { capabilities = ["update"] }
+POLICY
+K bao write auth/kubernetes/role/agent-ca \
+  bound_service_account_names=controlplane bound_service_account_namespaces=default \
+  policies=agent-ca ttl=1h
 ```
 
 No static credential is persisted anywhere — a caller's service-account JWT is exchanged for a
 short-lived OpenBao credential at login, which is the only client path allowed (ADR-0066
-decision 5). When the CA swap lands, its consumer role is added the same way:
-
-```bash
-K bao write auth/kubernetes/role/agent-ca \
-  bound_service_account_names=<ca-service-sa> bound_service_account_namespaces=default \
-  policies=agent-ca ttl=1h
-```
+decision 5). The role binds exactly the `controlplane` ServiceAccount declared by
+`deploy/dev/controlplane.yaml` (the consumer's projected SA token is the login credential —
+zero static credentials on either side), and the policy admits key creation, public-half reads
+and digest signing and nothing else. The key rationale and the staged-rotation reuse of this
+policy/role shape are §6b; the end-to-end proof from a service-account JWT to a signature
+through this exact key is the live test `TestLiveOpenBaoKubernetesAuthConsumer` in
+`backend/modules/agent/internal/adapters/custody/`, run against this cluster.
 
 ### Verify
 
@@ -330,6 +348,13 @@ kubectl --context gitfrok exec -n default openbao-0 -- bao auth list  # kubernet
 - Loss of enough shares to reach the threshold means the barrier cannot be reconstituted. In dev
   that is delete the three `data-openbao-*` PVCs and re-initialize; the posture exists precisely
   so production treats that as a decision, not a command.
+  Dev recovery gotcha (hostpath-provisioner): deleting the PVCs does not clear the node's disk,
+  so the fresh pods come up reading stale Raft state and refuse to initialize. After deleting the
+  PVCs, wipe the data directories before the pods restart into them:
+
+  ```bash
+  kubectl --context gitfrok exec -n default openbao-0 -- sh -c 'rm -rf /openbao/data/*'  # each node
+  ```
 
 ## 6b. Agent CA custody — provisioning and rotation operations (T-0040 AC4)
 
@@ -340,28 +365,17 @@ the key, rotating it, and the failure cases the rotation window creates.
 
 ### Provision the CA key — production shape, proven live on this cluster
 
-Under the initial root credential (dev shell variable `ROOT`, never persisted), using the `K`
-wrapper from §6a:
-
-```bash
-K bao secrets enable transit                              # once; this cluster's mount already exists
-K bao write -f transit/keys/agent-ca type=ecdsa-p256 exportable=false
-K bao policy write agent-ca - <<'POLICY'
-path "transit/keys/agent-ca*" { capabilities = ["create", "read", "update"] }
-path "transit/sign/agent-ca*"   { capabilities = ["update"] }
-POLICY
-K bao write auth/kubernetes/role/agent-ca \
-  bound_service_account_names=controlplane bound_service_account_namespaces=default \
-  policies=agent-ca ttl=1h
-```
-
-Posture facts this encodes: `exportable=false` means the private half never leaves the barrier —
+The full command sequence — transit mount, non-exportable ecdsa-p256 key, narrow sign-through
+policy, single-SA Kubernetes-auth role — is the wiring block in **§6a** ("Wire Kubernetes auth and
+the CA consumer"), executed exactly as written there against this cluster. Its posture facts:
+`exportable=false` means the private half never leaves the barrier —
 the control plane holds the key REFERENCE and signs DIGESTS through the seam (ADR-0064 decision 2);
 the policy admits key creation (bootstrap/staging), public-half reads and digest signing and
 nothing else — no decrypt, no wrap/unwrap, no secret reads, no deletion; the role binds exactly
-one service account (`controlplane` in `default`) — Kubernetes auth is the only client path
-(ADR-0066 decision 5). A staged rotation key reuses the same policy and role: its name matches
-the `agent-ca*` glob by convention (`agent-ca-<generation>`).
+one service account (`controlplane` in `default`, declared by `deploy/dev/controlplane.yaml`) —
+Kubernetes auth is the only client path (ADR-0066 decision 5). A staged rotation key reuses the
+same policy and role: its name matches the `agent-ca*` glob by convention
+(`agent-ca-<generation>`); staging it is step 1 of the rotation below.
 
 The consumer's env (the custody-enabled control-plane image; the dev deployment still pins the
 pre-custody image 0.1.0 and will take these when it moves): `GITFROK_CUSTODY_OPENBAO_ADDR`

@@ -1,4 +1,19 @@
 ---
+# T-0040 Wave 3b: the custody consumer identity. The control plane's projected
+# service-account token is its ONLY credential toward the custody service —
+# OpenBao's Kubernetes-auth role agent-ca binds exactly this account (MVP-RUNBOOK
+# §6a), and the custody adapter exchanges the token for a short-lived OpenBao
+# credential at login (ADR-0066 decision 5). Zero static credentials on either
+# side.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: controlplane
+  namespace: default
+  labels:
+    app: controlplane
+    phase: "1"
+---
 # T-0021: the control plane. Phase 1 ships it as a healthz-only baseline (the
 # agent gateway wires in Phase 3); it exists so the plane has a pinned image and
 # a presence in the cluster before the operator/Helm work of Phase 2.
@@ -23,6 +38,7 @@ spec:
         app: controlplane
         phase: "1"
     spec:
+      serviceAccountName: controlplane
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
