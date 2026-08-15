@@ -14,6 +14,9 @@
 #      backend verifier hashes), ECDSA over SHA-256. Each release must verify against at
 #      least one bundle key. Missing field = malformed; empty signature = unsigned; no key
 #      verifies = mis-signed. All three are refusals.
+#   3. Operator digest pin (T-0041, SPEC-0045 AC1): the operator ships only as a signed,
+#      digest-pinned first-party release — the chart must pin exactly the digest its signed
+#      manifest records, and the install carries no customer-supplied operator image.
 #
 # Exit: 0 clean · 1 violation · 3 environment problem (bundle or openssl absent).
 set -euo pipefail
@@ -113,6 +116,38 @@ fi
 
 if [ "$count" -eq 0 ]; then
   echo "signed-releases: no release manifests in deploy/releases/ — nothing to verify (bundle checked)"
+fi
+
+# --- 3. the operator image's digest pin is a signed release (T-0041, SPEC-0045 AC1) ------
+# The install depends on the vendor's operator image and nothing else: an operator-app
+# release manifest must exist and verify (part 2 above), and the BYO chart's default
+# operator pin must be EXACTLY that manifest's digest — drift between the chart's pin and
+# the signed release is exactly the substitution AC1 closes.
+operator_releases=("$releases"/operator-app-*.release)
+chart_values="$root/deploy/helm/gitfrok-dataplane/values.yaml"
+if [ ! -e "${operator_releases[0]}" ]; then
+  report "no operator-app release manifest in deploy/releases/ — the operator image is not a signed release (SPEC-0045 AC1)"
+elif [ ! -f "$chart_values" ]; then
+  report "$chart_values is absent — the install's operator pin cannot be checked against the signed release"
+else
+  for orel in "${operator_releases[@]}"; do
+    o_digest=$(field "$orel" digest)
+    o_oci=$(field "$orel" oci_ref)
+    chart_digest=$(sed -n 's/^[[:space:]]*digest:[[:space:]]*"\{0,1\}\(sha256:[0-9a-f]\{64\}\)"\{0,1\}$/\1/p' "$chart_values" | head -1)
+    chart_repo=$(sed -n 's/^[[:space:]]*repository:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' "$chart_values" | grep operator | head -1)
+    if [ -z "$chart_digest" ]; then
+      report "values.yaml carries no operator.image.digest pin — the operator image is not digest-pinned (SPEC-0045 AC1)"
+    else
+      if [ "$chart_digest" != "$o_digest" ]; then
+        report "values.yaml operator pin ($chart_digest) drifts from ${orel##*/}'s signed digest ($o_digest)"
+      else
+        echo "  ok    chart operator pin matches ${orel##*/} ($o_digest)"
+      fi
+    fi
+    if [ -n "$chart_repo" ] && [ "$chart_repo" != "$o_oci" ]; then
+      report "values.yaml operator repository ($chart_repo) drifts from ${orel##*/}'s signed oci_ref ($o_oci)"
+    fi
+  done
 fi
 
 if [ "$fail" -ne 0 ]; then

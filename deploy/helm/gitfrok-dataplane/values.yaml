@@ -58,14 +58,22 @@ enrolment:
     key: token
 
 # The Operator seam (ADR-0013 day-2). T-0031 lays the CRD (crds/), namespace-scoped
-# RBAC and the DataPlane CR shape; the reconcile loop that converges versions arrives
-# with T-0032 and is deliberately NOT part of this install.
+# RBAC and the DataPlane CR shape; T-0032 lands the reconcile contract. T-0041
+# (SPEC-0045 AC1, ADR-0065 decision 1) makes the operator a vendor-signed,
+# digest-pinned first-party image: the install DEFAULTS to the vendor pin and no
+# longer carries a customer-supplied operator image requirement — a customer-built
+# or customer-run operator image is a non-goal, and the release gate
+# (check-byo-chart.sh) refuses a regression of that requirement.
 operator:
   # Renders ServiceAccount + namespace-scoped Role/RoleBinding + operator Deployment.
   enabled: false
   image:
-    repository: ""
-    tag: ""
+    # The vendor's first-party operator image (backend Dockerfile.operator), referenced
+    # ONLY by digest pin — never by mutable tag. The default pin is the digest of the
+    # signed release manifest deploy/releases/operator-app-0.1.0.release; the release
+    # gate (check-signed-releases.sh) refuses drift between the two.
+    repository: docker.io/gitfrok/operator-app
+    digest: "sha256:35e2985b11f4e3631f38485c1803efa7307501354ba8669a85ff2d5dd0989a1d"
   # The release-signing trust bundle the reconcile loop verifies every release against
   # BEFORE applying it (SPEC-0039 AC3, ADR-0044). Name of an EXISTING ConfigMap holding
   # the bundle's *.pub verification keys (see deploy/releases/trust). Required when the

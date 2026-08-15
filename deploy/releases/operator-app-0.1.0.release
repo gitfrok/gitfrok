@@ -1,0 +1,5 @@
+component=operator-app
+version=0.1.0
+oci_ref=docker.io/gitfrok/operator-app
+digest=sha256:35e2985b11f4e3631f38485c1803efa7307501354ba8669a85ff2d5dd0989a1d
+signature=MEUCIERCn6lwRubauhk0h5DDtgkd+UsgDxTspXxV696EmkmMAiEAgTQE77FCEFCtefPKm+SF2HI3lgcuRY5lG0bMjKZiLwo=

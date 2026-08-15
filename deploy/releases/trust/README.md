@@ -10,6 +10,15 @@ manifest in this tree.
 SHA-256 fingerprint is
 `98a6c7395960bb407eff26096f581278e602195dac620f8d38e4c4456130c5f3`.
 
+`release-signing-2026-08-gen2.pub` is the staged successor of the T-0041 rotation
+window (SPEC-0045 AC2, ADR-0065 decision 2): it sits BESIDE the active key so every
+verifier dual-validates both during the overlap. Its SHA-256 fingerprint is
+`4045b10667845f736f75a3176171419f4dc39a641b2df733c84846b7cbb45ad8`. Its private half
+was a staged throwaway key generated OUTSIDE this tree (the sign-release.sh custody
+posture, mirrored) and never committed; the window demonstrates the overlap shape —
+`operator-app-0.1.0.release` verifies against it — and the removal step follows the
+rotation rule below once the fleet has converged.
+
 The matching private key lives only in the protected release pipeline (the CI
 environment secret named for release signing); it is available only to approved release
 jobs from `main` or a `v*` tag. It must not be copied here, into an image, into a chart,

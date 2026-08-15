@@ -92,7 +92,11 @@ spec:
         runAsGroup: 65532
       containers:
       - name: operator
-        image: "{{ required "operator.image.repository is required when operator.enabled" .Values.operator.image.repository }}:{{ required "operator.image.tag is required when operator.enabled" .Values.operator.image.tag }}"
+        # The vendor-signed first-party operator image, digest-pinned (T-0041, SPEC-0045
+        # AC1, ADR-0065 decision 1): the default pin is the signed release manifest
+        # deploy/releases/operator-app-0.1.0.release, and NO customer-supplied image
+        # value is required — a mutable tag is never a legal operator reference.
+        image: "{{ .Values.operator.image.repository }}@{{ required "operator.image.digest is required when operator.enabled: the operator ships only as the vendor's digest-pinned signed release (SPEC-0045 AC1)" .Values.operator.image.digest }}"
         env:
         - name: GITFROK_OPERATOR_NAMESPACE
           valueFrom:

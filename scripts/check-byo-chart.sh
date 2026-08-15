@@ -154,6 +154,29 @@ if [ -f "$op" ]; then
   if ! grep -q 'releaseTrust.configMap' "$op"; then
     report "operator template does not source the release trust bundle from operator.releaseTrust.configMap"
   fi
+  # --- 7b. AC1 (T-0041): the operator is the vendor's digest-pinned image, not a customer input ---
+  # The install stops depending on a customer-supplied operator image (SPEC-0045 AC1,
+  # ADR-0065 decision 1): the template references the image ONLY as repository@digest,
+  # requires no repository/tag values, and a mutable tag is not a legal reference.
+  if grep -qE 'required "operator\.image\.(repository|tag)' "$op"; then
+    report "operator template requires a customer-supplied operator image value — the operator ships only as the vendor's digest-pinned signed release (SPEC-0045 AC1)"
+  fi
+  if grep -q 'operator.image.tag' "$op"; then
+    report "operator template references operator.image.tag — a mutable tag is never a legal operator image reference (SPEC-0045 AC1)"
+  fi
+  if ! grep -q 'operator.image.digest' "$op"; then
+    report "operator template does not pin the operator image by operator.image.digest (SPEC-0045 AC1)"
+  fi
+  if ! grep -q 'operator.image.repository }}@' "$op"; then
+    report "operator template does not render the operator image as repository@digest (SPEC-0045 AC1)"
+  fi
+  # values.yaml: the pin is a non-empty default, and the operator section declares no tag.
+  if ! grep -qE '^[[:space:]]+digest:[[:space:]]*"sha256:[0-9a-f]{64}"' "$chart/values.yaml"; then
+    report "values.yaml carries no defaulted operator.image.digest pin (sha256:...) — the install would depend on a customer-supplied image (SPEC-0045 AC1)"
+  fi
+  if awk '/^operator:/{f=1} f && /^[[:space:]]+tag:/{found=1} END{exit !found}' "$chart/values.yaml"; then
+    report "values.yaml's operator section still declares an image tag — the operator is digest-pinned only (SPEC-0045 AC1)"
+  fi
 fi
 
 # --- 8. rendered assertions (only with helm) -------------------------------------------------------
@@ -191,6 +214,31 @@ if command -v helm >/dev/null 2>&1; then
     fi
     if ! grep -q 'secretKeyRef' "$render"; then
       report "rendered Deployment does not source the token via secretKeyRef"
+    fi
+  fi
+
+  # The operator-enabled shape (T-0041, SPEC-0045 AC1): with NO image values supplied the
+  # chart must render the vendor's digest-pinned operator image — the install depends on
+  # no customer-supplied operator image — and still render zero inbound surface.
+  if ! helm template test-operator "$chart" \
+      --set agent.gatewayAddr=agent.gitsaas.example:8443 \
+      --set agent.caBundleConfigMap=gitfrok-agent-ca \
+      --set policy.bundleConfigMap=gitfrok-policy-bundle \
+      --set region=eu-west1 \
+      --set enrolment.existingSecret.name=dp-enrolment \
+      --set operator.enabled=true \
+      --set operator.releaseTrust.configMap=gitfrok-release-trust \
+      > "$tmp/render-operator.yaml" 2> "$tmp/template-op.err"; then
+    report "helm template with operator.enabled=true failed (no image values supplied):"; sed 's/^/  /' "$tmp/template-op.err"
+  else
+    if ! grep -qE 'image:[[:space:]]*"?docker.io/gitfrok/operator-app@sha256:[0-9a-f]{64}' "$tmp/render-operator.yaml"; then
+      report "rendered operator Deployment does not carry the vendor's digest-pinned image with zero image values supplied (SPEC-0045 AC1)"
+    fi
+    if grep -qE 'docker\.io/gitfrok/operator-app:[^@]' "$tmp/render-operator.yaml"; then
+      report "the operator image is referenced by mutable tag instead of its digest pin"
+    fi
+    if grep -nE '^kind:[[:space:]]*(Secret|Service|Ingress)[[:space:]]*$' "$tmp/render-operator.yaml"; then
+      report "rendered operator manifests carry a Secret or inbound surface"
     fi
   fi
   echo "byo-chart: helm assertions ran (helm $(helm version --short 2>/dev/null))"
