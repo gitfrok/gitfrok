@@ -1,3 +1,6 @@
+{{- if .Values.operator.image.tag }}
+{{- fail "operator.image.tag is retired (T-0041, SPEC-0045 AC1): the operator ships ONLY as the vendor's digest-pinned signed release. Set operator.image.digest to the pin from deploy/releases/operator-app-0.1.0.release instead — a mutable tag is never honored, and silently discarding one would lie about the image the install converges." }}
+{{- end }}
 {{- if .Values.operator.enabled }}
 # The Operator seam (ADR-0013, SPEC-0039 AC3-AC7). T-0031 laid the shape: namespace-scoped
 # permissions and the workload slot. T-0032 names what the reconcile loop this Deployment

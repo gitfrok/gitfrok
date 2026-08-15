@@ -95,6 +95,12 @@ not governance — but they will save you from re-finding the same things:
   SPEC-0044 AC2, T-0040) is not the **release trust bundle** (cosign release-signing keys, ADR-0044 /
   ADR-0065, SPEC-0045 AC2, T-0041). Both ride the reconcile path and both stage with a dual-validate
   overlap; neither one's test may stand in for the other's.
+- **The operator image ships digest-pinned only — the legacy tag is a tripwire.** T-0041 retired
+  `operator.image.tag`: the dataplane chart FAILS the install if anyone still sets it
+  (`deploy/helm/gitfrok-dataplane/templates/operator.yaml`), rather than silently discarding a
+  mutable tag that would lie about the image the install converges. The only honored pin is
+  `operator.image.digest`, and it must agree with the signed release manifest
+  `deploy/releases/operator-app-0.1.0.release` (gated by check-signed-releases.sh).
 
 ## Known gaps and carried limits
 

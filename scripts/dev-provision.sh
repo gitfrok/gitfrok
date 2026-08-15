@@ -82,6 +82,7 @@ for m in \
   backend/modules/security/internal/adapters/postgres/migrations/0002_security_triage.sql \
   backend/modules/security/internal/adapters/postgres/migrations/0003_security_scan_report.sql \
   backend/modules/agent/internal/adapters/postgres/migrations/0001_agent_enrolment.sql \
+  backend/modules/agent/internal/adapters/postgres/migrations/0002_release_trust_plane_state.sql \
   backend/modules/residency/internal/adapters/postgres/migrations/0001_residency_declarations.sql; do
   [ -f "$m" ] || die "migration not found: $m"
   echo "  applying $m"
@@ -118,6 +119,7 @@ for t in \
   security.scan_report \
   agent.enrolment_tokens \
   agent.data_planes \
+  agent.release_trust_plane_state \
   residency.declarations \
   residency.observations; do
   printf '%s\n' "$table_list" | grep -qx "$t" || missing="$missing $t"

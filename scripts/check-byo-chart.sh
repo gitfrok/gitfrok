@@ -119,6 +119,13 @@ done
 # The install-time agent (backend commit for T-0031) must consume the channel outbound only. If
 # the backend pin predates that work the files are absent and we say so rather than fake a pass.
 agent_files=("$root/backend/cmd/dataplane-app/agent.go" "$root/backend/platform/agentclient/agentclient.go")
+# The Operator seam runs inside the customer's cluster too (T-0032/T-0041): its non-test Go
+# sources get the same outbound-only scan, file by file, so a listener anywhere in the
+# data-plane binaries is an inbound path regardless of which binary opens it.
+for f in "$root"/backend/cmd/operator-app/*.go; do
+  case "$f" in *_test.go) continue ;; esac
+  [ -f "$f" ] && agent_files+=("$f")
+done
 missing=0
 for f in "${agent_files[@]}"; do
   if [ ! -f "$f" ]; then missing=1; echo "byo-chart: note: $f absent (super-repo backend pin predates T-0031?)"; fi
@@ -161,8 +168,13 @@ if [ -f "$op" ]; then
   if grep -qE 'required "operator\.image\.(repository|tag)' "$op"; then
     report "operator template requires a customer-supplied operator image value — the operator ships only as the vendor's digest-pinned signed release (SPEC-0045 AC1)"
   fi
-  if grep -q 'operator.image.tag' "$op"; then
-    report "operator template references operator.image.tag — a mutable tag is never a legal operator image reference (SPEC-0045 AC1)"
+  # operator.image.tag may appear ONLY inside its retirement tripwire (the fail guard at the
+  # template's head refuses a legacy values file); any OTHER reference is a regression.
+  if grep -n 'operator.image.tag' "$op" | grep -vE 'fail |\.Values\.operator\.image\.tag' | grep -q .; then
+    report "operator template references operator.image.tag outside its retirement tripwire — a mutable tag is never a legal operator image reference (SPEC-0045 AC1)"
+  fi
+  if ! grep -q 'fail.*operator\.image\.tag is retired' "$op"; then
+    report "operator template lost its retirement tripwire — a legacy operator.image.tag must FAIL the install, never be silently discarded (SPEC-0045 AC1)"
   fi
   if ! grep -q 'operator.image.digest' "$op"; then
     report "operator template does not pin the operator image by operator.image.digest (SPEC-0045 AC1)"

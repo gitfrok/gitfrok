@@ -87,9 +87,10 @@ name.
 
 `deploy/dev/postgres.yaml` creates the T-0004 tenancy baseline from its own ConfigMap, and
 `scripts/dev-provision.sh` (which `dev-up` runs, and `make dev-provision` re-runs idempotently) applies
-the full backend migration set — the Phase-0/1 baseline and every Phase-2 migration, in dependency
-order — as the postgres superuser. Nothing in the *cluster* applies them, so a `kubectl apply` without
-the script leaves you to do it by hand:
+the full backend migration set — the Phase-0/1 baseline, every Phase-2 migration and the Phase-3/3.1
+agent and residency migrations, in dependency order — as the postgres superuser. Nothing in the
+*cluster* applies them, so a `kubectl apply` without the script leaves you to do it by hand. The
+authoritative list is the script's own apply list; at the time of writing it is:
 
 ```
 backend/platform/db/migrations/0001_tenancy_baseline.sql
@@ -101,13 +102,18 @@ backend/modules/policy/internal/adapters/postgres/migrations/0001_policy_decisio
 backend/modules/security/internal/adapters/postgres/migrations/0001_security_findings.sql
 backend/modules/security/internal/adapters/postgres/migrations/0002_security_triage.sql
 backend/modules/security/internal/adapters/postgres/migrations/0003_security_scan_report.sql
+backend/modules/agent/internal/adapters/postgres/migrations/0001_agent_enrolment.sql
+backend/modules/agent/internal/adapters/postgres/migrations/0002_release_trust_plane_state.sql
+backend/modules/residency/internal/adapters/postgres/migrations/0001_residency_declarations.sql
 ```
 
 Order matters: the tenancy baseline creates the schemas and the `gitfrok_app` role the module
 migrations grant to; audit 0002 indexes the tables audit 0001 creates; identity 0002 and policy 0001
-build on the baseline's RLS pattern; security 0002/0003 extend 0001's tables. The provisioning script
-verifies after applying — schemas `tenant/audit/identity/policy/security` present, and one table per
-Phase-2 migration (including `policy.decision_records` and the security scan/triage set).
+build on the baseline's RLS pattern; security 0002/0003 extend 0001's tables; agent 0002 registers
+the release-trust plane-state table on the enrolment schema agent 0001 creates. The provisioning
+script verifies after applying — schemas `tenant/audit/identity/policy/security/agent/residency`
+present, and one table per migration (including `policy.decision_records`, the security scan/triage
+set, `agent.release_trust_plane_state` and `residency.declarations`).
 
 Skipping the Phase-2 set is not a partial state: the pinned backend selects Postgres-backed stores
 whenever `GITFROK_DATABASE_URL` is set (`deploy/dev/dataplane.yaml` sets it), and policy `Decide`
