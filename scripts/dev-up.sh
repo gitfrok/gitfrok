@@ -92,13 +92,15 @@ POLICY_ENV=GITFROK_POLICY_BUNDLE_DIR
 KUBECTL=(kubectl --context "$PROFILE")
 
 # Deployments to wait on, and how long each gets. Zitadel runs schema migrations on first boot, so
-# it is slow in a way the others are not.
-DEPLOYMENTS="postgres valkey redpanda seaweedfs hello git-storaged dataplane controlplane"
+# it is slow in a way the others are not. bff joined when Stage C wired its usage door: the smoke
+# test asserts it Available, so its rollout gets a budget like the rest.
+DEPLOYMENTS="postgres valkey redpanda seaweedfs hello git-storaged dataplane controlplane bff"
 # Zitadel and its Login V2 UI get separate rollouts and budgets at the bottom of the rollout
 # section: first boot is init + migrations + FirstInstance setup (which also writes the
 # login-client PAT the login UI waits for).
 OIDC_CM=gitfrok-oidc
 PAT_SECRET=gitfrok-pat-verifier
+ENROL_TOKEN_SECRET=gitfrok-enrolment-token
 S3_SECRET=gitfrok-seaweedfs-s3
 S3_BUCKET=gitfrok
 
@@ -418,13 +420,30 @@ build_if_absent "$GIT_STORAGED_IMAGE" Dockerfile.gitstoraged backend
 build_if_absent "$BFF_IMAGE" Dockerfile bff
 build_if_absent "$WEBFRONTEND_IMAGE" Dockerfile webfrontend
 
-# The key the Git front doors verify PATs with. Generated and upserted like the
-# TLS certificate: a credential committed to the tree is a credential every clone
-# of the tree holds.
-step "PAT verifier key secret '$PAT_SECRET'"
-"${KUBECTL[@]}" create secret generic "$PAT_SECRET" -n "$NS" \
-  --from-literal=key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')" \
-  --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+# The key the Git front doors verify PATs with — and, since Stage C mounted the
+# controlplane's residency/enrolment doors, the key THOSE doors resolve the same
+# PATs against (one identity schema, ADR-0043). Created ONCE and never rotated
+# by this script: every PAT ever issued verifies against the key that was live
+# at issue time, so a dev-up that regenerated it would silently break the
+# platform-operator PAT dev-provision.sh issues. A rotation is a deliberate act,
+# not a side effect of convergence — delete the Secret and re-provision.
+step "PAT verifier key secret '$PAT_SECRET' (create-once: rotation breaks issued PATs)"
+"${KUBECTL[@]}" get secret "$PAT_SECRET" -n "$NS" >/dev/null 2>&1 \
+  || "${KUBECTL[@]}" create secret generic "$PAT_SECRET" -n "$NS" \
+     --from-literal=key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+
+# The one-time enrolment token's Secret (SPEC-0038, Stage C). dataplane.yaml
+# requires GITFROK_ENROLMENT_TOKEN non-empty whenever the agent gateway address
+# is set — the pinned binary treats an absent token as a CONFIG error, not a
+# wait state — so the pod needs this Secret to start at all while un-enrolled.
+# The placeholder lets it start; the agent's Bootstrap fails on it (logged,
+# non-fatal) until Stage D's proof flow mints the real token through the
+# enrolment door and replaces this Secret. Create-once for the mirror reason
+# above: dev-up must never clobber the real token once Stage D has written it.
+step "Enrolment token secret '$ENROL_TOKEN_SECRET' (placeholder until Stage D mints the real one)"
+"${KUBECTL[@]}" get secret "$ENROL_TOKEN_SECRET" -n "$NS" >/dev/null 2>&1 \
+  || "${KUBECTL[@]}" create secret generic "$ENROL_TOKEN_SECRET" -n "$NS" \
+     --from-literal=token="placeholder-not-enrolled"
 
 # The object tier's S3 credentials (ADR-0050 decision 6 — the adapter a deployment
 # without a FUSE mount runs on, which is what this cluster is; see MOUNT_DAEMONSET
@@ -459,6 +478,24 @@ step "KEDA $KEDA_VERSION"
   "https://github.com/kedacore/keda/releases/download/v$KEDA_VERSION/keda-$KEDA_VERSION.yaml" ||
   die "installing KEDA failed"
 "${KUBECTL[@]}" rollout status deployment/keda-operator -n keda --timeout="$DEFAULT_TIMEOUT"
+
+# Stage C ordering constraint: the controlplane now opens its agent door, and
+# that door composes the custody-backed CA at STARTUP (SPEC-0044 AC1) — a sealed
+# OpenBao leaves it crash-looping on `agent ca custody`. On an EXISTING custody
+# service, assert unsealed before the apply can restart the consumer. A fresh
+# create skips this: the StatefulSet is applied below and boots sealed by
+# design, and its first consumer start waits for the §6a operator procedure.
+if "${KUBECTL[@]}" get statefulset/openbao -n "$NS" >/dev/null 2>&1; then
+  step "Custody service: asserting OpenBao is unsealed before the controlplane restarts"
+  for i in 0 1 2; do
+    sealed=$("${KUBECTL[@]}" exec -n "$NS" "openbao-$i" -- bao status 2>/dev/null | grep '^Sealed' | awk '{print $2}' || true)
+    [ "$sealed" = "false" ] || die "openbao-$i is not unsealed (Sealed='${sealed:-unknown}').
+  The controlplane's agent door needs custody at startup and would crash-loop.
+  Quorum-unseal first — deploy/MVP-RUNBOOK.md §6a. The Shamir shares are
+  operator-held; this script never initializes or unseals on its own."
+  done
+  echo "openbao-0..2 all unsealed — safe to restart the custody consumer"
+fi
 
 step "Applying manifests"
 for m in postgres valkey redpanda seaweedfs zitadel zitadel-login hello git-storaged dataplane controlplane openbao bff webfrontend ingress; do
@@ -565,6 +602,16 @@ fi
 for d in $DEPLOYMENTS; do
   "${KUBECTL[@]}" rollout status "deployment/$d" -n "$NS" --timeout="$DEFAULT_TIMEOUT"
 done
+# Stage C: the controlplane is Available the moment its health door answers, but
+# the claim this step makes is that the PHASE 3.1 DOORS opened. Grep the process
+# log for the four door lines the binary prints on success; a fail-fast (custody,
+# policy bundle, PAT key) would show as a crash-loop caught above, and a door
+# that silently did not open would otherwise hide behind a green healthz.
+if ! "${KUBECTL[@]}" logs deployment/controlplane -n "$NS" --tail=200 2>/dev/null | \
+     grep -q 'AgentGateway listening'; then
+  die "controlplane is up but its log shows no AgentGateway door — check:
+  kubectl --context $PROFILE logs deployment/controlplane -n $NS"
+fi
 # Kept last and given its own budget: first boot is init + migrations + FirstInstance setup.
 "${KUBECTL[@]}" rollout status deployment/zitadel -n "$NS" --timeout="$ZITADEL_TIMEOUT"
 # The Login V2 UI waits for the login-client PAT the API's setup writes (its pat-wait init

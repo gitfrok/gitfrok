@@ -70,6 +70,12 @@ spec:
           value: "dataplane:9090"
         - name: GITFROK_REPOSITORY_READER_ADDR
           value: "git-storaged:9000"
+        # The control plane's UsageService door (T-0034, SPEC-0041), mounted by
+        # Stage C: the tenant's fair-use view, rendered by the BFF. Unset meant
+        # the usage surface stayed unmounted and the route answered 404; the
+        # door itself is plaintext in dev, same posture as the policy door.
+        - name: GITFROK_USAGE_ADDR
+          value: "controlplane:9092"
         - name: GITFROK_BFF_LISTEN_ADDR
           value: ":8080"
         # OIDC login (ADR-0045). The issuer is Zitadel, which the dev cluster

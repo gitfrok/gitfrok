@@ -144,6 +144,51 @@ spec:
             configMapKeyRef:
               name: gitfrok-oidc
               key: tenant-mapping
+        # ---- Agent mode (T-0031, SPEC-0039 AC1, Stage C of the North Star).
+        # The agent dials the control plane OUTBOUND (ADR-0011); there is no
+        # inbound path. Setting this address makes the other agent envs REQUIRED
+        # at config time (loadAgentClientConfig exits non-zero on any gap), while
+        # connection/enrolment failures at runtime are logged and never fatal —
+        # the pod stays up and its doors keep serving while un-enrolled.
+        - name: GITFROK_AGENT_GATEWAY_ADDR
+          value: "controlplane:9091"
+        # DEV FICTION, annotated per Stage C: this cluster is minikube/podman,
+        # not GKE. The cloud + settings satisfy the driver seam's install-time
+        # contract (platform/clouddriver refuses an install that does not say
+        # what it is); the real-cluster proof is T-0042's, not this fiction's.
+        - name: GITFROK_CLOUD
+          value: "gke"
+        - name: GITFROK_CLOUD_SETTINGS
+          value: "gke.workloadIdentityServiceAccount=dev-dataplane@gitsaas-dev.iam"
+        - name: GITFROK_REGION
+          value: "europe-west1"
+        # The pinned control-plane CA bundle (agent.caBundleConfigMap's shape in
+        # the BYO chart: one ConfigMap, key ca.pem). dev-provision.sh derives it
+        # from the durable agent-CA snapshot the controlplane persists (the CA is
+        # minted at the controlplane's first start with its issuer door open;
+        # RUNBOOK §6b has no earlier source). Until that ConfigMap exists this
+        # pod cannot start in agent mode — by contract: an agent that cannot pin
+        # the control plane's CA must not connect.
+        - name: GITFROK_AGENT_CA_BUNDLE
+          value: /etc/gitfrok/agent-ca/ca.pem
+        # Pod-local emptyDir: the credential lives only as long as the pod (the
+        # enrolment record on the control plane is the durable half).
+        - name: GITFROK_AGENT_CREDENTIAL_PATH
+          value: /var/lib/gitfrok/agent/credential.pem
+        # The one-time enrolment token (SPEC-0038). Contract note: the pinned
+        # binary REQUIRES this env non-empty whenever the gateway address is set
+        # — an absent token is a config error, not a wait state. dev-provision.sh
+        # therefore converges a placeholder Secret so the pod STARTS un-enrolled
+        # (Bootstrap then fails at runtime, logged, non-fatal); Stage D's proof
+        # flow mints the real token through the enrolment door, replaces this
+        # Secret and restarts the pod. optional:true keeps a fresh cluster from
+        # crash-looping on env resolution before provisioning ran.
+        - name: GITFROK_ENROLMENT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gitfrok-enrolment-token
+              key: token
+              optional: true
         # Same in-cluster issuer reachability as the BFF: public URL for
         # discovery/JWKS/token, dev-only DNS alias + mkcert CA (Go honors
         # SSL_CERT_DIR). Trouble reaching the issuer shows as every login
@@ -187,6 +232,11 @@ spec:
         - name: gitsaas-ca
           mountPath: /etc/ssl/gitsaas
           readOnly: true
+        - name: agent-ca-bundle
+          mountPath: /etc/gitfrok/agent-ca
+          readOnly: true
+        - name: agent-credential
+          mountPath: /var/lib/gitfrok/agent
         resources:
           requests:
             memory: "64Mi"
@@ -209,6 +259,18 @@ spec:
           items:
           - key: ca.crt
             path: ca.crt
+      # Written by dev-provision.sh from the controlplane's durable agent-CA
+      # snapshot (key ca.pem); optional so a fresh cluster's first rollout
+      # survives until provisioning derives it.
+      - name: agent-ca-bundle
+        configMap:
+          name: gitfrok-agent-ca
+          optional: true
+          items:
+          - key: ca.pem
+            path: ca.pem
+      - name: agent-credential
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

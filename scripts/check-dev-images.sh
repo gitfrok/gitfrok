@@ -55,7 +55,11 @@ expected_images() { # expected_images <manifest>
     # recorded in versions.env is the one asserted on the cluster.
     dataplane.yaml) printf '%s\n' "$DATAPLANE_IMAGE" ;;
     git-storaged.yaml) printf '%s\n' "$GIT_STORAGED_IMAGE" ;;
-    controlplane.yaml) printf '%s\n' "$CONTROLPLANE_IMAGE" ;;
+    # The controlplane's custody loopback proxy sidecar is busybox (Stage C):
+    # the custody adapter admits plain http only on loopback, and the sidecar is
+    # the pod-local forward to the openbao Service — same busybox-pin shape as
+    # zitadel's db-wait and the BFF's valkey-wait init containers.
+    controlplane.yaml) printf '%s\n' "$CONTROLPLANE_IMAGE" "$BUSYBOX_IMAGE" ;;
     # The BFF's valkey-wait init container is busybox, same shape as zitadel's db-wait:
     # it refuses to start without its session store (ADR-0052), so it waits for one.
     bff.yaml) printf '%s\n' "$BFF_IMAGE" "$BUSYBOX_IMAGE" ;;

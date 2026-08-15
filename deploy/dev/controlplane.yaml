@@ -14,11 +14,66 @@ metadata:
     app: controlplane
     phase: "1"
 ---
-# T-0021: the control plane. Phase 1 ships it as a healthz-only baseline (the
-# agent gateway wires in Phase 3); it exists so the plane has a pinned image and
-# a presence in the cluster before the operator/Helm work of Phase 2.
+# Stage C (North Star): the custody bundle's durable snapshot home. The snapshot
+# carries ONLY public material and key references (SPEC-0044 AC1) — but startup
+# REFUSES the agent door without a place to persist it (GITFROK_CUSTODY_SNAPSHOT_FILE
+# is required), and it must survive pod rescheduling, hence a real PVC rather than
+# emptyDir. MVP-RUNBOOK §6b names this as the deployment requirement the
+# custody-enabled image takes when it moves — this is that move, for dev.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: controlplane-custody-snapshot
+  namespace: default
+  labels:
+    app: controlplane
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Stage C (North Star): the loopback proxy script the sidecar below executes.
+# Carried as a ConfigMap (like the policy bundle) rather than baked into an
+# image: it is dev plumbing, and the pinned busybox image already ships tcpsvd.
 #
-# GITFROK_LISTEN_ADDR is the only config it reads.
+# WHY IT EXISTS: the custody adapter's transport posture is https, always, with
+# one explicit relaxation — plain http to a LOOPBACK address behind the dev flag
+# (backend custody/openbao.go validateAddress; MVP-RUNBOOK §6b states the dev
+# cluster's port-forward posture). The dev OpenBao listener has tls_disable=true
+# (deploy/dev/openbao.yaml) and the custody client carries no custom CA trust,
+# so https://openbao:8200 cannot validate and http://openbao:8200 is refused
+# off-loopback. The proxy keeps the adapter's address loopback-only; plain http
+# never leaves the pod's own network namespace on this path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: controlplane-openbao-proxy
+  namespace: default
+  labels:
+    app: controlplane
+data:
+  proxy.sh: |
+    #!/bin/sh
+    # One TCP proxy: pod loopback :8200 -> the openbao consumer Service.
+    # tcpsvd accepts on the loopback and runs one `nc` forwarder per connection.
+    echo "openbao proxy: 127.0.0.1:8200 -> openbao:8200 (dev custody posture, MVP-RUNBOOK 6b)"
+    exec tcpsvd -E 127.0.0.1 8200 sh -c 'exec nc openbao 8200'
+---
+# Stage C (North Star): the Phase 3.1 doors mount here. T-0021 shipped this plane
+# healthz-only; the pinned backend (fc18081) opens a door per set gRPC address,
+# and every fail-fast below is the contract working as designed (invariant 13):
+#
+#   agent door open          -> policy bundle dir + custody config complete
+#                               (OpenBao addr, snapshot file — SPEC-0044 AC1/AC3)
+#   usage door open          -> agent door open (telemetry rides the agent channel)
+#   residency/enrolment open -> GITFROK_PAT_VERIFIER_KEY (base64, >= 32 bytes)
+#
+# Release-trust door: deliberately NOT MOUNTED in Stage C. MVP-RUNBOOK §6b gives
+# no dev-safe seed path for the RELEASE trust bundle (SPEC-0045, T-0041), so
+# GITFROK_RELEASE_TRUST_SNAPSHOT_FILE stays unset — the honest absence the binary
+# logs loudly ("distribution NOT CONFIGURED"), never a fabricated seed.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,9 +107,79 @@ spec:
         env:
         - name: GITFROK_LISTEN_ADDR
           value: ":8080"
+        # The OPA bundle governance ships (ADR-0006, invariant 2) — the SAME
+        # ConfigMap and mount the data plane consumes (deploy/dev/dataplane.yaml,
+        # dev-up.sh POLICY_CM/POLICY_MOUNT). Required the moment the agent door
+        # opens: every operator action on the agent surface needs a decision.
+        - name: GITFROK_POLICY_BUNDLE_DIR
+          value: /etc/gitfrok/policy
+        # The audit sink + durable stores (T-0036/T-0037): with this DSN the
+        # agent enrolment state, the residency declarations and the audit trail
+        # persist onto the Postgres trail. Dev creds exactly as dataplane.yaml.
+        - name: GITFROK_DATABASE_URL
+          value: "postgres://gitfrok_app:gitfrok_app@postgres:5432/gitfrok"
+        # ---- Door 1: AgentGateway (T-0030, SPEC-0038). The gateway certificate
+        # is minted by the custody-backed CA with these SANs; the dev data plane
+        # dials controlplane:9091, so both names are carried.
+        - name: GITFROK_AGENT_GRPC_ADDR
+          value: ":9091"
+        - name: GITFROK_AGENT_SERVER_NAMES
+          value: "localhost,controlplane"
+        # ---- Door 2: UsageService (T-0034, SPEC-0041) — the BFF's usage view.
+        # Contract: it refuses to open without the agent door (main.go), which is
+        # why both set together.
+        - name: GITFROK_USAGE_GRPC_ADDR
+          value: ":9092"
+        # ---- Door 3: residency Declare (T-0038, SPEC-0043). PAT-verified before
+        # any policy decision; the verifier key comes from the shared Secret.
+        - name: GITFROK_RESIDENCY_GRPC_ADDR
+          value: ":9093"
+        # ---- Door 4: enrolment issuance (SPEC-0038 AC1) — mints the one-time
+        # token a data plane consumes on first Connect. Stage D performs that
+        # issuance through this door.
+        - name: GITFROK_ENROLMENT_GRPC_ADDR
+          value: ":9094"
+        # One verifier key for all PAT-authenticated surfaces (ADR-0043): the
+        # Git front doors (dataplane), this door set, and the PATs issued through
+        # them all resolve against the SAME identity schema — so this reads the
+        # same Secret dev-up.sh generates for the data plane.
+        - name: GITFROK_PAT_VERIFIER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gitfrok-pat-verifier
+              key: key
+        # ---- Custody block (MVP-RUNBOOK §6a/§6b). The address is LOOPBACK on
+        # purpose: validateAddress admits plain http only there, and the sidecar
+        # below is the dev-cluster equivalent of §6b's port-forward posture.
+        - name: GITFROK_CUSTODY_OPENBAO_ADDR
+          value: "http://127.0.0.1:8200"
+        - name: GITFROK_CUSTODY_ALLOW_LOOPBACK_HTTP
+          value: "true"
+        - name: GITFROK_CUSTODY_TRANSIT_MOUNT
+          value: "transit"
+        - name: GITFROK_CUSTODY_KUBERNETES_ROLE
+          value: "agent-ca"
+        - name: GITFROK_CUSTODY_KEY_NAME
+          value: "agent-ca"
+        - name: GITFROK_CUSTODY_SNAPSHOT_FILE
+          value: /var/lib/gitfrok/custody/snapshot.json
+        # Release trust (SPEC-0045): NOT MOUNTED — see the Deployment header.
+        # GITFROK_RELEASE_TRUST_SNAPSHOT_FILE deliberately absent.
         ports:
         - name: health
           containerPort: 8080
+          protocol: TCP
+        - name: agent-grpc
+          containerPort: 9091
+          protocol: TCP
+        - name: usage-grpc
+          containerPort: 9092
+          protocol: TCP
+        - name: residency-grpc
+          containerPort: 9093
+          protocol: TCP
+        - name: enrolment-grpc
+          containerPort: 9094
           protocol: TCP
         livenessProbe:
           httpGet:
@@ -72,18 +197,70 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
+        volumeMounts:
+        - name: policy-bundle
+          mountPath: /etc/gitfrok/policy
+          readOnly: true
+        - name: custody-snapshot
+          mountPath: /var/lib/gitfrok/custody
         resources:
           requests:
             memory: "64Mi"
             cpu: "25m"
           limits:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "192Mi"
+            cpu: "200m"
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+      # The custody loopback proxy (see the ConfigMap above for why). Pinned to
+      # BUSYBOX_IMAGE from versions.env — the same image the cluster already runs
+      # for init containers, so the smoke test's "every running image comes from
+      # versions.env" assertion still holds.
+      #
+      # It also mounts the custody snapshot volume READ-ONLY: the main container
+      # is a scratch image with no shell and no `cat`, so this sidecar is the
+      # only window a `kubectl exec` has onto the durable snapshot — which is
+      # how dev-provision.sh derives the agent CA bundle ConfigMap the data
+      # plane pins. Public material only (SPEC-0044 AC1).
+      - name: openbao-proxy
+        image: docker.io/library/busybox:1.35.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - /etc/gitfrok/proxy/proxy.sh
+        volumeMounts:
+        - name: openbao-proxy-script
+          mountPath: /etc/gitfrok/proxy
+          readOnly: true
+        - name: custody-snapshot
+          mountPath: /var/lib/gitfrok/custody
+          readOnly: true
+        resources:
+          requests:
+            memory: "8Mi"
+            cpu: "5m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      - name: policy-bundle
+        configMap:
+          name: gitfrok-policy-bundle
+      - name: custody-snapshot
+        persistentVolumeClaim:
+          claimName: controlplane-custody-snapshot
+      - name: openbao-proxy-script
+        configMap:
+          name: controlplane-openbao-proxy
+          defaultMode: 0555
 ---
 apiVersion: v1
 kind: Service
@@ -99,6 +276,26 @@ spec:
   - name: health
     port: 8080
     targetPort: health
+    protocol: TCP
+  # The doors the data plane (agent gateway) and the BFF (usage) dial in-cluster.
+  # Residency/enrolment are operator surfaces reached via port-forward (Stage D),
+  # published for the same reason: a door that cannot be addressed cannot be
+  # proven.
+  - name: agent-grpc
+    port: 9091
+    targetPort: agent-grpc
+    protocol: TCP
+  - name: usage-grpc
+    port: 9092
+    targetPort: usage-grpc
+    protocol: TCP
+  - name: residency-grpc
+    port: 9093
+    targetPort: residency-grpc
+    protocol: TCP
+  - name: enrolment-grpc
+    port: 9094
+    targetPort: enrolment-grpc
     protocol: TCP
   selector:
     app: controlplane

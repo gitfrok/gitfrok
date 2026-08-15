@@ -127,6 +127,132 @@ done
 [ -z "$missing" ] || die "tables missing after migrations:$missing"
 echo "  all Phase-2 tables + agent enrolment + residency declaration tables present"
 
+# --------------------------------------------- 1b. Stage C: door credentials
+# The Phase 3.1 doors the dev cluster now mounts (deploy/dev/controlplane.yaml)
+# resolve operator PATs against the SAME identity schema the data plane issues
+# from (ADR-0043). This section converges the two credentials those doors need:
+#   1. the PAT verifier key assertion — dev-up.sh creates the Secret create-once;
+#      a key shorter than 32 decoded bytes would fail the doors' contract,
+#   2. one platform-operator/owner PAT, issued through the data plane's identity
+#      door (grpcurl over a port-forward, the RUNBOOK §7 shape) and stored in a
+#      Secret for Stage D's enrolment proof — idempotent: re-runs keep the
+#      existing Secret, because a plaintext PAT exists in exactly one response
+#      and can never be read back,
+#   3. the agent CA bundle ConfigMap the data plane pins, derived from the
+#      custody snapshot the controlplane persisted on its first custody-backed
+#      start (RUNBOOK §6b has no earlier source for it),
+#   4. the enrolment-token placeholder Secret assertion (dev-up.sh creates it;
+#      the pinned data plane refuses to START without a non-empty token).
+step "Stage C door credentials (PAT verifier, operator PAT, agent CA bundle)"
+command -v grpcurl >/dev/null || die "grpcurl not installed — the operator PAT is issued over
+  the identity door's gRPC surface: brew install grpcurl (or your platform's equivalent)"
+
+verifier_len=$("${KUBECTL[@]}" get secret gitfrok-pat-verifier -n "$NS" \
+  -o jsonpath='{.data.key}' 2>/dev/null | base64 -D 2>/dev/null | wc -c | tr -d ' ')
+[ "${verifier_len:-0}" -ge 32 ] || die "secret gitfrok-pat-verifier is absent or its key decodes to
+  ${verifier_len:-0} bytes — the residency/enrolment doors require base64 of >= 32 bytes. Run dev-up.sh."
+echo "  PAT verifier key present ($verifier_len decoded bytes)"
+
+"${KUBECTL[@]}" get secret gitfrok-enrolment-token -n "$NS" >/dev/null 2>&1 \
+  || die "secret gitfrok-enrolment-token is absent — dev-up.sh converges the placeholder;
+  the data plane cannot start in agent mode without a non-empty GITFROK_ENROLMENT_TOKEN"
+
+# The CA the controlplane's custody-backed issuer minted at startup, read from
+# its durable snapshot and published as the pin the data plane connects with.
+# Public material only (SPEC-0044 AC1); regenerated on every run so a rotation
+# window's roots re-converge here too (Stage D applies it to the data plane).
+custody_ca=$(mktemp)
+# Read through the busybox sidecar: the controlplane container is a scratch
+# image with no `cat`, and controlplane.yaml mounts the snapshot volume into
+# the sidecar read-only exactly for this window.
+"${KUBECTL[@]}" exec deployment/controlplane -c openbao-proxy -n "$NS" -- \
+  cat /var/lib/gitfrok/custody/snapshot.json 2>/dev/null | python3 -c "
+import base64, json, sys
+snap = json.load(sys.stdin)
+roots = snap.get('snapshot', {}).get('Roots') or []
+if not roots:
+    sys.exit('custody snapshot carries no roots - did the agent door bootstrap?')
+sys.stdout.write(''.join(
+    '-----BEGIN CERTIFICATE-----\n' + base64.b64encode(base64.b64decode(r['CertDER'])).decode()
+    + '\n-----END CERTIFICATE-----\n' for r in roots))" > "$custody_ca" \
+  || { rm -f "$custody_ca"; die "could not derive the agent CA from the controlplane custody snapshot —
+  is the controlplane's agent door up? kubectl --context $PROFILE logs deployment/controlplane -n $NS"; }
+[ -s "$custody_ca" ] || { rm -f "$custody_ca"; die "derived agent CA bundle is empty"; }
+"${KUBECTL[@]}" create configmap gitfrok-agent-ca -n "$NS" \
+  --from-file=ca.pem="$custody_ca" \
+  --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - >/dev/null || die "writing gitfrok-agent-ca failed"
+rm -f "$custody_ca"
+echo "  configmap gitfrok-agent-ca converged from the custody snapshot"
+
+# The platform-operator PAT. Issued ONCE and kept in the Secret: re-issuing on
+# every run would litter the identity schema with live credentials nobody holds.
+if "${KUBECTL[@]}" get secret gitfrok-operator-pat -n "$NS" >/dev/null 2>&1; then
+  echo "  operator PAT secret gitfrok-operator-pat already present (create-once)"
+else
+  "${KUBECTL[@]}" port-forward svc/dataplane -n "$NS" 19090:9090 >/dev/null 2>&1 &
+  OP_PF=$!
+  trap 'kill "$OP_PF" 2>/dev/null || true' EXIT
+  op_tries=0
+  # No gRPC reflection on the door, so `grpcurl list` cannot probe it; a real
+  # method call serves instead. AuthenticatePAT is the probe of choice: unlike
+  # the lifecycle methods it is NOT authorization-gated (the door answers an
+  # empty OK response for an unknown token), so it exits 0 exactly when the
+  # door is serving.
+  until grpcurl -plaintext -import-path governance/contracts \
+      -proto proto/identity/v1/identity.proto \
+      -d '{"personal_access_token":"gfp_provision-probe_probe"}' \
+      127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/AuthenticatePAT >/dev/null 2>&1; do
+    op_tries=$((op_tries + 1))
+    [ "$op_tries" -lt 30 ] || die "identity door never answered on the port-forward"
+    sleep 1
+  done
+  op_pat=$(grpcurl -plaintext -import-path governance/contracts \
+    -proto proto/identity/v1/identity.proto \
+    -d '{"tenant_id":"dev","actor_id":"user-admin","label":"platform-operator","scope_labels":["repo.read","repo.write"],"roles":["owner"]}' \
+    127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/IssuePAT \
+    | python3 -c "import json,sys;print(json.load(sys.stdin).get('plaintextToken',''))") \
+    || die "IssuePAT against the identity door failed"
+  [ -n "$op_pat" ] || die "IssuePAT returned no plaintext token"
+  "${KUBECTL[@]}" create secret generic gitfrok-operator-pat -n "$NS" \
+    --from-literal=token="$op_pat" >/dev/null || die "writing gitfrok-operator-pat failed"
+  unset op_pat
+  kill "$OP_PF" 2>/dev/null || true
+  trap - EXIT
+  echo "  operator PAT issued through gitsaas.identity.v1.CredentialAuthenticator/IssuePAT -> secret gitfrok-operator-pat"
+fi
+
+# Prove the credential round-trips before Stage D is asked to spend it: the
+# verifier key the doors read and the key the PAT was issued under must agree.
+"${KUBECTL[@]}" port-forward svc/dataplane -n "$NS" 19090:9090 >/dev/null 2>&1 &
+OP_PF=$!
+trap 'kill "$OP_PF" 2>/dev/null || true' EXIT
+op_tries=0
+# Same probe shape as above: AuthenticatePAT answers OK for any token shape,
+# so it signals "door serving" without needing an authorized principal.
+until grpcurl -plaintext -import-path governance/contracts \
+    -proto proto/identity/v1/identity.proto \
+    -d '{"personal_access_token":"gfp_provision-probe_probe"}' \
+    127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/AuthenticatePAT >/dev/null 2>&1; do
+  op_tries=$((op_tries + 1))
+  [ "$op_tries" -lt 30 ] || die "identity door never answered for the PAT roundtrip"
+  sleep 1
+done
+op_token=$("${KUBECTL[@]}" get secret gitfrok-operator-pat -n "$NS" -o jsonpath='{.data.token}' | base64 -D)
+# The door answers OK with an EMPTY body for an unknown token, so "the RPC
+# succeeded" is not the assertion — the resolved principal is.
+op_auth=$(grpcurl -plaintext -import-path governance/contracts \
+  -proto proto/identity/v1/identity.proto \
+  -d "{\"personal_access_token\":\"$op_token\"}" \
+  127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/AuthenticatePAT) \
+  || die "AuthenticatePAT RPC failed for the operator PAT"
+printf '%s' "$op_auth" | grep -q '"principal"' \
+  || die "operator PAT did not resolve to a principal — verifier key rotated under an issued PAT?
+  (dev-up.sh creates gitfrok-pat-verifier create-once precisely to prevent this)"
+unset op_token op_auth
+kill "$OP_PF" 2>/dev/null || true
+trap - EXIT
+echo "  operator PAT authenticates against the identity door"
+
 # ------------------------------------------------------------------ 2. Zitadel client
 step "Zitadel OIDC client for the BFF (headless, idempotent)"
 # The login-client PAT: written once by the FirstInstance setup into the bootstrap
@@ -246,6 +372,11 @@ ORG_ID=$(http /management/v1/users/_search -X POST \
   --from-literal=tenant-mapping="$ORG_ID=dev" \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - || die "writing $OIDC_CM failed"
 echo "  configmap $OIDC_CM updated ($ORG_ID maps to the dev tenant)"
+# The data plane restart below must see the enrolment placeholder: its pinned
+# binary treats an absent GITFROK_ENROLMENT_TOKEN as a config error when the
+# gateway address is set (Stage C's un-enrolled-start contract).
+"${KUBECTL[@]}" get secret gitfrok-enrolment-token -n "$NS" >/dev/null 2>&1 \
+  || die "secret gitfrok-enrolment-token vanished before the dataplane restart — re-run dev-up.sh"
 # Both consumers read from the ConfigMap (bff.yaml: client-id+issuer;
 # dataplane.yaml: client-id+issuer+tenant-mapping), so both converge.
 "${KUBECTL[@]}" rollout restart deployment/bff -n "$NS" >/dev/null || die "restarting bff failed"
