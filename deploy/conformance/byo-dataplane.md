@@ -63,6 +63,7 @@ cd backend && go test -race -count=1 ./platform/clouddriver/... ./platform/agent
 - **Operator reconcile** (SPEC-0039 AC3–AC7) is T-0032's surface. T-0032 lands the harness half — the rollout engine, signature
   verification, reconcile idempotency, rollback, staleness, and the no-inbound dial
   assertion (rows 15–19), plus the release-signing tooling/trust bundle and the
-  reconcile-contract tripwires in this tree. What remains real-cluster-only is the
-  Operator binary actually converging a live workload; the chart mounts its release
-  trust root but the image is a required install value, not yet shipped here.
+  reconcile-contract tripwires in this tree. Since T-0041 (super-repo@febf0f7) the operator
+  ships as the vendor's signed, digest-pinned image defaulted by the chart — it is no longer
+  a required install value; what remains real-cluster-only is the operator converging a live
+  workload.

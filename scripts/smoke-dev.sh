@@ -127,7 +127,7 @@ running=$("${KUBECTL[@]}" get pods -n "$NS" -o \
 expected=$(printf '%s\n' "$POSTGRES_IMAGE" "$VALKEY_IMAGE" "$REDPANDA_IMAGE" \
   "$SEAWEEDFS_IMAGE" "$ZITADEL_IMAGE" "$ZITADEL_LOGIN_IMAGE" "$BUSYBOX_IMAGE" \
   "$DATAPLANE_IMAGE" "$CONTROLPLANE_IMAGE" "$GIT_STORAGED_IMAGE" "$BFF_IMAGE" \
-  "$WEBFRONTEND_IMAGE" | sort -u)
+  "$WEBFRONTEND_IMAGE" "$OPENBAO_IMAGE" | sort -u)
 
 unexpected=$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$running"))
 missing=$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$running"))
