@@ -651,13 +651,13 @@ else
   echo "ingress ports are not published, so forward .test to the ingress-dns addon on the node ($IP)"
 fi
 
-# Both shapes share this fallback. It is not a wildcard — it names the four hosts the ingress serves
+# Both shapes share this fallback. It is not a wildcard — it names the six hosts the ingress serves
 # — but it needs no resolver and no daemon, and it is enough for `make dev-smoke`.
 hosts_fallback() {
   cat <<EOF
 
   Or, without touching system DNS at all — enough for the smoke test, but NOT a wildcard:
-    echo '$DNS_TARGET hello.gitsaas.test zitadel.gitsaas.test s3.gitsaas.test filer.gitsaas.test' |
+    echo '$DNS_TARGET hello.gitsaas.test zitadel.gitsaas.test s3.gitsaas.test filer.gitsaas.test app.gitsaas.test git.gitsaas.test' |
       sudo tee -a /etc/hosts >/dev/null
 EOF
 }
