@@ -18,10 +18,11 @@ work stands*; governance says *what and why*.
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
 
-## Where work stands (2026-08-15)
+## Where work stands (2026-08-16)
 
-Pins at super-repo `6bf9c7d`: **governance `43a46d6`**, **backend `da45212`**, **bff `e2344de`**,
-**webfrontend `0e80261`**.
+Pins as recorded by the Phase 3.1 docs close-out commit atop super-repo `a0ed3f5`:
+**governance `a4c0748`**, **backend `0238dee`**, **bff `4059a23`**,
+**webfrontend `843a195`**.
 
 **Phases 0, 1 and 2 are Complete.** **Phase 3 (BYO) is implementation-complete** — T-0030…T-0034 all
 Done against SPEC-0038…SPEC-0041, each acceptance criterion proven by named tests at the exit pins.
@@ -30,22 +31,33 @@ path has never run on a real customer-shaped cluster, so every real-cluster row 
 `deploy/conformance/byo-dataplane.md` reads "not run". That is recorded against T-0003's cluster lane
 the way Phase 1 and Phase 2 recorded their host limits.
 
-**Phase 3.1 is planned and nothing in it has started.** Every task is `Todo`. It turns Phase 3's
-recorded limits into production posture under **ADR-0062…ADR-0067** (all Accepted) and
-**SPEC-0042…SPEC-0046** (all Approved), as epics EP-19…EP-23 and tasks **T-0036…T-0044** —
+**Phase 3.1 is implementation-complete — one task stands blocked.** It turned Phase 3's recorded
+limits into production posture under **ADR-0062…ADR-0067** (all Accepted) and
+**SPEC-0042…SPEC-0046** (all Approved), as epics EP-19…EP-23 and tasks **T-0035…T-0044** —
 `governance/docs/plans/phase-3-byo-v2.md` carries the dependency spine and the exit criteria.
+Exit records live in `governance/docs/tasks/`; every pin below resolves:
 
-**Start here if you are picking up work:** M1 is unblocked and gates the rest.
-
-| Next | Task | Why it is first |
+| Epic / task | State | Exit pins |
 |---|---|---|
-| 1 | **T-0036** — durable agent stores (Postgres adapters for the enrolment-token store and registry) | EP-19 lands the adapter/migration pattern once; everything above it grows the registry or cites the pack |
-| 2 | **T-0037** — durable residency declarations + pack assembly from durable projections | repeats T-0036's pattern; SPEC-0043's own assumption is that this lands before the Declare surface |
-| ∥ | **T-0040** — agent-CA custody: deploy OpenBao, sign through it, staged rotation | EP-21 runs parallel to EP-20; within it, deploy the custody service **before** swapping the composition root |
+| **EP-19** — T-0036 durable agent stores; T-0037 durable residency declarations + pack assembly | Done | backend@c9e58c5; backend@816cb30 |
+| **EP-20** — T-0038 residency Declare surface; T-0039 PlacementGate hardening | Done | governance@794f578/3b9e853 (bundle 0.10.0) + backend@f182761 |
+| **EP-21** — T-0040 agent-CA custody & rotation | Done | backend@b0ab32e + super-repo@f8449b8 (Wave-3 close-out backend@28f729f + super-repo@5adedf1) |
+| **EP-22 harness half** — T-0041 signed operator image + release-trust-bundle distribution | Done | backend@762d5f0 + backend@a669cef, super-repo@febf0f7 |
+| **EP-23** — T-0043 divergence gates & envelope telemetry; T-0044 read-only cause distinction | Done | T-0043: backend@bc30abd + bff@4059a23 + webfrontend@08f42c4 (contracts governance@b425db0/36f284b); T-0044: backend@0238dee + webfrontend@843a195 |
+| **T-0035** — envelope throttle applied in the data plane (Phase 3 carry that gated T-0043) | Done | backend@a9ed620, pin-bumped at super-repo@9f526d0 |
+| **EP-22 real-cluster half** — T-0042 real GKE/EKS/AKS conformance | **Blocked** | blocked-by T-0003's cluster lane availability |
 
-Two tasks are blocked on something no code can unblock: **T-0042** (real GKE/EKS/AKS clusters, on
-T-0003's lane) and **T-0043** (on **T-0035**, the envelope throttle's data-plane half, which is still
-`Todo` on Phase 3's books).
+**T-0042 is the only task not Done, and no code can unblock it**: real clusters come only from
+T-0003's lane. Every real-cluster row of `deploy/conformance/byo-dataplane.md` reads "not run"
+with that cause annotated at the matrix's head — honest by construction, recorded against the lane
+the way Phase 1 and Phase 2 recorded their host limits. With it wait SPEC-0045 AC3, Phase 3's
+carried fifth exit criterion (the whole install → self-register → upgrade → meter path on a real
+customer-shaped cluster), and SPEC-0039 AC8's forward/backward migration proof on real state. The
+plan's exit criteria that the exit records prove are ticked in `phase-3-byo-v2.md`; the
+real-cluster criterion and the final-pin-bump criterion are not.
+
+**Start here if you are picking up work:** nothing in Phase 3.1 is actionable until the cluster
+lane provides real GKE/EKS/AKS clusters — T-0042 is the sole remaining task.
 
 ## Read the reviews before you re-derive them
 

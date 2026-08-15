@@ -8,6 +8,17 @@ live-cluster proof is the phase exit, not T-0031. Which cloud gets a real cluste
 is the cost decision SPEC-0039's open questions name; it is recorded here as UNMADE, not
 implied.
 
+**Why every real-cluster column reads "not run" (annotated 2026-08-16, per SPEC-0045 AC3's honesty
+rule):** these rows are pending execution by **T-0042**
+(`governance/docs/tasks/T-0042-real-cluster-conformance.md`), which stands **Todo — blocked-by
+T-0003's cluster lane availability**. The lane is the standing owner of every infrastructure-bound
+demonstration since Phase 1, and T-0042 does not conjure clusters the lane does not provide — so,
+exactly as T-0042 applies AC3's rule to its own dependency, each "not run" below is a named,
+explained exception, not silence. This annotation records the cause; it fabricates no result. (Row
+5's "not applicable" is structural — an arch-test boundary with no cluster half — not a lane wait.)
+The plan's exit bar remains at least one real cluster per cloud, or an honestly annotated subset —
+never a silent one.
+
 **Harness** = the backend Go test suite (`go test -race ./...` at the pinned backend
 commit) plus the super-repo chart gate `scripts/check-byo-chart.sh`. Backend test names
 are cited; run them with:
