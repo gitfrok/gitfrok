@@ -268,11 +268,12 @@ band by decision; that is distinct from the CA private-key posture, which never 
 barrier at all.
 
 **The initial root credential is the dev-only bootstrap authority.** It authorizes exactly the
-one-time wiring below — enabling Kubernetes auth, the consumer role and policy, the transit
-mount and the CA key — and nothing else: it is held as a shell variable (`ROOT`), never written
-to disk, never persisted, and no runtime path uses it (Kubernetes auth is the only client path,
-ADR-0066 decision 5). Provisioning the CA key through it, and everything it does NOT authorize,
-is §6b.
+one-time wiring below — enabling Kubernetes auth, the transit mount, and the consumer policy and
+role — and nothing else: it is held as a shell variable (`ROOT`), never written to disk, never
+persisted, and no runtime path uses it (Kubernetes auth is the only client path, ADR-0066
+decision 5). It does NOT create the CA key — the control plane is the key's single creator, on
+first bootstrap, through Kubernetes auth; that posture and everything it does NOT authorize is
+§6b.
 
 ### Unseal — every cold restart, before any consumer starts
 
@@ -307,7 +308,6 @@ K() { kubectl --context gitfrok exec -i -n default openbao-0 -- env BAO_TOKEN="$
 K bao auth enable kubernetes
 K bao write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc:443"
 K bao secrets enable transit
-K bao write -f transit/keys/agent-ca type=ecdsa-p256 exportable=false
 K bao policy write agent-ca - <<'POLICY'
 path "transit/keys/agent-ca*" { capabilities = ["create", "read", "update"] }
 path "transit/sign/agent-ca*"   { capabilities = ["update"] }
@@ -322,9 +322,14 @@ short-lived OpenBao credential at login, which is the only client path allowed (
 decision 5). The role binds exactly the `controlplane` ServiceAccount declared by
 `deploy/dev/controlplane.yaml` (the consumer's projected SA token is the login credential —
 zero static credentials on either side), and the policy admits key creation, public-half reads
-and digest signing and nothing else. The key rationale and the staged-rotation reuse of this
-policy/role shape are §6b; the end-to-end proof from a service-account JWT to a signature
-through this exact key is the live test `TestLiveOpenBaoKubernetesAuthConsumer` in
+and digest signing and nothing else. **The transit key itself is NOT created in this block —
+there is exactly one key creator: the control plane.** It creates `agent-ca` on first bootstrap
+through the policy's key-create capability (ComposeIssuer, ecdsa-p256, `exportable=false`) and
+re-attaches through the key's public half on every later start; operators unseal and hold
+shares — they never create the key, and a manual `bao write transit/keys/...` is out of
+procedure (Wave-3 review C1 fix, backend 7d5b693). The key rationale and the staged-rotation
+reuse of this policy/role shape are §6b; the end-to-end proof from a service-account JWT to a
+signature through this exact key is the live test `TestLiveOpenBaoKubernetesAuthConsumer` in
 `backend/modules/agent/internal/adapters/custody/`, run against this cluster.
 
 ### Verify
@@ -363,11 +368,15 @@ the production composition root has no dev CA and no key-material path — `inte
 asserts both, SPEC-0044 AC1/AC3). This section is the operator side of that posture: provisioning
 the key, rotating it, and the failure cases the rotation window creates.
 
-### Provision the CA key — production shape, proven live on this cluster
+### Provision the CA key — the control plane is the single creator
 
-The full command sequence — transit mount, non-exportable ecdsa-p256 key, narrow sign-through
-policy, single-SA Kubernetes-auth role — is the wiring block in **§6a** ("Wire Kubernetes auth and
-the CA consumer"), executed exactly as written there against this cluster. Its posture facts:
+Key creation is never a manual operator step (Wave-3 review C1 fix, backend 7d5b693): exactly
+one creator exists — the control plane creates `agent-ca` on first bootstrap through the
+Kubernetes-auth login and the custody policy's key-create capability (ecdsa-p256,
+`exportable=false`), and re-attaches through the key's public half on every later start. What
+an operator provisions by hand is ONLY the wiring that admits it — the transit mount, the
+narrow sign-through policy and the single-SA role, the block in **§6a** ("Wire Kubernetes auth
+and the CA consumer"), executed exactly as written there against this cluster. Its posture facts:
 `exportable=false` means the private half never leaves the barrier —
 the control plane holds the key REFERENCE and signs DIGESTS through the seam (ADR-0064 decision 2);
 the policy admits key creation (bootstrap/staging), public-half reads and digest signing and
@@ -381,14 +390,22 @@ The consumer's env (the custody-enabled control-plane image; the dev deployment 
 pre-custody image 0.1.0 and will take these when it moves): `GITFROK_CUSTODY_OPENBAO_ADDR`
 (https enforced — plain http only on loopback behind an explicit dev flag),
 `GITFROK_CUSTODY_TRANSIT_MOUNT=transit`, `GITFROK_CUSTODY_KUBERNETES_ROLE=agent-ca`,
-`GITFROK_CUSTODY_KEY_NAME=agent-ca`; the login JWT is the pod's projected service-account token,
-never a file an operator hands it. Bootstrap refuses a key that already exists: a control plane
-that restarts re-attaches through Snapshot/Restore, never by re-creating the key.
+`GITFROK_CUSTODY_KEY_NAME=agent-ca`, and `GITFROK_CUSTODY_SNAPSHOT_FILE` (REQUIRED — startup
+refuses without it); the login JWT is the pod's projected service-account token, never a file
+an operator hands it. The snapshot file carries the bundle's durable staging state — key
+references and public certificates only, never key material (SPEC-0044 AC1) — and must be
+mounted or volume-backed in a real deployment. Startup branches on what it finds: snapshot
+present → Restore (the window comes back exactly where the fleet last saw it); snapshot absent
+→ Bootstrap, which persists its own stage through the change hook wired before it; custody
+still holds the key but the snapshot is gone → re-attach through the key's public half, logged
+loudly. A corrupt or partial snapshot fails startup loudly — it never falls through to a
+silent re-bootstrap against a custody service that kept its keys.
 
 ### Rotate the CA — stage → overlap → remove
 
-1. **Stage.** Create the next custody key (procedure above, name `agent-ca-<generation>`) and
-   stage it into the bundle. From that instant the dual-validate window is open: BOTH roots
+1. **Stage.** Stage the next custody key (name `agent-ca-<generation>`; created through the
+   same custody seam — the policy's key-create capability admits it, so staging needs no
+   manual `bao write`) into the bundle. From that instant the dual-validate window is open: BOTH roots
    validate, and new issuance chains to the NEW root. The reconcile channel distributes the change
    as `DesiredState.ca_trust_bundle` — revision is the staging epoch, so data planes see both
    roots during the window without re-enrolment.
@@ -402,8 +419,10 @@ that restarts re-attaches through Snapshot/Restore, never by re-creating the key
    surviving root.
 
 A control-plane restart mid-window changes nothing: the window state (roots, ledger, staging
-revision) is Snapshot/Restore durable, and the restarted control plane re-publishes exactly the
-revision the fleet last saw.
+revision) persists to the configured `GITFROK_CUSTODY_SNAPSHOT_FILE` — written atomically
+(temp file, fsync, rename, mode 0600), so a torn write leaves the previous complete snapshot
+or none — and the restarted control plane restores it and re-publishes exactly the revision
+the fleet last saw.
 
 ### Cold restart of the custody service
 

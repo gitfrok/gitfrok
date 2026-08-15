@@ -11,9 +11,10 @@
 #   1. Applies ALL backend migrations (Phase 0/1 tenancy baseline, audit, identity;
 #      Phase 2 audit evidence indexes, identity auditor grants, policy decision
 #      records, security findings/triage/scan-report; Phase 3.1 agent enrolment
-#      tokens + data-plane registry, T-0036) against the app database
-#      `gitfrok` — all CREATE/GRANT idempotent, applied as the postgres superuser
-#      like the postgres-init ConfigMap does.
+#      tokens + data-plane registry, T-0036, and the residency declarations +
+#      observations store, T-0037) against the app database `gitfrok` — all
+#      CREATE/GRANT idempotent, applied as the postgres superuser like the
+#      postgres-init ConfigMap does.
 #   2. Creates the Zitadel OIDC web application for the BFF, if it does not exist:
 #      admin login is driven headlessly through the same API surface the Login V2
 #      UI uses (session check API with the setup-written login-client PAT, then
