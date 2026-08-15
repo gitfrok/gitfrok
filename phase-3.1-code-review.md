@@ -225,6 +225,10 @@ in the phase's exit summary rather than only in a board record.
 
 ## Disposition (2026-08-16, same day)
 
+**Fixed at:** backend `86f4f0b`, governance `deb9cb6`, super-repo `b9c268f` (bff and webfrontend
+unchanged). The findings above were all found at the reviewed state named in the header; this
+section binds to the fix-round state.
+
 All six findings were acted on. Code fixes are backend-only (one submodule, one commit); the two
 scope findings became recorded limits in governance, as the disposition below originally proposed.
 
@@ -232,7 +236,11 @@ scope findings became recorded limits in governance, as the disposition below or
   converged the workload, and `fail` reports it instead of `""`. The status map therefore keeps
   naming what is RUNNING across a refusal. Test:
   `TestFailureKeepsTheObservedVersionOfWhatIsRunning` (converge 0.1.0 → desired 0.2.0 with no
-  manifest → status reads Failed *and* 0.1.0). Red before the change.
+  manifest → status reads Failed *and* 0.1.0). Red before the change. Scope of the fix: the memory
+  is per-process, so the first pass after an operator restart that fails before observing anything
+  still reports no version — genuinely unknown at that point, and the code says so. Reading the
+  running image back from the workload on that path would make it restart-durable; that is a
+  further change, not this one.
 - **M2 — fixed.** `custody.Bundle` gains `firstRootMu`, held across the whole of `Bootstrap` and
   `ReattachRoot` (both claim the FIRST root and both cross the custody seam, which `mu` must not be
   held across), plus an emptiness re-check under `mu` at the append point so a concurrent `Stage`
