@@ -2,7 +2,8 @@
 
 One page for an incoming session or a new agent. **`governance/` is the Source of Truth (ADR-0001);**
 where this file disagrees with it, governance is right and this file is stale. This file says *where
-work stands*; governance says *what and why*.
+work stands and how to run it*; governance says *what and why*. Verified against the tree on
+2026-08-17.
 
 ## Navigate
 
@@ -14,137 +15,127 @@ work stands*; governance says *what and why*.
 | a task to pick up | `governance/docs/tasks/` — one file each, own `Status:` and `Repo(s):` |
 | phase intent and exit criteria | `governance/docs/roadmap/README.md`, `governance/docs/plans/` |
 | how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md`, `ci-gates.md` |
-| what a review already found | `phase-2-code-review.md`, `phase-2-code-review-wave2.md`, `phase-3-code-review.md`, `phase-3.1-plan-review.md` (this repo's root) |
+| what a review already found | `phase-2-code-review.md`, `phase-2-code-review-wave2.md`, `phase-3-code-review.md`, `phase-3.1-code-review.md`, `phase-3.1-plan-review.md` (this repo's root) |
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
 
-## Where work stands (2026-08-16)
+## Where work stands (2026-08-17)
 
-Pins as recorded by the Phase 3.1 docs close-out commit atop super-repo `a0ed3f5`:
-**governance `a4c0748`**, **backend `0238dee`**, **bff `4059a23`**,
-**webfrontend `843a195`**.
+Current pins — verified with `git submodule status` at super-repo `ec7077a`:
+**governance `c7cb3e8`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `6c8cceb`**.
 
-**Phases 0, 1 and 2 are Complete.** **Phase 3 (BYO) is implementation-complete** — T-0030…T-0034 all
-Done against SPEC-0038…SPEC-0041, each acceptance criterion proven by named tests at the exit pins.
-Its fifth exit criterion is **carried, not met**: the whole install → self-register → upgrade → meter
-path has never run on a real customer-shaped cluster, so every real-cluster row of
-`deploy/conformance/byo-dataplane.md` reads "not run". That is recorded against T-0003's cluster lane
-the way Phase 1 and Phase 2 recorded their host limits.
+**Phases 0, 1 and 2 are Complete.** **Phase 3 (BYO) is implementation-complete** — its fifth exit
+criterion is carried, not met: the install → self-register → upgrade → meter path has never run on a
+real customer-shaped cluster; every real-cluster row of `deploy/conformance/byo-dataplane.md` reads
+"not run", recorded against T-0003's cluster lane.
 
-**Phase 3.1 is implementation-complete — one task stands blocked.** It turned Phase 3's recorded
-limits into production posture under **ADR-0062…ADR-0067** (all Accepted) and
-**SPEC-0042…SPEC-0046** (all Approved), as epics EP-19…EP-23 and tasks **T-0035…T-0044** —
-`governance/docs/plans/phase-3-byo-v2.md` carries the dependency spine and the exit criteria.
-Exit records live in `governance/docs/tasks/`; every pin below resolves:
+**Phase 3.1 is implementation-complete** (durability, custody, residency, signed operator, metering
+UI) under ADR-0062…ADR-0067 and SPEC-0042…SPEC-0046, epics EP-19…EP-23, tasks T-0035…T-0044.
+Final tips: governance `62075e2`→`c7cb3e8`, backend `7c05a86`→`55db3bb`, bff `1ffbb77`→`ee53bd8`→
+`3b90090`, webfrontend `a1e614a`→`9dab620`→`6c8cceb`. Exit records live in
+`governance/docs/tasks/`; the dependency spine is `governance/docs/plans/phase-3-byo-v2.md`.
+**One task stands blocked:** T-0042 real GKE/EKS/AKS conformance — no code can unblock it; it waits
+on T-0003's cluster lane. With it wait SPEC-0045 AC3 and SPEC-0039 AC8's migration proof on real
+state.
 
-| Epic / task | State | Exit pins |
-|---|---|---|
-| **EP-19** — T-0036 durable agent stores; T-0037 durable residency declarations + pack assembly | Done | backend@c9e58c5; backend@816cb30 |
-| **EP-20** — T-0038 residency Declare surface; T-0039 PlacementGate hardening | Done | governance@794f578/3b9e853 (bundle 0.10.0) + backend@f182761 |
-| **EP-21** — T-0040 agent-CA custody & rotation | Done | backend@b0ab32e + super-repo@f8449b8 (Wave-3 close-out backend@28f729f + super-repo@5adedf1) |
-| **EP-22 harness half** — T-0041 signed operator image + release-trust-bundle distribution | Done | backend@762d5f0 + backend@a669cef, super-repo@febf0f7 |
-| **EP-23** — T-0043 divergence gates & envelope telemetry; T-0044 read-only cause distinction | Done | T-0043: backend@bc30abd + bff@4059a23 + webfrontend@08f42c4 (contracts governance@b425db0/36f284b); T-0044: backend@0238dee + webfrontend@843a195 |
-| **T-0035** — envelope throttle applied in the data plane (Phase 3 carry that gated T-0043) | Done | backend@a9ed620, pin-bumped at super-repo@9f526d0 |
-| **EP-22 real-cluster half** — T-0042 real GKE/EKS/AKS conformance | **Blocked** | blocked-by T-0003's cluster lane availability |
+**The North Star deployment proof is 9/9 on this machine** — `scripts/north-star.sh`
+(`make dev-north-star`): enrolment token issued via the owner-only EnrolmentService door (:9094),
+dataplane self-enrolled, residency declared, usage door serving, durability across controlplane
+restart, evidence pack, and git clone/push/MR/merge through the live security merge gate over mkcert
+TLS. Journey table with named evidence: MVP-RUNBOOK §8b. The proof CAUGHT and fixed a real defect:
+the merge gate's merge-base resolver omitted the merging actor's verified roles, storage's PDP denied
+every role-less `repo.read`, and every merge failed closed — fixed test-first at backend **55db3bb**
+(recorded in RUNBOOK §4a/§8b/§9). Nothing weakens: precompute stays role-less best-effort.
 
-**T-0042 is the only task not Done, and no code can unblock it**: real clusters come only from
-T-0003's lane. Every real-cluster row of `deploy/conformance/byo-dataplane.md` reads "not run"
-with that cause annotated at the matrix's head — honest by construction, recorded against the lane
-the way Phase 1 and Phase 2 recorded their host limits. With it wait SPEC-0045 AC3, Phase 3's
-carried fifth exit criterion (the whole install → self-register → upgrade → meter path on a real
-customer-shaped cluster), and SPEC-0039 AC8's forward/backward migration proof on real state. The
-plan's exit criteria that the exit records prove are ticked in `phase-3-byo-v2.md`; the
-real-cluster criterion and the final-pin-bump criterion are not.
+**The usability chain landed (2026-08-16/17) and is browser-proven.** Zitadel project roles
+owner/member/reader + an owner grant for `admin@gitsaas.test` converge idempotently in
+`scripts/dev-provision.sh` §2b; the ingress routes `/login`, `/callback`, `/logout` → bff
+(`deploy/dev/ingress.yaml`); the dataplane runs `GITFROK_OIDC_ALLOWED_ROLES=owner,member,reader`
+with the singular role claim `urn:zitadel:iam:org:project:roles` (`deploy/dev/dataplane.yaml`); the
+BFF session captures roles at login (bff `3b90090`, ADR-0049 d8); the webfrontend ships sign-in /
+sign-out / `/usage` nav (webfrontend `6c8cceb`). Login works in a browser and `/usage` renders the
+authenticated 8-dimension view.
 
-**Start here if you are picking up work:** nothing in Phase 3.1 is actionable until the cluster
-lane provides real GKE/EKS/AKS clusters — T-0042 is the sole remaining task.
+## How to run it
 
-**The North Star deployment proof ran to a full 9/9 verdict on this host (Stage D, 2026-08-16).**
-`scripts/north-star.sh` (`make dev-north-star`) replays the whole journey on the live minikube
-cluster — dev-smoke, custody, issuance, self-enrolment, residency, usage, durability, evidence,
-git flow — and all nine steps passed against backend **55db3bb**; the journey table with named
-evidence is MVP-RUNBOOK §8b. The proof CAUGHT a live defect the unit tests could not: the merge
-gate's merge-base read went to git-storaged without the merging actor's verified roles, storage's
-PDP denied every role-less `repo.read`, and every merge through the security gate failed closed.
-Fixed test-first at backend **55db3bb** (roles threaded Merge → facts provider → attribution →
-resolver → `ReadContext.ActorRoles`; precompute stays role-less best-effort; nothing weakens).
-Carried by the run, written down in the script's verdict: `GITFROK_CLOUD=gke` is dev fiction,
-the git-flow PAT is throwaway (in-memory identity store), the release-trust door stays unmounted
-(no dev-safe seed), and bare repos are re-created via kubectl exec (git/v1 has no create-repo RPC).
+**Host prerequisites (this machine):** minikube+podman machine running; `mkcert -install` done;
+`/etc/hosts` six-host line (`hello/zitadel/s3/filer/app/git.gitsaas.test → 127.0.0.1`); `grpcurl`
+installed; **`helm` absent** — `make verify`'s byo-chart *rendered* assertions skip honestly, static
+assertions still bind. Say so when you report a green run.
 
-## Read the reviews before you re-derive them
+**Daily loop (all idempotent):**
 
-Four review reports live at this repo's root, each naming the pins it was taken at. They are records,
-not governance — but they will save you from re-finding the same things:
+| Target | Does |
+|---|---|
+| `make bootstrap` | clone/sync submodules |
+| `make dev-up` | converge the cluster (addons + mkcert TLS + manifests); **hard-fails if OpenBao is sealed** |
+| `make dev-provision` | DB migrations + Zitadel OIDC client + role vocabulary (§2b) + login roundtrip |
+| `make dev-smoke` | deployments up, 200 over real TLS at `*.gitsaas.test` |
+| `make dev-north-star` | the full nine-step journey proof |
 
-- **`phase-3.1-plan-review.md`** — the most recent, and the one that shapes current work. Seven
-  findings on the planning artifacts, all acted on, plus the ADR-0067 decision they produced. Worth
-  reading in full before touching a Phase 3.1 spec or task.
-- **`phase-3-code-review.md`** — the CA trust-ordering defect (fixed at backend `e722046`) and the
-  carried envelope-throttle half that opened T-0035.
-- **`phase-2-code-review.md`** and **`phase-2-code-review-wave2.md`** — seventeen findings, then seven
-  on the fixes themselves, then two residuals.
+**Cold-restart ritual:** OpenBao quorum unseal per MVP-RUNBOOK §6a — the Shamir shares are
+operator-held. **Never automate the unseal and never re-initialize** (§6a: initialize is once per
+cluster, ever). Unseal must precede any consumer start.
 
-## What Phase 3.1 decided that changes how you build
+**Dev identities:** `admin@gitsaas.test` (Zitadel, owner role on the dev tenant) · operator PAT in
+secret `gitfrok-operator-pat` · enrolment token in secret `gitfrok-enrolment-token`.
 
-- **Durability** (ADR-0062, SPEC-0042). The agent and residency stores become Postgres adapters behind
-  the ports that already exist. Two things the spec now states rather than leaves to the adapter:
-  the enrolment-token hash lookup is the **one named RLS exemption** (enrolment resolves the tenant
-  *from* the token, so `TokenByHash`/`ClaimToken` cannot be tenant-scoped — the exemption is bounded
-  to one row and enumerated by test), and a **failed signature may not silently consume a token**
-  (AC6), because durable spend plus a remote signer turns an availability event into a dead
-  credential.
-- **The Declare surface verifies its caller** (SPEC-0043 AC6). `residency/v1` writes control state, so
-  it does not inherit SPEC-0002's limit (d) — the posture where the subject is the caller's assertion.
-  No tenant, actor or role field exists in those messages, by contract test.
-- **A tenant-scoped platform operator may declare** (ADR-0067, SPEC-0043 AC7). It reuses ADR-0046's
-  `platform_operator` principal rather than adding a cross-tenant path: the tenant is a property of
-  the verified principal. The Rego grant and its bundle-revision bump ship under T-0038 — **until then
-  bundle 0.9.0 is owner-only in fact.**
-- **Custody is OpenBao** (ADR-0066, SPEC-0044 AC5). Control-plane-side only, three-node Raft, Shamir
-  quorum unseal, Kubernetes auth, image pinned per ADR-0034. Deploying it is T-0040's scope, not an
-  assumption it inherits. Nothing in `deploy/` references it yet.
-- **Two trust bundles, named apart.** The **CA trust bundle** (agent identity roots, ADR-0064,
-  SPEC-0044 AC2, T-0040) is not the **release trust bundle** (cosign release-signing keys, ADR-0044 /
-  ADR-0065, SPEC-0045 AC2, T-0041). Both ride the reconcile path and both stage with a dual-validate
-  overlap; neither one's test may stand in for the other's.
-- **The operator image ships digest-pinned only — the legacy tag is a tripwire.** T-0041 retired
-  `operator.image.tag`: the dataplane chart FAILS the install if anyone still sets it
-  (`deploy/helm/gitfrok-dataplane/templates/operator.yaml`), rather than silently discarding a
-  mutable tag that would lie about the image the install converges. The only honored pin is
-  `operator.image.digest`, and it must agree with the signed release manifest
-  `deploy/releases/operator-app-0.1.0.release` (gated by check-signed-releases.sh).
+**Gate matrix before you push:**
 
-## Known gaps and carried limits
+- backend: full gate chain — gofmt/vet/build/arch + the real-Postgres `-race` harness (port 15432).
+- governance: `governance/scripts/check-docs.sh`, contracts and policies checks.
+- super-repo: `make verify` (includes `scripts/check-runbook.sh`) && `make codegen-check` &&
+  `make surfaces-check` && `make dev-smoke`.
 
-1. **Proxy-only egress is unsolved and can block a sale outright** (ADR-0017's remaining follow-up). A
-   customer whose egress permits only an HTTP proxy cannot install. Outside Phase 3.1's scope.
-2. **The cluster lane is the standing blocker** for every infrastructure-bound proof since Phase 1: no
-   gVisor RuntimeClass under rootless podman (CI dispatch), one git node (durability quorum and
-   failover), measured scan and index freshness, and now the whole real-cluster conformance matrix
-   (T-0042) plus SPEC-0039 AC8's forward/backward migration proof on real state.
-3. **The dataplane gRPC door is unauthenticated** — Phase-2 limit (d). Every Phase-2 RPC takes tenant,
-   actor and roles off the wire, so the PDP decides correctly about a caller-asserted subject; today's
-   mitigation is network isolation plus RLS. SPEC-0043 AC6 gives the *new* admin surface a verified
-   caller; whether that seam generalizes to the older doors is undecided and recorded in the ADR
-   index's follow-ups.
-4. **Phase-2 in-process state does not survive a restart** — the attribution projection, pack assembly
-   state and the code-search index, which also has no per-tenant or global cap (limit (e)).
-5. **Backend integration tests skip without `TEST_DATABASE_URL`**, so some isolation and tamper proofs
-   rest on a local run.
-6. **Two sources of schema truth** — `deploy/dev/postgres.yaml`'s ConfigMap creates the tenancy schema
-   independently of `backend/`'s migrations. They agree; nothing enforces it.
-7. **Per-consumer codegen gating is impossible** while each `buf.gen.yaml` reads
-   `../governance/contracts`, so contract freshness is gated at the super-repo pin bump.
-8. First-party images in `deploy/dev` are pinned by tag, not digest (ADR-0035 decision 4).
-9. Host DNS for `*.gitsaas.test` needs root, so `dev-up.sh` prints the snippet rather than applying it.
-10. `helm` is not on this host's PATH, so `make verify`'s byo-chart **rendered** assertions skip; its
-    static assertions still bind. Say so when you report a green run.
-11. **North Star carried limits** (Stage D, all annotated in `scripts/north-star.sh`'s verdict):
-    the release-trust door is NOT mounted in dev (no dev-safe seed path, §6b), `GITFROK_CLOUD=gke`
-    is dev fiction (real-cluster proof is T-0042's), the git-flow PAT is throwaway because the
-    dataplane identity store is in-memory, and the git/v1 contract has no create-repository RPC —
-    bare repos come back via the §8a kubectl-exec recovery.
+## Governance rules that bind every agent
+
+Condensed from `AGENTS.md` — read it before editing anything.
+
+- **Governance is SoT.** Decisions, contracts, policies and shared surface live only in
+  `governance/` (invariants 21–25). New decision → Proposed ADR and stop; new behaviour → spec
+  first; API change → governance PR first, additive only.
+- **One commit never spans two submodules.** Work lands in the submodule's own repo; the super-repo
+  stores **pins only** (invariant 25), bumped in their own commit after the submodule commit is on
+  its `main`.
+- Dependency direction is one-way: `webfrontend → bff → backend → governance`. webfrontend never
+  calls backend; bff holds no business logic.
+- **Honest "not run" annotations.** A row that says "not run" is worth more than a row that implies
+  it passed. **Write the limit down** — every carry is recorded against the spec it bounds.
+- Accepted ADRs are immutable (supersede, never edit); approved specs may be amended with the
+  amendment noted in `Status:`.
+- **Work lands directly on `main`** (ADR-0053, ADR-0054) — no PR gate; run the local gates first.
+  A red `main` is stop-everything: the next commit fixes or reverts it.
+
+## Open items / carried limits (never silent)
+
+1. **T-0042 multi-cloud conformance is blocked** on T-0003's cluster lane — the sole remaining
+   Phase 3.1 task, and no code can unblock it.
+2. **The release-trust door is unmounted in dev** (no dev-safe seed path, MVP-RUNBOOK §6b).
+3. **Usage dimensions show gap states** until dataplane telemetry emission is wired — the next
+   candidate task.
+4. `GITFROK_CLOUD=gke` is **annotated dev fiction**; real-cluster proof is T-0042's.
+5. **Backend integration tests skip without `TEST_DATABASE_URL`**, so some isolation and tamper
+   proofs rest on a local run.
+6. **`helm` is absent on this host** — rendered-chart assertions skip honestly; static ones bind.
+7. **One throwaway probe-discard PAT** lives in the dev tenant (in-memory identity store; north-star
+   git-flow PAT is the same class).
+8. **Dependabot advisories are open on the bff and webfrontend default branches** — pre-existing.
+9. **One-node limits stay "no" on this cluster:** failover, CI gVisor RuntimeClass under rootless
+   podman, durability quorum — all need the cluster lane.
+10. Proxy-only egress is unsolved (ADR-0017 follow-up) and can block a sale outright.
+11. The dataplane gRPC door is unauthenticated (Phase-2 limit (d)): tenant/actor/roles come off the
+    wire; mitigation is network isolation + RLS.
+12. Phase-2 in-process state does not survive a restart (attribution projection, pack assembly,
+    code-search index; the index also has no cap — limit (e)).
+13. Two sources of schema truth: `deploy/dev/postgres.yaml`'s ConfigMap vs `backend/` migrations —
+    they agree; nothing enforces it.
+14. Per-consumer codegen gating is impossible while each `buf.gen.yaml` reads
+    `../governance/contracts` — freshness is gated at the super-repo pin bump.
+15. First-party images in `deploy/dev` are pinned by tag, not digest (ADR-0035 decision 4).
+16. Host DNS for `*.gitsaas.test` needs root, so `dev-up.sh` prints the snippet rather than
+    applying it.
+17. git/v1 has no create-repository RPC — bare repos come back via the RUNBOOK §8a kubectl-exec
+    recovery.
 
 ## The storage picture, in one place
 
@@ -159,51 +150,40 @@ not governance — but they will save you from re-finding the same things:
 - **Browser sessions: Valkey** (ADR-0049), opened by the BFF itself under the one datastore waiver
   ADR-0052 grants. Every other cache or database client in the BFF still fails its boundary gate.
 
-## The lessons the record keeps
+## What Phase 3.1 decided that changes how you build
 
-**A test against a fake proves the control flow, not the claim.** Proving T-0018's AC1 and AC2 against
-live infrastructure found three defects that had all passed review — a `git fetch` with no refspec that
-landed no branches; an `authz.rego` that granted `repository.import` to no role, so its criterion had
-"passed" only because nobody could import; and a SeaweedFS PUT into a missing bucket answering 200 and
-keeping nothing. Wiring the object tier found a fourth: the S3 gateway served every object to unsigned
-requests. Prefer a live proof for anything an acceptance criterion rests on — and see
-`deploy/dev/README.md` for the eleven defects only a real cluster bring-up exposed. The North Star
-Stage D proof found one more of the same kind: the security merge gate's merge-base resolver handed
-storage a role-less subject, its PDP denied the read, and every merge failed closed — invisible to
-every unit test because the fake resolver has no PDP (fixed at backend 55db3bb).
+- **Durability** (ADR-0062, SPEC-0042): agent and residency stores are Postgres adapters behind the
+  existing ports. The enrolment-token hash lookup is the **one named RLS exemption** (bounded to one
+  row, enumerated by test), and a **failed signature may not silently consume a token** (AC6).
+- **The Declare surface verifies its caller** (SPEC-0043 AC6); no tenant/actor/role field exists in
+  `residency/v1` messages, by contract test.
+- **A tenant-scoped platform operator may declare** (ADR-0067, SPEC-0043 AC7), reusing ADR-0046's
+  `platform_operator` principal.
+- **Custody is OpenBao** (ADR-0066, SPEC-0044 AC5): control-plane-side, three-node Raft, Shamir
+  quorum unseal, Kubernetes auth, image pinned per ADR-0034.
+- **Two trust bundles, named apart:** the CA trust bundle (ADR-0064, T-0040) is not the release
+  trust bundle (ADR-0044/ADR-0065, T-0041); neither one's test may stand in for the other's.
+- **The operator image ships digest-pinned only** — `operator.image.tag` is a tripwire that FAILS the
+  install (T-0041); the only honored pin is `operator.image.digest`, which must agree with
+  `deploy/releases/operator-app-0.1.0.release` (gated by `check-signed-releases.sh`).
 
-**A green gate is not a correct spec.** Every Phase 3.1 review finding passed `check-docs.sh`. Two of
-them — an unimplementable RLS rule and an unauthenticated write surface — would have shipped as written
-and been discovered in code. When a spec says "no exception exists", check the port signature before
-believing it.
+## History, compressed
 
-**Write the limit down.** Every phase here carried something it could not finish, and each one is
-readable because it was recorded against the spec it bounds rather than left as silence. A row that
-says "not run" is worth more than a row that implies it passed.
-
-## Hard rules
-
-- Decisions, contracts and policies change **only** in `governance/` (invariants 21–25).
-- Dependency direction is one-way: `webfrontend → bff → backend → governance`.
-- **One commit never spans two submodules.** The super-repo stores **pins**, never in-place edits to a
-  submodule path; pins move in their own commit, after the submodule commit is on its `main`
-  (invariant 25).
-- New decision → **Proposed ADR and stop.** New behaviour → **spec first.** API change → governance
-  first, additive only.
-- **Accepted ADRs are immutable** — supersede, never edit. Approved specs *may* be amended in place,
-  with the amendment noted in the `Status:` line (see SPEC-0042…0045 for the shape).
-- Every query tenant-scoped; authZ through the PDP; audit append-only.
-- **Work lands directly on `main`** (ADR-0053, ADR-0054). No pull request and no review — four-eyes is
-  removed by decision. `main` carries one ruleset, `main-guard`: no force-push, no deletion, nothing
-  else. A pull request is available for anything worth discussing first; it is a choice, not a gate.
-- **CI on push is the only gate, so run the local gates before you push** — `make verify`,
-  `make surfaces-check`, `make codegen-check`, the repo's own tests and fitness functions, and
-  `governance/scripts/check-docs.sh` for a governance change. A red `main` is a stop-everything
-  condition: the next commit fixes it or reverts it, and nothing else proceeds until it is green.
-- Declare SPEC-0012's ceremony tier as a `Ceremony:` trailer in the commit message. Its gate reads a
-  PR body, so it is inert on a push until taught to read the commit (ADR-0053, open question).
-- If you do use a branch, delete it locally (`-D`; squash merges make `-d` refuse) **and** on the
-  remote once it lands, then `git remote prune origin`.
+- **Phase 3.1 wave records** (exit pins all resolve): EP-19 durable stores/residency
+  (backend@c9e58c5, 816cb30) · EP-20 Declare surface + PlacementGate (governance@794f578/3b9e853,
+  bundle 0.10.0, backend@f182761) · EP-21 custody (backend@b0ab32e, super-repo@f8449b8) · EP-22
+  harness (backend@762d5f0, a669cef, super-repo@febf0f7) · EP-23 divergence gates + read-only cause
+  (backend@bc30abd, 0238dee; bff@4059a23; webfrontend@08f42c4, 843a195) · T-0035 envelope throttle
+  (backend@a9ed620, super-repo@9f526d0).
+- **Reviews at this repo's root** — records, not governance, but they save you from re-deriving:
+  `phase-3.1-code-review.md` and `phase-3.1-plan-review.md` (findings acted on, produced ADR-0067) ·
+  `phase-3-code-review.md` (CA trust-ordering defect fixed at backend `e722046`; opened T-0035) ·
+  `phase-2-code-review.md` + `-wave2.md` (seventeen findings, seven on fixes, two residuals).
+- **The lesson the record keeps:** a test against a fake proves the control flow, not the claim —
+  live proofs found the no-refspec fetch, the `authz.rego` that granted `repository.import` to no
+  role, the SeaweedFS 200-on-missing-bucket, the S3 gateway serving unsigned reads, and the
+  role-less merge-base read (backend 55db3bb). And: a green gate is not a correct spec — check the
+  port signature before believing "no exception exists".
 
 ## Tool entry points
 
