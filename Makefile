@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-provision dev-smoke update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check runbook-check signed-releases-check
+.PHONY: bootstrap submodules dev-up dev-provision dev-smoke dev-north-star update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check runbook-check signed-releases-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5) + runbook completeness (T-0040 AC4)
@@ -68,5 +68,7 @@ dev-provision: ## apply DB migrations + provision the Zitadel OIDC client + veri
 	@./scripts/dev-provision.sh
 dev-smoke: ## T-0003 integration smoke test: deployments up, 200 over real TLS at *.gitsaas.test
 	@./scripts/smoke-dev.sh
+dev-north-star: ## North Star Stage D: the full journey on the live dev cluster (enrolment → residency → usage → durability → evidence → git flow)
+	@./scripts/north-star.sh
 update-pins: ## fetch latest submodule commits (review before committing the bump)
 	git submodule update --remote --merge

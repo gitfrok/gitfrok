@@ -184,59 +184,68 @@ sys.stdout.write(''.join(
 rm -f "$custody_ca"
 echo "  configmap gitfrok-agent-ca converged from the custody snapshot"
 
-# The platform-operator PAT. Issued ONCE and kept in the Secret: re-issuing on
-# every run would litter the identity schema with live credentials nobody holds.
-if "${KUBECTL[@]}" get secret gitfrok-operator-pat -n "$NS" >/dev/null 2>&1; then
-  echo "  operator PAT secret gitfrok-operator-pat already present (create-once)"
-else
-  "${KUBECTL[@]}" port-forward svc/dataplane -n "$NS" 19090:9090 >/dev/null 2>&1 &
-  OP_PF=$!
-  trap 'kill "$OP_PF" 2>/dev/null || true' EXIT
-  op_tries=0
-  # No gRPC reflection on the door, so `grpcurl list` cannot probe it; a real
-  # method call serves instead. AuthenticatePAT is the probe of choice: unlike
-  # the lifecycle methods it is NOT authorization-gated (the door answers an
-  # empty OK response for an unknown token), so it exits 0 exactly when the
-  # door is serving.
-  until grpcurl -plaintext -import-path governance/contracts \
-      -proto proto/identity/v1/identity.proto \
-      -d '{"personal_access_token":"gfp_provision-probe_probe"}' \
-      127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/AuthenticatePAT >/dev/null 2>&1; do
-    op_tries=$((op_tries + 1))
-    [ "$op_tries" -lt 30 ] || die "identity door never answered on the port-forward"
-    sleep 1
-  done
-  op_pat=$(grpcurl -plaintext -import-path governance/contracts \
+# The platform-operator PAT. Issued ONCE per data-plane lifetime and kept in the
+# Secret: re-issuing on every run would litter the identity schema with live
+# credentials nobody holds. ONE exception, measured in Stage D: the data plane's
+# identity store is the in-memory composition (cmd/dataplane-app/main.go), so any
+# data-plane restart clears it and a kept Secret stops resolving — the roundtrip
+# below detects exactly that and re-issues, because a Secret holding a dead
+# credential is worse than a fresh one. A dataplane restart clears the PATs the
+# RUNBOOK §8a note already names.
+issue_operator_pat() {
+  local _op_pat
+  _op_pat=$(grpcurl -plaintext -import-path governance/contracts \
     -proto proto/identity/v1/identity.proto \
     -d '{"tenant_id":"dev","actor_id":"user-admin","label":"platform-operator","scope_labels":["repo.read","repo.write"],"roles":["owner"]}' \
     127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/IssuePAT \
     | python3 -c "import json,sys;print(json.load(sys.stdin).get('plaintextToken',''))") \
     || die "IssuePAT against the identity door failed"
-  [ -n "$op_pat" ] || die "IssuePAT returned no plaintext token"
+  [ -n "$_op_pat" ] || die "IssuePAT returned no plaintext token"
   "${KUBECTL[@]}" create secret generic gitfrok-operator-pat -n "$NS" \
-    --from-literal=token="$op_pat" >/dev/null || die "writing gitfrok-operator-pat failed"
-  unset op_pat
-  kill "$OP_PF" 2>/dev/null || true
-  trap - EXIT
-  echo "  operator PAT issued through gitsaas.identity.v1.CredentialAuthenticator/IssuePAT -> secret gitfrok-operator-pat"
-fi
+    --from-literal=token="$_op_pat" --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - >/dev/null \
+    || die "writing gitfrok-operator-pat failed"
+}
 
-# Prove the credential round-trips before Stage D is asked to spend it: the
-# verifier key the doors read and the key the PAT was issued under must agree.
 "${KUBECTL[@]}" port-forward svc/dataplane -n "$NS" 19090:9090 >/dev/null 2>&1 &
 OP_PF=$!
 trap 'kill "$OP_PF" 2>/dev/null || true' EXIT
 op_tries=0
-# Same probe shape as above: AuthenticatePAT answers OK for any token shape,
-# so it signals "door serving" without needing an authorized principal.
+# No gRPC reflection on the door, so `grpcurl list` cannot probe it; a real
+# method call serves instead. AuthenticatePAT is the probe of choice: unlike
+# the lifecycle methods it is NOT authorization-gated (the door answers an
+# empty OK response for an unknown token), so it exits 0 exactly when the
+# door is serving.
 until grpcurl -plaintext -import-path governance/contracts \
     -proto proto/identity/v1/identity.proto \
     -d '{"personal_access_token":"gfp_provision-probe_probe"}' \
     127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/AuthenticatePAT >/dev/null 2>&1; do
   op_tries=$((op_tries + 1))
-  [ "$op_tries" -lt 30 ] || die "identity door never answered for the PAT roundtrip"
+  [ "$op_tries" -lt 30 ] || die "identity door never answered on the port-forward"
   sleep 1
 done
+if "${KUBECTL[@]}" get secret gitfrok-operator-pat -n "$NS" >/dev/null 2>&1; then
+  # Does the kept PAT still resolve on the data plane's identity door? The
+  # in-memory store says no after every dataplane restart.
+  op_kept=$("${KUBECTL[@]}" get secret gitfrok-operator-pat -n "$NS" -o jsonpath='{.data.token}' | base64 -D)
+  op_kept_auth=$(grpcurl -plaintext -import-path governance/contracts \
+    -proto proto/identity/v1/identity.proto \
+    -d "{\"personal_access_token\":\"$op_kept\"}" \
+    127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/AuthenticatePAT 2>/dev/null || true)
+  if printf '%s' "$op_kept_auth" | grep -q '"principal"'; then
+    echo "  operator PAT secret gitfrok-operator-pat already present and resolves (create-once)"
+  else
+    echo "  kept operator PAT no longer resolves — the data plane's in-memory identity store"
+    echo "  cleared it on restart; re-issuing into the Secret (the old plaintext was already gone)"
+    issue_operator_pat
+  fi
+  unset op_kept op_kept_auth
+else
+  issue_operator_pat
+  echo "  operator PAT issued through gitsaas.identity.v1.CredentialAuthenticator/IssuePAT -> secret gitfrok-operator-pat"
+fi
+
+# Prove the credential round-trips before Stage D is asked to spend it: the
+# verifier key the doors read and the key the PAT was issued under must agree.
 op_token=$("${KUBECTL[@]}" get secret gitfrok-operator-pat -n "$NS" -o jsonpath='{.data.token}' | base64 -D)
 # The door answers OK with an EMPTY body for an unknown token, so "the RPC
 # succeeded" is not the assertion — the resolved principal is.
@@ -246,12 +255,89 @@ op_auth=$(grpcurl -plaintext -import-path governance/contracts \
   127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator/AuthenticatePAT) \
   || die "AuthenticatePAT RPC failed for the operator PAT"
 printf '%s' "$op_auth" | grep -q '"principal"' \
-  || die "operator PAT did not resolve to a principal — verifier key rotated under an issued PAT?
+  || die "operator PAT did not resolve to a principal right after issuance —
+  verifier key rotated under an issued PAT?
   (dev-up.sh creates gitfrok-pat-verifier create-once precisely to prevent this)"
 unset op_token op_auth
 kill "$OP_PF" 2>/dev/null || true
 trap - EXIT
 echo "  operator PAT authenticates against the identity door"
+
+# --------------------------------------------- 1c. Stage D: durable owner identity
+# The controlplane's residency/enrolment doors resolve their callers through the
+# DURABLE identity seam — identity.NewPostgres, i.e. identity.resolve_active_credential
+# (backend/cmd/controlplane-app/main.go) — while the data plane's identity door that
+# issued the operator PAT above is the IN-MEMORY composition (cmd/dataplane-app/main.go
+# wires identity.NewInMemory unconditionally). A PAT that lives only in that in-memory
+# store can never resolve on the doors: the north-star journey's first live attempt
+# proved exactly that (coarse PermissionDenied, controlplane log "issuance refused —
+# no verified principal"). So this step provisions the dev tenant's OWNER identity
+# where the doors actually look — principals + memberships(owner) + one PAT row keyed
+# by its verifier — exactly the way resolve_active_credential reads them.
+#
+# The PDP is untouched by this: agent.enrolment_token.issue stays owner-only in
+# authz.rego and platform_operator stays refused. This step CREATES the dev tenant's
+# owner principal; it widens no grant.
+#
+# Key discipline: GITFROK_PAT_VERIFIER_KEY is a base64 STRING and the doors
+# base64-DECODE it to the HMAC key (base64.StdEncoding.DecodeString in
+# loadResidencyDoorConfig/loadEnrolmentDoorConfig). The Secret's .data.key is the
+# base64 encoding of that string, so the HMAC key is .data.key decoded TWICE. The
+# verifier is HMAC-SHA256(key, token) over the FULL token string, exactly what
+# identity's hashWithKey computes on both stores.
+#
+# Create-once, like the operator PAT: the plaintext exists in exactly one place.
+# Re-runs converge the rows from the kept token, so a re-created database catches
+# up to the Secret instead of orphaning it.
+step "Stage D door credential: dev-tenant OWNER identity + PAT in the durable store"
+if "${KUBECTL[@]}" get secret gitfrok-owner-pat -n "$NS" >/dev/null 2>&1; then
+  OWNER_PAT=$("${KUBECTL[@]}" get secret gitfrok-owner-pat -n "$NS" -o jsonpath='{.data.token}' | base64 -D)
+  echo "  owner PAT secret gitfrok-owner-pat already present (create-once) — converging its rows"
+else
+  OWNER_PAT="gfp_default_$(od -An -v -tx1 -N 32 /dev/urandom | tr -d ' \n')"
+fi
+[ ${#OWNER_PAT} -eq 76 ] || die "owner PAT has unexpected shape (${#OWNER_PAT} chars, want 76:
+  gfp_default_ + 64 hex) — gitfrok-owner-pat was not written by this step"
+verifier_key_hex=$("${KUBECTL[@]}" get secret gitfrok-pat-verifier -n "$NS" -o jsonpath='{.data.key}' \
+  | base64 -D | base64 -D | od -An -v -tx1 | tr -d ' \n')
+[ ${#verifier_key_hex} -ge 64 ] || die "PAT verifier key decodes to fewer than 32 bytes — the doors
+  would refuse to open with it; re-run dev-up.sh"
+owner_verifier=$(printf '%s' "$OWNER_PAT" | openssl dgst -sha256 -mac HMAC \
+  -macopt "hexkey:$verifier_key_hex" | awk '{print $NF}')
+[ ${#owner_verifier} -eq 64 ] || die "HMAC computation failed (openssl missing?) — the owner PAT
+  cannot be registered in the durable store"
+owner_cred_id=$(printf '%s' "$owner_verifier" | cut -c1-32)
+"${KUBECTL[@]}" exec -i deployment/postgres -n "$NS" -- \
+  psql -U postgres -d gitfrok -v ON_ERROR_STOP=1 -q <<SQL || die "converging the dev owner identity failed"
+INSERT INTO identity.principals(tenant_id, actor_id, active) VALUES('dev','user-admin', true)
+  ON CONFLICT (tenant_id, actor_id) DO UPDATE SET active = true;
+INSERT INTO identity.memberships(tenant_id, actor_id, role, active) VALUES('dev','user-admin','owner', true)
+  ON CONFLICT (tenant_id, actor_id, role) DO UPDATE SET active = true;
+DELETE FROM identity.credentials
+ WHERE tenant_id = 'dev' AND actor_id = 'user-admin' AND credential_kind = 'PAT'
+   AND verifier <> '$owner_verifier';
+INSERT INTO identity.credentials
+  (id, tenant_id, actor_id, credential_kind, key_id, verifier, label, scope_labels)
+VALUES ('$owner_cred_id', 'dev', 'user-admin', 'PAT', 'default', '$owner_verifier',
+        'north-star-owner', '{agent.enrolment,residency.declare}')
+ON CONFLICT (credential_kind, key_id, verifier) DO NOTHING;
+SQL
+# The assertion the doors themselves make, run exactly the way they run it: the
+# SECURITY DEFINER resolver must return this credential's principal WITH the owner
+# role. Anything else means the doors would still refuse the north-star journey.
+owner_roles=$("${KUBECTL[@]}" exec deployment/postgres -n "$NS" -- \
+  psql -U postgres -d gitfrok -tAc \
+  "SELECT array_to_string(roles, ',') FROM identity.resolve_active_credential('PAT','default','$owner_verifier');")
+[ "$owner_roles" = "owner" ] || die "the owner PAT does not resolve to an owner principal through
+  identity.resolve_active_credential (got '${owner_roles:-<nothing>}') — the controlplane doors
+  would refuse it; check the identity migrations and the verifier key"
+if ! "${KUBECTL[@]}" get secret gitfrok-owner-pat -n "$NS" >/dev/null 2>&1; then
+  "${KUBECTL[@]}" create secret generic gitfrok-owner-pat -n "$NS" \
+    --from-literal=token="$OWNER_PAT" >/dev/null || die "writing gitfrok-owner-pat failed"
+  echo "  owner PAT issued into the durable identity store -> secret gitfrok-owner-pat"
+fi
+unset OWNER_PAT verifier_key_hex owner_verifier owner_cred_id owner_roles
+echo "  identity.resolve_active_credential resolves the owner PAT with roles {owner}"
 
 # ------------------------------------------------------------------ 2. Zitadel client
 step "Zitadel OIDC client for the BFF (headless, idempotent)"

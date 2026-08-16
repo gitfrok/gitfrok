@@ -59,6 +59,19 @@ real-cluster criterion and the final-pin-bump criterion are not.
 **Start here if you are picking up work:** nothing in Phase 3.1 is actionable until the cluster
 lane provides real GKE/EKS/AKS clusters — T-0042 is the sole remaining task.
 
+**The North Star deployment proof ran to a full 9/9 verdict on this host (Stage D, 2026-08-16).**
+`scripts/north-star.sh` (`make dev-north-star`) replays the whole journey on the live minikube
+cluster — dev-smoke, custody, issuance, self-enrolment, residency, usage, durability, evidence,
+git flow — and all nine steps passed against backend **55db3bb**; the journey table with named
+evidence is MVP-RUNBOOK §8b. The proof CAUGHT a live defect the unit tests could not: the merge
+gate's merge-base read went to git-storaged without the merging actor's verified roles, storage's
+PDP denied every role-less `repo.read`, and every merge through the security gate failed closed.
+Fixed test-first at backend **55db3bb** (roles threaded Merge → facts provider → attribution →
+resolver → `ReadContext.ActorRoles`; precompute stays role-less best-effort; nothing weakens).
+Carried by the run, written down in the script's verdict: `GITFROK_CLOUD=gke` is dev fiction,
+the git-flow PAT is throwaway (in-memory identity store), the release-trust door stays unmounted
+(no dev-safe seed), and bare repos are re-created via kubectl exec (git/v1 has no create-repo RPC).
+
 ## Read the reviews before you re-derive them
 
 Four review reports live at this repo's root, each naming the pins it was taken at. They are records,
@@ -127,6 +140,11 @@ not governance — but they will save you from re-finding the same things:
 9. Host DNS for `*.gitsaas.test` needs root, so `dev-up.sh` prints the snippet rather than applying it.
 10. `helm` is not on this host's PATH, so `make verify`'s byo-chart **rendered** assertions skip; its
     static assertions still bind. Say so when you report a green run.
+11. **North Star carried limits** (Stage D, all annotated in `scripts/north-star.sh`'s verdict):
+    the release-trust door is NOT mounted in dev (no dev-safe seed path, §6b), `GITFROK_CLOUD=gke`
+    is dev fiction (real-cluster proof is T-0042's), the git-flow PAT is throwaway because the
+    dataplane identity store is in-memory, and the git/v1 contract has no create-repository RPC —
+    bare repos come back via the §8a kubectl-exec recovery.
 
 ## The storage picture, in one place
 
@@ -149,7 +167,10 @@ landed no branches; an `authz.rego` that granted `repository.import` to no role,
 "passed" only because nobody could import; and a SeaweedFS PUT into a missing bucket answering 200 and
 keeping nothing. Wiring the object tier found a fourth: the S3 gateway served every object to unsigned
 requests. Prefer a live proof for anything an acceptance criterion rests on — and see
-`deploy/dev/README.md` for the eleven defects only a real cluster bring-up exposed.
+`deploy/dev/README.md` for the eleven defects only a real cluster bring-up exposed. The North Star
+Stage D proof found one more of the same kind: the security merge gate's merge-base resolver handed
+storage a role-less subject, its PDP denied the read, and every merge failed closed — invisible to
+every unit test because the fake resolver has no PDP (fixed at backend 55db3bb).
 
 **A green gate is not a correct spec.** Every Phase 3.1 review finding passed `check-docs.sh`. Two of
 them — an unimplementable RLS rule and an unauthenticated write surface — would have shipped as written

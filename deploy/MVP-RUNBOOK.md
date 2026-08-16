@@ -141,6 +141,25 @@ while still reporting as enabled.
   merges fail closed. In dev there is **no scan-dispatch path at all** (no gVisor RuntimeClass on this
   host; scans can only be ingested by RPC), so the gate can deny everything a CI flow would otherwise
   have gated; that dispatch capability is T-0003's cluster lane.
+- **The merge gate's merge-base read runs under the merging actor's verified roles (caught by the
+  north-star Stage D proof, fixed at backend 55db3bb).** Attribution needs the MR's merge base from
+  git-storaged, and that read is a PDP-guarded `repo.read`. Before the fix the resolver built the
+  `ReadContext` without `ActorRoles`, so storage denied every role-less read, attribution never
+  materialized, and EVERY merge through the security gate failed closed on every real plane — unit
+  tests could not see it because the fake resolver has no PDP. The gate now threads the merge
+  context's verified roles end to end (precompute stays role-less best-effort); nothing weakens —
+  facts still fail closed whenever the comparison cannot assemble. If a merge refuses with the
+  comparison unavailable, check the merging actor's roles and the scan coverage at BOTH revisions
+  before anything else.
+- **The Phase 3.1 doors are mounted on the dev control plane (North Star Stage C, super-repo
+  54ee3e9) and proven end to end (Stage D).** Agent gateway :9091 (custody-backed CA), usage :9092,
+  residency :9093, enrolment :9094 — plus the dataplane in agent mode and the BFF's usage route.
+  `scripts/north-star.sh` (`make dev-north-star`) runs the nine-step journey on the live cluster:
+  dev-smoke, custody, issuance, self-enrolment, residency, usage, durability, evidence, git flow —
+  and prints which rows stay honestly 'no' on one node (failover, durable push, CI gVisor).
+  Carried annotations of the run: `GITFROK_CLOUD=gke` is dev fiction (the real-cluster proof is
+  T-0042's), the git-flow PAT is throwaway (in-memory identity store, discarded with the pod), and
+  enrolment issuance is OWNER-only by PDP grant.
 - **CI scan-report ingest is wired; its operational defaults are mirrored here (invariant 13).**
   T-0029 (backend 49d6bfa) has `CIJobFinished` events drive Security's ingester — the runner
   persists the raw report and findings/scans land under the job's own principal. The limits are
@@ -253,9 +272,11 @@ b0ab32e, T-0040 Wave 3b): the control plane composes its CA exclusively through 
 the moment it is deployed with the agent door configured (`GITFROK_AGENT_GRPC_ADDR` set),
 **unseal must precede control-plane start** — a sealed custody service cannot sign, and the
 production composition root holds no other key (the dev CA is unreachable from it by
-construction, SPEC-0044 AC1/AC3; fitness-asserted in `internal/arch`). The current dev
-deployment still runs the Phase-1 healthz-only image, so on this cluster the step may still run
-any time after step 2 until the custody-enabled image ships.
+construction, SPEC-0044 AC1/AC3; fitness-asserted in `internal/arch`). Since North Star
+Stage C (super-repo 54ee3e9) the dev control plane runs the custody-enabled composition
+with all four Phase 3.1 doors mounted, so on this cluster **unseal precedes
+control-plane start**: a cold restart that skips §6a's unseal leaves the agent door
+unable to sign, and enrolment issuance refuses until quorum unseal completes.
 
 ### Initialize — once per cluster, ever
 
@@ -373,6 +394,15 @@ The control plane composes its CA exclusively through the custody service (backe
 the production composition root has no dev CA and no key-material path — `internal/arch` fitness
 asserts both, SPEC-0044 AC1/AC3). This section is the operator side of that posture: provisioning
 the key, rotating it, and the failure cases the rotation window creates.
+
+**Custody is live in dev (North Star Stage C/D).** Since super-repo 54ee3e9 the dev control
+plane mounts the agent door against the custody service through a busybox loopback-proxy
+sidecar (the admission below), and North Star Stage D proved the whole chain on the live
+cluster: `scripts/north-star.sh` step 2 verifies custody availability, step 4 self-enrols a
+fresh dataplane credential through the custody-backed CA, and step 7 shows the CA snapshot
+surviving a dataplane restart. The one honest gap: the **release trust door stays
+unmounted** in dev — §6b gives no dev-safe seed path for the release-signing keys, so the
+pinned binary's loud "distribution NOT CONFIGURED" is the intended state.
 
 ### Provision the CA key — the control plane is the single creator
 
@@ -566,7 +596,38 @@ kubectl exec deploy/postgres -- psql -U gitfrok_app -d gitfrok -c \
 
 **In-memory stores reset with the plane.** A dataplane or git-storaged restart clears the ref
 projection, protection rules and every issued PAT — re-create or re-push the bare repo, re-apply
-`SetBranchProtection`, and re-issue the PAT before re-running the flow.
+`SetBranchProtection`, and re-issue the PAT before re-running the flow. Bare repos are re-created
+the documented way: `kubectl exec deploy/git-storaged -- sh -c 'mkdir -p <root>/<tenant>/<repo>.git
+&& cd <root>/<tenant>/<repo>.git && git init -q --bare -b main'` — the git/v1 contract has no
+create-repository RPC by design.
+
+### 8b. North Star verified run (2026-08-16, run 1786839593)
+
+`scripts/north-star.sh` (`make dev-north-star`) replays the full journey on the live cluster with
+mkcert TLS (`GIT_SSL_CAINFO=$(mkcert -CAROOT)/rootCA.pem`), and every step passed against the
+fixed backend 55db3bb:
+
+| Step | Verdict | Named evidence |
+|---|---|---|
+| 1 dev-smoke | PASS | all deployments up, 200 over real TLS at *.gitsaas.test |
+| 2 custody | PASS | openbao raft quorum unsealed, agent-ca present |
+| 3 issuance | PASS | owner PAT minted, audit count advanced; platform_operator refused (OWNER-only grant) |
+| 4 self-enrolment | PASS | dataplane claimed its enrolment token, credential issued by the custody-backed CA |
+| 5 residency | PASS | declaration chainSeq advanced, CLOUD_GKE/europe-west1 |
+| 6 usage | PASS | METERED + DEFERRED counters advance; a reader-scoped principal is refused |
+| 7 durability | PASS | dataplane restart: CA snapshot, spent tokens and declarations unchanged |
+| 8 evidence | PASS | pack READY with residency + usage sections |
+| 9 git-flow | PASS | push over https, protected-ref denial, MR 01M03Z1GRK3MHG788FXFP4Z632 approved and MERGED through the security merge gate |
+
+Rows that stay honestly 'no' on this one-node host: failover promotes the in-sync replica, durable
+push (primary + in-sync replica ack), CI job runs and gates merge (no gVisor RuntimeClass under
+rootless podman). Step 9 ingests clean scans at the merge-base and head revisions because the
+security merge gate engages by construction (see §4a) — a merge without scan reports at BOTH
+revisions fails closed, and that refusal is the gate working.
+
+This run also CAUGHT a live defect the unit tests could not: the merge-base read went to storage
+without the merging actor's verified roles, so every merge through the security gate failed closed.
+Root cause and fix are recorded in §4a (backend 55db3bb).
 
 ## 9. Troubleshooting
 
@@ -585,6 +646,7 @@ projection, protection rules and every issued PAT — re-create or re-push the b
 | data plane crash-loops: `RegisterService called after Server.Serve` | the policy gRPC door raced registration | fixed in `ServePolicy()` (backend #54); rebuild the image |
 | fresh repo pushes but MR open or `refs` lookups fail | a plane restart cleared the ref projection | re-push the bare repo, re-apply protection, re-issue the PAT |
 | MR open denied despite valid refs | short ref names | pass full ref names in codereview RPCs |
+| merge refuses, comparison unavailable | no scan at head AND merge base, or the merge actor lacks repo roles | ingest scans at BOTH revisions; check the merging actor's roles (§4a) |
 | `openbao-*` pods Never Ready | sealed — the intended state until quorum-unsealed | §6a unseal procedure (init first if the cluster never was) |
 
 ## 10. Teardown
