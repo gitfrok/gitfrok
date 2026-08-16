@@ -134,9 +134,18 @@ spec:
         - name: GITFROK_OIDC_REDIRECT_URI
           value: "https://app.gitsaas.test/callback"
         - name: GITFROK_OIDC_ROLE_CLAIM
-          value: "urn:zitadel:iam:org:projects:roles"
+          # Zitadel v4.16.2 emits granted project roles under the generic
+          # SINGULAR claim (verified live: {"owner":{orgId:orgDomain}}; the
+          # identity verifier reads the map's keys as role names). The plural
+          # name this carried before is never populated by v4. Roles only
+          # appear once the project's projectRoleAssertion flag is on —
+          # dev-provision.sh converges it together with the grants.
+          value: "urn:zitadel:iam:org:project:roles"
         - name: GITFROK_OIDC_ALLOWED_ROLES
-          value: "admin"
+          # The reviewed role vocabulary (ADR-0045 line 44: vocabulary changes
+          # carry governance/policy review — this set is exactly the roles the
+          # authz policy reasons about: owner/member/reader).
+          value: "owner,member,reader"
         - name: GITFROK_OIDC_TENANT_MAPPING
           # Written by dev-provision.sh (the org id is instance-generated and
           # differs per fresh Zitadel): maps the dev org to the dev tenant id.

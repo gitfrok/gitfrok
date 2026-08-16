@@ -99,10 +99,34 @@ spec:
             port:
               number: 8888
   # The web app (T-0015). The SSR server renders tree/file/diff views from BFF
-  # responses; /callback and /login terminate the OIDC flow at the BFF.
+  # responses; /login, /callback and /logout terminate the OIDC flow at the BFF
+  # (ADR-0045 — the browser never touches the backend directly). The three
+  # auth paths are Exact so the BFF's GET /login + GET /callback + POST /logout
+  # are the whole routed surface; every other path stays with the SSR app.
   - host: app.gitsaas.test
     http:
       paths:
+      - path: /login
+        pathType: Exact
+        backend:
+          service:
+            name: bff
+            port:
+              number: 8080
+      - path: /callback
+        pathType: Exact
+        backend:
+          service:
+            name: bff
+            port:
+              number: 8080
+      - path: /logout
+        pathType: Exact
+        backend:
+          service:
+            name: bff
+            port:
+              number: 8080
       - path: /
         pathType: Prefix
         backend:

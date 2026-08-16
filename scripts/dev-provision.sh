@@ -19,6 +19,10 @@
 #      admin login is driven headlessly through the same API surface the Login V2
 #      UI uses (session check API with the setup-written login-client PAT, then
 #      OIDC callback), so no browser, no console, no cookies are needed.
+#   2b. Converges the Zitadel project-role vocabulary (owner/member/reader), the
+#       dev admin's owner grant, and the three assertion switches that make the
+#       exchanged principal carry its roles in the ID token, then proves the
+#       exchange really does carry the owner role.
 #   3. Writes the resulting client id into the ConfigMap `gitfrok-oidc` and
 #      restarts the BFF so it picks the client id up from env.
 #   4. Verifies: BFF /login redirects to the issuer and the full OIDC code flow
@@ -458,6 +462,175 @@ ORG_ID=$(http /management/v1/users/_search -X POST \
   --from-literal=tenant-mapping="$ORG_ID=dev" \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - || die "writing $OIDC_CM failed"
 echo "  configmap $OIDC_CM updated ($ORG_ID maps to the dev tenant)"
+
+# --------------------------------------- 2b. Zitadel project roles + owner grant
+# The dataplane's verified role vocabulary is owner/member/reader
+# (dataplane.yaml GITFROK_OIDC_ALLOWED_ROLES — the exact roles the authz policy
+# reasons about; ADR-0045 keeps that vocabulary a reviewed decision). Zitadel
+# only emits granted project roles into the ID token when FOUR things all hold,
+# and this section converges each one idempotently:
+#   1. the project roles exist,
+#   2. the dev admin holds the owner role on the project (a user grant),
+#   3. the project asserts roles at authentication (projectRoleAssertion),
+#   4. the BFF app asserts roles into the ID token (idTokenRoleAssertion).
+# Without 3 the token carries no role claim at all no matter what 4 says
+# (v4.16.2 internal/api/oidc/userinfo.go assertRoles: the gate reads the
+# PROJECT flag; the app flag only decides what the gate may emit).
+step "Zitadel project roles, owner grant, role-assertion switches"
+
+# 1. Roles. Existence is read through roles/_search (a GET of one role answers
+# 405 in v4.16.2); a create that races an existing role answers 409, which is
+# the idempotency key rather than an error.
+role_list=$(http "/management/v1/projects/$PROJECT_ID/roles/_search" -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"pagination":{"limit":"100"}}' \
+  | python3 -c "import json,sys;print(' '.join(r['key'] for r in json.load(sys.stdin).get('result',[])))") \
+  || die "project role search failed: $HTTP_BODY"
+for role in owner member reader; do
+  case " $role_list " in
+    *" $role "*) echo "  project role '$role' present" ;;
+    *)
+      sc=$(curl -sk --max-time "$TIMEOUT" -o /dev/null -w '%{http_code}' \
+        "$ISSUER/management/v1/projects/$PROJECT_ID/roles" -X POST \
+        -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+        -d "{\"roleKey\":\"$role\",\"displayName\":\"$role\"}")
+      [ "$sc" = 200 ] || [ "$sc" = 409 ] || die "creating project role '$role' failed (HTTP $sc)"
+      echo "  project role '$role' converged"
+      ;;
+  esac
+done
+
+# 2. The dev admin's owner grant. The v1 management endpoint is retired in v4
+# (answers 405); the connect shape of authorization.v2 is the live surface, and
+# 409 ALREADY_EXISTS is its idempotent no-op. The user id is resolved rather
+# than pinned: it is instance-generated like everything else in this script.
+ADMIN_USER_ID=$(http /management/v1/users/_search -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"queries\":[{\"userNameQuery\":{\"userName\":\"$ADMIN_LOGIN\"}}]}" \
+  | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['result'][0]['id'] if d.get('result') else '')") \
+  || die "user search for $ADMIN_LOGIN failed"
+[ -n "$ADMIN_USER_ID" ] || die "no user found for $ADMIN_LOGIN"
+sc=$(curl -sk --max-time "$TIMEOUT" -o /dev/null -w '%{http_code}' \
+  "$ISSUER/zitadel.authorization.v2.AuthorizationService/CreateAuthorization" -X POST \
+  -H "Connect-Protocol-Version: 1" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"userId\":\"$ADMIN_USER_ID\",\"projectId\":\"$PROJECT_ID\",\"organizationId\":\"$ORG_ID\",\"roles\":[\"owner\"]}")
+[ "$sc" = 200 ] || [ "$sc" = 409 ] || die "granting owner to $ADMIN_LOGIN failed (HTTP $sc)"
+echo "  $ADMIN_LOGIN holds the owner role on the project"
+
+# 3. The project must assert roles at authentication.
+proj_assert=$(http "/management/v1/projects/$PROJECT_ID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['project'].get('projectRoleAssertion', False))") \
+  || die "project read failed"
+if [ "$proj_assert" != "True" ]; then
+  proj_name=$(http "/management/v1/projects/$PROJECT_ID" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin)['project']['name'])")
+  http "/management/v1/projects/$PROJECT_ID" -X PUT \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+    -d "{\"name\":\"$proj_name\",\"projectRoleAssertion\":true}" >/dev/null \
+    || die "enabling projectRoleAssertion failed: $HTTP_BODY"
+  echo "  projectRoleAssertion enabled on project $PROJECT_ID"
+else
+  echo "  projectRoleAssertion already on"
+fi
+
+# 4. The BFF app must assert roles into the ID token. The PUT replaces the whole
+# OIDC config, so it only runs when a flag is missing — same reason-to-write
+# discipline as the ConfigMap above.
+APP_ID=$("${KUBECTL[@]}" exec deployment/postgres -n "$NS" -- \
+  psql -U postgres -d zitadel -tAc \
+  "SELECT a.id FROM projections.apps7 a JOIN projections.apps7_oidc_configs oc ON a.id=oc.app_id AND a.instance_id=oc.instance_id WHERE oc.client_id='$CLIENT_ID'") \
+  || die "cannot resolve the BFF app id from Zitadel projections"
+APP_ID=$(printf '%s' "$APP_ID" | tr -d '\r ')
+[ -n "$APP_ID" ] || die "no app with client id $CLIENT_ID in Zitadel projections"
+app_cfg=$(http "/management/v1/projects/$PROJECT_ID/apps/$APP_ID" -H "Authorization: Bearer $ADMIN_TOKEN") \
+  || die "app read failed"
+need_flags=$(printf '%s' "$app_cfg" | python3 -c "import json,sys;c=json.load(sys.stdin)['app'].get('oidcConfig',{});print('' if c.get('idTokenRoleAssertion') and c.get('idTokenUserinfoAssertion') else 'yes')")
+if [ -n "$need_flags" ]; then
+  put_payload=$(printf '%s' "$app_cfg" | python3 -c "
+import json, sys
+cfg = dict(json.load(sys.stdin)['app']['oidcConfig'])
+cfg['idTokenRoleAssertion'] = True
+cfg['idTokenUserinfoAssertion'] = True
+cfg.pop('clientId', None)
+cfg.pop('clockSkew', None)
+print(json.dumps(cfg))")
+  http "/management/v1/projects/$PROJECT_ID/apps/$APP_ID/oidc_config" -X PUT \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+    -d "$put_payload" >/dev/null || die "enabling the app role-assertion flags failed: $HTTP_BODY"
+  echo "  BFF app idTokenRoleAssertion/idTokenUserinfoAssertion enabled"
+else
+  echo "  BFF app role-assertion flags already on"
+fi
+
+# Proof: the exchanged principal carries the owner role. A fresh PKCE exchange
+# with the BFF client is exactly the token the dataplane's ExchangeCode mints
+# the session principal from (ADR-0049 d8), so its role claim IS the principal's
+# roles. The claim arrives Zitadel-shaped — an object keyed by role name — and
+# the identity verifier reads the keys (backend verifier.go claims.strings).
+ROLE_CLAIM="urn:zitadel:iam:org:project:roles"
+assert_owner_role() {
+  local body sid token verifier challenge q loc authreq code claims
+  body=$(http /v2/sessions -X POST \
+    -H "Authorization: Bearer $PAT" -H "Content-Type: application/json" \
+    -d "{\"checks\":{\"user\":{\"loginName\":\"$ADMIN_LOGIN\"},\"password\":{\"password\":\"$ADMIN_PASSWORD\"}}}") \
+    || die "assertion session check failed"
+  sid=$(printf '%s' "$body" | python3 -c "import json,sys;print(json.load(sys.stdin).get('sessionId',''))")
+  token=$(printf '%s' "$body" | python3 -c "import json,sys;print(json.load(sys.stdin).get('sessionToken',''))")
+  [ -n "$sid" ] || die "assertion: no session id"
+  verifier=$(head -c 48 /dev/urandom | base64url)
+  challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | base64url)
+  q=$(python3 - "$CLIENT_ID" "$challenge" <<'PYEOF'
+import sys, urllib.parse
+print(urllib.parse.urlencode({
+  "client_id": sys.argv[1],
+  "redirect_uri": "https://app.gitsaas.test/callback",
+  "response_type": "code", "scope": "openid profile email", "state": "prov",
+  "code_challenge": sys.argv[2], "code_challenge_method": "S256"}))
+PYEOF
+    )
+  loc=$(curl -sk --max-time "$TIMEOUT" -o /dev/null -w '%{redirect_url}' \
+        "$ISSUER/oauth/v2/authorize?$q") || die "assertion: authorize failed"
+  authreq=$(printf '%s' "$loc" | python3 -c "import sys,urllib.parse;qs=urllib.parse.parse_qs(urllib.parse.urlparse(sys.stdin.read()).query);v=(qs.get('authRequest') or qs.get('requestId') or [''])[0];print(v[5:] if v.startswith('oidc_') else v)")
+  [ -n "$authreq" ] || die "assertion: no auth request handle ($loc)"
+  code=$(http "/v2/oidc/auth_requests/$authreq" -X POST \
+    -H "Authorization: Bearer $PAT" -H "Content-Type: application/json" \
+    -d "{\"session\":{\"sessionId\":\"$sid\",\"sessionToken\":\"$token\"}}" \
+    | python3 -c "import sys,urllib.parse,json;print(urllib.parse.parse_qs(urllib.parse.urlparse(json.load(sys.stdin)['callbackUrl']).query)['code'][0])")
+  [ -n "$code" ] || die "assertion: no code from callback"
+  claims=$(http /oauth/v2/token -X POST \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "grant_type=authorization_code" --data-urlencode "code=$code" \
+    --data-urlencode "redirect_uri=$BFF_REDIRECT" --data-urlencode "client_id=$CLIENT_ID" \
+    --data-urlencode "code_verifier=$verifier" \
+    | python3 -c "
+import json, sys, base64
+t = json.load(sys.stdin)
+idt = t.get('id_token', '')
+if not idt:
+    print('NO_ID_TOKEN')
+else:
+    p = idt.split('.')[1]
+    p += '=' * (-len(p) % 4)
+    c = json.loads(base64.urlsafe_b64decode(p))
+    r = c.get('$ROLE_CLAIM', {})
+    print(','.join(sorted(r.keys())) if isinstance(r, dict) else ','.join(sorted(r)))")
+  printf '%s' "$claims"
+}
+roles_seen=$(assert_owner_role)
+attempt=1
+while [ "$roles_seen" != owner ] && [ "$attempt" -lt 5 ]; do
+  # Zitadel's projections trail the write model by a beat; retry before failing.
+  sleep 2
+  roles_seen=$(assert_owner_role)
+  attempt=$((attempt + 1))
+done
+[ "$roles_seen" = owner ] \
+  || die "the exchanged principal does not carry the owner role (roles seen: '$roles_seen') — check the four switches converged above"
+echo "  exchanged principal carries roles {$roles_seen} in $ROLE_CLAIM"
+unset roles_seen attempt
+
 # The data plane restart below must see the enrolment placeholder: its pinned
 # binary treats an absent GITFROK_ENROLMENT_TOKEN as a config error when the
 # gateway address is set (Stage C's un-enrolled-start contract).
@@ -496,7 +669,10 @@ loc=$(printf '%s' "${reqout##*$'\n'}")
 flow_cookie=$(printf '%s' "$headers" | tr -d '\r' | sed -n 's/^Set-Cookie: __Host-gitfrok_login=\([^;]*\).*/\1/p')
 state=$flow_cookie
 printf '%s' "$loc" | grep -q "$ISSUER" || die "BFF /login did not reach the issuer: $loc"
-authreq=$(printf '%s' "$loc" | python3 -c "import sys,urllib.parse;print(urllib.parse.parse_qs(urllib.parse.urlparse(sys.stdin.read()).query)['requestId'][0].replace('oidc_','',1))")
+# The login UI's redirect carries the auth-request handle as `authRequest`
+# (V2_-prefixed on v4.16.2) or `requestId` (older `oidc_` shape); only the
+# legacy prefix is stripped — /v2/oidc/auth_requests takes V2_ ids verbatim.
+authreq=$(printf '%s' "$loc" | python3 -c "import sys,urllib.parse;qs=urllib.parse.parse_qs(urllib.parse.urlparse(sys.stdin.read()).query);v=(qs.get('authRequest') or qs.get('requestId') or [''])[0];print(v[5:] if v.startswith('oidc_') else v)")
 [ -n "$flow_cookie" ] || die "no flow cookie from BFF /login"
 [ -n "$authreq" ] || die "no requestId from the login UI"
 
