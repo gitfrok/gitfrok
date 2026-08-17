@@ -16,13 +16,14 @@ work stands and how to run it*; governance says *what and why*. Verified against
 | phase intent and exit criteria | `governance/docs/roadmap/README.md`, `governance/docs/plans/` |
 | how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md`, `ci-gates.md` |
 | what a review already found | `phase-2-code-review.md`, `phase-2-code-review-wave2.md`, `phase-3-code-review.md`, `phase-3.1-code-review.md`, `phase-3.1-plan-review.md` (this repo's root) |
+| how the UI must look and behave | `governance/docs/adr/0069-cvd-first-design-system.md` → `docs/specs/SPEC-0047-*` (binding token table) |
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
 
 ## Where work stands (2026-08-17)
 
-Current pins — verified with `git submodule status` at super-repo `ec7077a`:
-**governance `c7cb3e8`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `6c8cceb`**.
+Current pins — verified with `git submodule status` at super-repo `124a686`:
+**governance `26887a6`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `ad075f4`**.
 
 **Phases 0, 1 and 2 are Complete.** **Phase 3 (BYO) is implementation-complete** — its fifth exit
 criterion is carried, not met: the install → self-register → upgrade → meter path has never run on a
@@ -37,6 +38,22 @@ Final tips: governance `62075e2`→`c7cb3e8`, backend `7c05a86`→`55db3bb`, bff
 **One task stands blocked:** T-0042 real GKE/EKS/AKS conformance — no code can unblock it; it waits
 on T-0003's cluster lane. With it wait SPEC-0045 AC3 and SPEC-0039 AC8's migration proof on real
 state.
+
+**Phase 3.5 (the design system) is COMPLETE** — all ten SPEC-0047 criteria green, plan exit criteria
+all ticked. It was opened and closed on 2026-08-17 under **ADR-0069** (Accepted same day), which
+discharges ADR-0015's never-delivered design-system follow-up. Tasks T-0045…T-0048, epic EP-24,
+webfrontend only — backend and bff were never touched.
+
+What changed, beyond colours: `webfrontend/src` had **no tokens at all** (232 hex literals across 16
+files) and the diff shipped the red/green encoding brand v2 exists to reject. Now every colour
+resolves from `src/styles/tokens.css`, `scripts/check-hex-literals.mjs` fails the build on a literal
+anywhere else, and the diff's meaning lives in text markers rather than tint. Severity stopped being
+a red-to-green heat ramp — under deuteranopia that made "low" and "critical" the same badge.
+
+**The AC10 capture run earned its place on first use.** It found that Astro renders style-object
+values verbatim, so `gap: 24` shipped as `gap:24` and the browser dropped it — **197 spacing values
+across nine files were being silently discarded**. No DOM assertion could see it; a grayscale
+screenshot could. Fixed, with a guard test.
 
 **The North Star deployment proof is 9/9 on this machine** — `scripts/north-star.sh`
 (`make dev-north-star`): enrolment token issued via the owner-only EnrolmentService door (:9094),
@@ -54,7 +71,10 @@ owner/member/reader + an owner grant for `admin@gitsaas.test` converge idempoten
 with the singular role claim `urn:zitadel:iam:org:project:roles` (`deploy/dev/dataplane.yaml`); the
 BFF session captures roles at login (bff `3b90090`, ADR-0049 d8); the webfrontend ships sign-in /
 sign-out / `/usage` nav (webfrontend `6c8cceb`). Login works in a browser and `/usage` renders the
-authenticated 8-dimension view.
+authenticated 8-dimension view. **Phase 3.5 then rebuilt that shell on the token layer** — the nav is
+now Repositories / Security / Usage, marked with `aria-current` plus weight plus a rule rather than
+colour, behind a skip link. The auth affordance itself is unchanged: cookie presence is still a
+presentation hint, never a decision.
 
 ## How to run it
 
@@ -72,6 +92,7 @@ assertions still bind. Say so when you report a green run.
 | `make dev-provision` | DB migrations + Zitadel OIDC client + role vocabulary (§2b) + login roundtrip |
 | `make dev-smoke` | deployments up, 200 over real TLS at `*.gitsaas.test` |
 | `make dev-north-star` | the full nine-step journey proof |
+| `cd webfrontend && npm run cvd` | regenerate the 15 CVD capture artifacts (SPEC-0047 AC10) |
 
 **Cold-restart ritual:** OpenBao quorum unseal per MVP-RUNBOOK §6a — the Shamir shares are
 operator-held. **Never automate the unseal and never re-initialize** (§6a: initialize is once per
@@ -84,6 +105,10 @@ secret `gitfrok-operator-pat` · enrolment token in secret `gitfrok-enrolment-to
 
 - backend: full gate chain — gofmt/vet/build/arch + the real-Postgres `-race` harness (port 15432).
 - governance: `governance/scripts/check-docs.sh`, contracts and policies checks.
+- webfrontend: `npx tsc --noEmit` && `npm test` (203 cases) && `npm run build`. The build is gated
+  by `prebuild`: the hex-literal check plus seven suites. **`usage-regression-pins` and
+  `readonly-cause` must pass UNMODIFIED** — editing one to make a change pass means the change moved
+  behaviour.
 - super-repo: `make verify` (includes `scripts/check-runbook.sh`) && `make codegen-check` &&
   `make surfaces-check` && `make dev-smoke`.
 
@@ -136,6 +161,16 @@ Condensed from `AGENTS.md` — read it before editing anything.
     applying it.
 17. git/v1 has no create-repository RPC — bare repos come back via the RUNBOOK §8a kubectl-exec
     recovery.
+18. **The CVD captures run against the stub BFF, not a cluster** — deliberately, because the
+    fixtures are state-dense in a way live data on a given day is not. They prove the ENCODINGS
+    survive grayscale and deuteranopia; they are not a live-cluster walk, and the artifacts are
+    gitignored (`npm run cvd` regenerates them; the reviewed verdict is in T-0048's exit record).
+19. **Six prototype surfaces are deliberately absent from the product**: Issues, Releases, a
+    pipelines list, repository Settings, the Admin area, and the marketing landing page. `./UI`
+    shows all six; none has a BFF route or a `PR-#`, and SPEC-0047 records them out of scope. A
+    prototype is not a requirement — do not "restore" them without a spec.
+20. **Deepfreeze (dark) ships tokenized but unreachable** — no user-facing toggle, by ADR-0069 open
+    decision 3. Both themes are defined together so they cannot drift; only the switch is missing.
 
 ## The storage picture, in one place
 
@@ -167,6 +202,25 @@ Condensed from `AGENTS.md` — read it before editing anything.
   install (T-0041); the only honored pin is `operator.image.digest`, which must agree with
   `deploy/releases/operator-app-0.1.0.release` (gated by `check-signed-releases.sh`).
 
+## What Phase 3.5 decided that changes how you build
+
+- **Tokens are the only source of colour** (ADR-0069). A hex literal anywhere in `webfrontend/src`
+  outside `styles/tokens.css` fails the build. If a literal is genuinely unavoidable, annotate it
+  `gf-allow-hex: <reason>` **on the same line** — the checker is line-scoped, which caught its own
+  author once.
+- **Never hue-only encoding.** Every status carries a glyph and a word from the ONE vocabulary in
+  `src/lib/status.ts`. A status added with a colour and nothing else fails
+  `tests/status-vocabulary.test.ts`, which enumerates the table rather than sampling it.
+- **Diffs are blue/orange with `+`/`−` text markers**, and the removed marker is U+2212 MINUS, not
+  the patch format's hyphen. Four channels carry add-versus-remove; the tint is the weakest.
+- **Astro does not add `px`.** A style object written `{ gap: 24 }` renders as `gap:24` and the
+  browser discards it — React's behaviour is the exception, not the rule. Use `'24px'`. A test walks
+  `src/**.astro` and fails on a bare number in a length property.
+- **Frost (light) is the only default.** Deepfreeze is fully tokenized so it cannot drift, but ships
+  no user-facing toggle — that is ADR-0069's open decision 3.
+- Fonts are **self-hosted WOFF2** under `webfrontend/public/fonts`; the org blocks the Google CDN and
+  a test asserts the built output never reaches it.
+
 ## History, compressed
 
 - **Phase 3.1 wave records** (exit pins all resolve): EP-19 durable stores/residency
@@ -175,6 +229,10 @@ Condensed from `AGENTS.md` — read it before editing anything.
   harness (backend@762d5f0, a669cef, super-repo@febf0f7) · EP-23 divergence gates + read-only cause
   (backend@bc30abd, 0238dee; bff@4059a23; webfrontend@08f42c4, 843a195) · T-0035 envelope throttle
   (backend@a9ed620, super-repo@9f526d0).
+- **Phase 3.5 wave records:** T-0045 tokens/fonts/gate (webfrontend@cdf032c) · T-0046 the CVD diff
+  and repo browsing (089c514) · T-0047 the status vocabulary, ratchet to zero (0f0dabd) · T-0048
+  usage, trend arrows, the Okabe–Ito series palette (56c91d1) · AC10 captures and the unitless-px
+  fix (ad075f4).
 - **Reviews at this repo's root** — records, not governance, but they save you from re-deriving:
   `phase-3.1-code-review.md` and `phase-3.1-plan-review.md` (findings acted on, produced ADR-0067) ·
   `phase-3-code-review.md` (CA trust-ordering defect fixed at backend `e722046`; opened T-0035) ·
@@ -183,7 +241,9 @@ Condensed from `AGENTS.md` — read it before editing anything.
   live proofs found the no-refspec fetch, the `authz.rego` that granted `repository.import` to no
   role, the SeaweedFS 200-on-missing-bucket, the S3 gateway serving unsigned reads, and the
   role-less merge-base read (backend 55db3bb). And: a green gate is not a correct spec — check the
-  port signature before believing "no exception exists".
+  port signature before believing "no exception exists". Phase 3.5 added the visual case: a DOM
+  assertion passes happily on a page whose layout has collapsed, which is why the CVD captures are a
+  criterion and not a nicety.
 
 ## Tool entry points
 
