@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `4b38656`**, **backend `d72998d`**, **bff `1f38368`**, **webfrontend `38fcd95`**.
+**governance `1cae679`**, **backend `a09042f`**, **bff `790e8d5`**, **webfrontend `c152501`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -70,6 +70,29 @@ grants; `webfrontend` only, may start now), **Tier B** (PRD requires it, no rout
 repository list, blame/history, pipelines, policy authoring; backend first), **Tier C** (the
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
+
+**TIER B IS COMPLETE (EP-26 closed, 2026-08-19)** — all four surfaces, each built to the line its
+ADR drew. Repository list (PR-24), blame + history (PR-25/PR-8), pipeline **runs** (PR-26's runs
+half), policy **visibility** (PR-16's read half).
+
+**Two halves are openly undelivered, and both are decisions rather than gaps:**
+
+- **PR-26's job logs** — **ADR-0072**. Job output does not exist anywhere: `api.Job` withholds raw
+  output by design and PR-11 destroys the sandbox at job end. Retaining it needs a decision covering
+  capture, redaction, retention and size (fair-use dimensions), who may read, and residency. The
+  ADR records its own risk: deferring is cautious about disclosure and reckless about usefulness,
+  because a CI view that cannot show why a job failed pushes people back to `kubectl logs`.
+- **PR-27's policy authoring** — **ADR-0073**. Policies live in `governance/policies/` and ADR-0001
+  makes governance the SoT, so a web form that writes policy is a second source of truth for the
+  same decisions. One boundary is fixed: **a tenant-authored policy may only ever narrow, never
+  widen.** Its risk is sharper — PR-16's persona is a compliance owner, and telling that person to
+  open a PR against a Rego bundle may be what the product exists not to do.
+
+**Both deferrals are held by contract gates, not by intention.** `check-contracts.sh` **check 13**
+forbids a job-output field on `CIJob`; **check 14** forbids an authoring verb on
+`PolicyDecisionPoint`. Each is paired with a fixture proving it can fail. If you are about to add
+"just a log URL" or "just an upload endpoint", the gate is what stops you, and it is stopping you on
+purpose.
 
 **Tier B surface 2 (blame and history, PR-25) is DONE end to end** — SPEC-0053, T-0056…T-0058. It
 completes PR-8, which has named both since Phase 1 and had neither.
