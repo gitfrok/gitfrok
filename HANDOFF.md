@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `f556a1a`**, **backend `0c853b1`**, **bff `1c52899`**, **webfrontend `39e224b`**.
+**governance `4b38656`**, **backend `d72998d`**, **bff `1f38368`**, **webfrontend `38fcd95`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -70,6 +70,26 @@ grants; `webfrontend` only, may start now), **Tier B** (PRD requires it, no rout
 repository list, blame/history, pipelines, policy authoring; backend first), **Tier C** (the
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
+
+**Tier B surface 2 (blame and history, PR-25) is DONE end to end** — SPEC-0053, T-0056…T-0058. It
+completes PR-8, which has named both since Phase 1 and had neither.
+
+Its rule is **the phase's first about an identity rather than an absence**, and it is the easiest to
+undo by accident: a commit's author is whatever the committer's git config said, git verifies none of
+it, and neither does this platform. So the contract names the fields `git_author_name` and friends,
+**`check-contracts.sh` check 12 forbids `actor_id`/`principal_id` on `CommitIdentity` by compiled
+descriptor**, the BFF test asserts the same on the JSON the browser reads, and the views carry the
+note, label the name at the point of use, and render **no avatar, no profile link and no `<img>` at
+all** — because an avatar beside a name *is* the claim the platform knows who that is.
+
+Two amendments worth knowing before you touch this surface:
+
+- **A filename beginning with `-` is legal**, so `validRepositoryPath` does NOT reject one and must
+  not start to — three shipped surfaces browse such files. The `--` separator is what makes a dash
+  inert, and `historyArgs`/`blameArgs` are named functions so the argument ORDER is testable without
+  running git.
+- **Rename and copy detection are deliberately off and asserted off.** A heuristic rendered without
+  its uncertainty is the overclaim this surface is about.
 
 **Tier B surface 1 (the repository list, PR-24) is DONE end to end** — the first Phase 4 landing to
 leave governance and webfrontend. It also found a gap nobody had recorded: **the Repository context
