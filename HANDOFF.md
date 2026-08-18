@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `f7a8db3`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `6d61827`**.
+**governance `6d66175`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `1141bc5`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -71,7 +71,10 @@ repository list, blame/history, pipelines, policy authoring; backend first), **T
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
 
-**T-0049 is Done** (webfrontend `6d61827`, SPEC-0048 AC1–AC11 proven): a merge request can now be
+**Three of Tier A's four items are Done.** T-0050 code search is the only one left, and it is not
+yet specced.
+
+**T-0049** (webfrontend `6d61827`, SPEC-0048 AC1–AC11 proven): a merge request can now be
 **opened, reviewed and merged from the browser**. PR-9's write half had been served by the BFF since
 T-0016 and reached by `curl` and nothing else. Two traps were found before any code was written, and
 both would have produced a control that silently never works: **the MR writes are form-encoded**
@@ -81,6 +84,30 @@ yields UNSPECIFIED with no error. Both are pinned by test. SPEC-0048's AC8 was *
 implementation**: its ≥ 25 L\* threshold between two status tones is unsatisfiable, because every
 status ink in `tokens.css` sits between L\* 38 and L\* 46 — ADR-0069 law 1 governs foreground
 against background, law 2's redundant channel separates one status from another.
+
+**T-0051 and T-0052** (webfrontend `1141bc5`, SPEC-0050 and SPEC-0051 AC1–AC11 each): evidence packs
+and auditor grants, landed together because they are one surface. The shell gains its first new
+destination since the design system: **Compliance**, pointing at the evidence-pack page rather than
+at a `/compliance` index, because an index would be a nav destination with no BFF route behind it.
+
+Three traps, all recorded in the specs before code:
+
+- **`response.ok` means nothing on the pack stream.** `getPack` writes `200` and its content type on
+  the FIRST chunk, so a failure after that returns a truncated body with a success status.
+  `final_chunk` is the only authority, and `readPackStream` treats truncation as the **default** that
+  has to be cleared rather than a condition to be detected.
+- **The server may bound an issued grant's expiry**, so the issue relay does not carry the grant
+  through its redirect — the list re-reads it, because the server's record is the only place that
+  value is true.
+- **A grant's state is never computed here.** `src/lib/grants.ts` deliberately has no function that
+  turns an `expires_at` into a state; validity is read at decision time (SPEC-0033 AC7), and the stub
+  carries a grant whose expiry was 2020 and whose state is `ACTIVE` to keep that honest.
+
+**The grayscale review earned its place a third time.** The truncated pack rendered a **"✓ Ready"
+badge above the notice saying the pack was not whole**. Both strings were true — READY is the
+*assembly* state, and assembly did succeed — but the badge is the most glanceable thing on the page,
+so a reader who skimmed it took the pack as complete. Every test passed while it was on screen. The
+notice now precedes the badge and a test asserts document order.
 
 **The North Star deployment proof is 9/9 on this machine** — `scripts/north-star.sh`
 (`make dev-north-star`): enrolment token issued via the owner-only EnrolmentService door (:9094),
