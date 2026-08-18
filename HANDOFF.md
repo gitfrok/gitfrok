@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `792e8c3`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `a668de5`**.
+**governance `f556a1a`**, **backend `0c853b1`**, **bff `1c52899`**, **webfrontend `39e224b`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -70,6 +70,32 @@ grants; `webfrontend` only, may start now), **Tier B** (PRD requires it, no rout
 repository list, blame/history, pipelines, policy authoring; backend first), **Tier C** (the
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
+
+**Tier B surface 1 (the repository list, PR-24) is DONE end to end** — the first Phase 4 landing to
+leave governance and webfrontend. It also found a gap nobody had recorded: **the Repository context
+had never had a durable store.** Its only adapter was `memstore`, whose own header said the Postgres
+one was owed with T-0004 and T-0010 — both Done, neither delivered it. So the registry recording
+which repositories exist was a map that emptied on restart, while the repositories themselves are
+bare git repositories on block volumes that do not. **ADR-0071** (Accepted) records the finding,
+adds the Postgres adapter, and decides that the registry — not the disk — is the product's truth for
+existence: a bare repository with no registry row is absent from every product surface **by
+consequence, not by defect**, which is the RUNBOOK §8a recovery interaction with carried limit 17.
+
+`index.astro` is no longer the T-0001 stub.
+
+**Three things that phase caught, all worth carrying:**
+
+- **The isolation proofs had been passing as skips.** Carried limit 5 — backend integration tests
+  skip silently without `TEST_DATABASE_URL` — and the six that skip are exactly the cross-tenant
+  proofs. Port-forwarded to the dev Postgres they **failed immediately**. Now 6/6 with zero skips.
+  A green summary with six skips reads identically in a report; count them.
+- **The architecture fitness function refused the first design.** `List` needs an authorization
+  answer, so it imported the Policy context — and **Repository is a leaf pinned at fan-out zero**.
+  The context now declares its own `api.Authorizer` and the dataplane composition root adapts the
+  PDP onto it. If you add a use case here that needs a decision, invert it the same way.
+- **The first contract commit put `ListRepositories` on `RepositoryReader`**, which git-storaged
+  serves — a process that reads bare repos off block volumes and holds no registry. It is now its
+  own `RepositoryRegistry` service, served by the data plane.
 
 **Tier A is COMPLETE** (T-0049, T-0050, T-0051, T-0052 — EP-25 closed). Every BFF route that had no
 UI now has one. **ADR-0070 was Accepted 2026-08-18** and the PRD carries a Phase 4 table with
