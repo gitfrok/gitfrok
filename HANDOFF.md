@@ -3,7 +3,7 @@
 One page for an incoming session or a new agent. **`governance/` is the Source of Truth (ADR-0001);**
 where this file disagrees with it, governance is right and this file is stale. This file says *where
 work stands and how to run it*; governance says *what and why*. Verified against the tree on
-2026-08-17.
+2026-08-18.
 
 ## Navigate
 
@@ -17,13 +17,16 @@ work stands and how to run it*; governance says *what and why*. Verified against
 | how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md`, `ci-gates.md` |
 | what a review already found | `phase-2-code-review.md`, `phase-2-code-review-wave2.md`, `phase-3-code-review.md`, `phase-3.1-code-review.md`, `phase-3.1-plan-review.md` (this repo's root) |
 | how the UI must look and behave | `governance/docs/adr/0069-cvd-first-design-system.md` → `docs/specs/SPEC-0047-*` (binding token table) |
+| which surfaces get built next, and why some may not start | `governance/docs/adr/0070-full-product-surface.md` (Proposed) → `docs/plans/phase-4-full-product-surface.md` |
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
 
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `26887a6`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `ad075f4`**.
+**governance `f7a8db3`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `6d61827`**.
+Backend and bff are untouched by Phase 4 so far; the phase has stayed in
+`governance` + `webfrontend`, as Phase 3.5 did.
 
 **Phases 0, 1 and 2 are Complete.** **Phase 3 (BYO) is implementation-complete** — its fifth exit
 criterion is carried, not met: the install → self-register → upgrade → meter path has never run on a
@@ -54,6 +57,30 @@ a red-to-green heat ramp — under deuteranopia that made "low" and "critical" t
 values verbatim, so `gap: 24` shipped as `gap:24` and the browser dropped it — **197 spacing values
 across nine files were being silently discarded**. No DOM assertion could see it; a grayscale
 screenshot could. Fixed, with a guard test.
+
+**Phase 4 (the full product surface) is OPEN** — planned 2026-08-18 under **ADR-0070**
+(*Proposed*), plan `governance/docs/plans/phase-4-full-product-surface.md`, epics EP-25…EP-27.
+
+It exists because three inventories of the web surface disagree: the BFF serves **eighteen routes
+and ten have a UI**, the PRD requires twenty-three `PR-#` rows and several render nowhere, and the
+`./UI` prototype shows a larger product than either. ADR-0070 sets a **route-before-pixel** ordering
+law — no UI before the BFF route it reads, no route before the backend port it shapes — and tiers
+the work: **Tier A** (route exists, UI does not: MR actions, code search, evidence packs, auditor
+grants; `webfrontend` only, may start now), **Tier B** (PRD requires it, no route serves it:
+repository list, blame/history, pipelines, policy authoring; backend first), **Tier C** (the
+prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
+PR-24…PR-32).
+
+**T-0049 is Done** (webfrontend `6d61827`, SPEC-0048 AC1–AC11 proven): a merge request can now be
+**opened, reviewed and merged from the browser**. PR-9's write half had been served by the BFF since
+T-0016 and reached by `curl` and nothing else. Two traps were found before any code was written, and
+both would have produced a control that silently never works: **the MR writes are form-encoded**
+(a JSON body reaches `r.ParseForm()` as no fields), and **the disposition must travel as the
+protobuf enum name** — `codereviewv1.ReviewDisposition_value["APPROVE"]` is a Go map miss that
+yields UNSPECIFIED with no error. Both are pinned by test. SPEC-0048's AC8 was **amended before
+implementation**: its ≥ 25 L\* threshold between two status tones is unsatisfiable, because every
+status ink in `tokens.css` sits between L\* 38 and L\* 46 — ADR-0069 law 1 governs foreground
+against background, law 2's redundant channel separates one status from another.
 
 **The North Star deployment proof is 9/9 on this machine** — `scripts/north-star.sh`
 (`make dev-north-star`): enrolment token issued via the owner-only EnrolmentService door (:9094),
@@ -169,6 +196,10 @@ Condensed from `AGENTS.md` — read it before editing anything.
     pipelines list, repository Settings, the Admin area, and the marketing landing page. `./UI`
     shows all six; none has a BFF route or a `PR-#`, and SPEC-0047 records them out of scope. A
     prototype is not a requirement — do not "restore" them without a spec.
+    **Superseded in principle, still binding in practice (2026-08-18):** **ADR-0070** is the spec
+    this limit asks for, and it adopts all six as ADR-0070 Tier C — but it is **Proposed**, so none
+    of them may be specced or built until it is Accepted and the PRD carries PR-28…PR-32. The bar
+    did not drop; it moved to an ADR someone has to defend.
 20. **Deepfreeze (dark) ships tokenized but unreachable** — no user-facing toggle, by ADR-0069 open
     decision 3. Both themes are defined together so they cannot drift; only the switch is missing.
 
