@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `6d66175`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `1141bc5`**.
+**governance `1e7da37`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `195ef83`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
