@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `1e7da37`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `195ef83`**.
+**governance `792e8c3`**, **backend `55db3bb`**, **bff `3b90090`**, **webfrontend `a668de5`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -71,8 +71,11 @@ repository list, blame/history, pipelines, policy authoring; backend first), **T
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
 
-**Three of Tier A's four items are Done.** T-0050 code search is the only one left, and it is not
-yet specced.
+**Tier A is COMPLETE** (T-0049, T-0050, T-0051, T-0052 — EP-25 closed). Every BFF route that had no
+UI now has one. **ADR-0070 was Accepted 2026-08-18** and the PRD carries a Phase 4 table with
+PR-24…PR-32, so Tier B and Tier C are unblocked at the requirement level. Tier C keeps its second
+gate: issues, releases, repository settings and the admin area each need their own Proposed ADR
+before a spec, because each is a bounded context under ADR-0022 rather than a screen.
 
 **T-0049** (webfrontend `6d61827`, SPEC-0048 AC1–AC11 proven): a merge request can now be
 **opened, reviewed and merged from the browser**. PR-9's write half had been served by the BFF since
@@ -102,6 +105,25 @@ Three traps, all recorded in the specs before code:
 - **A grant's state is never computed here.** `src/lib/grants.ts` deliberately has no function that
   turns an `expires_at` into a state; validity is read at decision time (SPEC-0033 AC7), and the stub
   carries a grant whose expiry was 2020 and whose state is `ACTIVE` to keep that honest.
+
+**T-0050** (webfrontend `a668de5`, SPEC-0049 AC1–AC12): code search, and the sharpest empty state in
+the product. Three meanings share one wire shape — *nothing matched*, *you may not see what matched*,
+and *nothing is indexed* — and `SearchPage` carries no total, because SPEC-0035 AC3 makes
+non-enumeration a type property. "No results found" picks one of the three and states it as fact; on
+the second it tells an unauthorized reader nothing exists where something does, which is PR-19's leak
+inverted. The index status narrows it, and its **empty answer is a signal rather than an error**:
+`readIndexFreshness(null)` is *unknown*, `readIndexFreshness({entries: []})` is *nothing indexed*.
+
+**Two defects surfaced during T-0050 that it did not cause, and both were live for a while:**
+
+- **Seven pages nested a second `<main>` landmark** inside the shell's, dating from the Phase 3.5
+  shell. Invalid HTML and two `main` landmarks on every rendered page. Fixed everywhere.
+- **The e2e journeys asserted post-submit content against a signed-out render.** The session travels
+  as a request header (Chromium accepts a `__Host-` cookie only over https) and Playwright does not
+  apply those headers when the browser follows the 303 every form POST answers with. Every content
+  assertion after a form submit was passing for the wrong reason. **This is a standing harness
+  limit:** a submit proves the redirect, and a `page.goto` of the resulting URL proves what that URL
+  renders. Do not assert content directly after a submit.
 
 **The grayscale review earned its place a third time.** The truncated pack rendered a **"✓ Ready"
 badge above the notice saying the pack was not whole**. Both strings were true — READY is the
