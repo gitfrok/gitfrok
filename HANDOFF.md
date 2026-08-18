@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `1cae679`**, **backend `a09042f`**, **bff `790e8d5`**, **webfrontend `c152501`**.
+**governance `7530e82`**, **backend `a09042f`**, **bff `790e8d5`**, **webfrontend `c152501`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -70,6 +70,25 @@ grants; `webfrontend` only, may start now), **Tier B** (PRD requires it, no rout
 repository list, blame/history, pipelines, policy authoring; backend first), **Tier C** (the
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
+
+**TIER C'S FIVE ADRs ARE WRITTEN AND ALL FIVE ARE PROPOSED (2026-08-19)** — ADR-0074 issues,
+ADR-0075 releases, ADR-0076 repository settings, ADR-0077 admin area, ADR-0078 marketing surface.
+**None of them adopts its surface**, and no Tier C spec may be written until the relevant one is
+Accepted. Read together they say something the tier's framing did not: **Tier C is four bounded
+contexts and a separate deployment, not four screens and a page.** Two recommend a smaller
+alternative than PR-28…PR-32 describe — an external issue tracker, and releases as tags plus notes
+with no artifacts.
+
+The two worth reading before touching anything nearby:
+
+- **ADR-0076** names what a settings page does quietly. PR-10 says branch protection and approval
+  requirements are **policy, not UI toggles**, and a settings page is exactly where that erodes —
+  by a "require approvals" checkbox appearing where a user would look for one. It also records that
+  visibility and per-repository membership are **authorization model changes wearing a form's
+  clothing**, and that tenant-level roles may be coarser than customers assume they bought.
+- **ADR-0077** observes PR-31's "without gaining repository read access" is already solved for a
+  different reader by **SPEC-0033's auditor grants**. An `admin` role with unbounded audit read
+  would make that machinery decorative.
 
 **TIER B IS COMPLETE (EP-26 closed, 2026-08-19)** — all four surfaces, each built to the line its
 ADR drew. Repository list (PR-24), blame + history (PR-25/PR-8), pipeline **runs** (PR-26's runs
