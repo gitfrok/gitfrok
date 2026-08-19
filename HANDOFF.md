@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `7530e82`**, **backend `a09042f`**, **bff `790e8d5`**, **webfrontend `c152501`**.
+**governance `666ecbe`**, **backend `4668f75`**, **bff `9a76f1b`**, **webfrontend `1f5fd65`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -71,8 +71,27 @@ repository list, blame/history, pipelines, policy authoring; backend first), **T
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
 
-**TIER C'S FIVE ADRs ARE WRITTEN AND ALL FIVE ARE PROPOSED (2026-08-19)** — ADR-0074 issues,
-ADR-0075 releases, ADR-0076 repository settings, ADR-0077 admin area, ADR-0078 marketing surface.
+**TIER C HAS ITS FIRST SURFACE: releases (PR-29's tags-and-notes half) is DONE end to end** —
+**ADR-0075 Accepted** with the alternative it recommended, SPEC-0056, T-0064…T-0066. A release here
+is **a name for a commit plus prose about it**, and there are **no artifacts** — check 15 in
+`check-contracts.sh` keeps `release/v1` free of a field for one, because the moment this platform
+serves a downloadable artifact it is in a customer's supply chain.
+
+**The rule to know before touching this surface:** a tag is a mutable pointer, so a release records
+**the commit its tag pointed at when published**, and the page says when the two have diverged —
+*agrees* (renders nothing), *moved*, *gone*, kept apart because a deleted tag and a repointed one
+are different events. The comparison happens in the **web page** because nowhere else may hold both
+facts: the Release context may not ask git what a tag means (ADR-0022) and Repository/Git knows
+nothing about releases.
+
+Two mechanics worth carrying: `git-storaged`'s `ListTags` **dereferences annotated tags**
+(`*objectname`) or a release would record a tag object's SHA as a commit; and the Release context has
+**no in-memory constructor**, because a record of what was announced that empties with a process is
+the gap ADR-0071 closed.
+
+**THE OTHER FOUR TIER C ADRs REMAIN PROPOSED (2026-08-19)** — ADR-0074 issues,
+ADR-0076 repository settings, ADR-0077 admin area, ADR-0078 marketing surface — plus **ADR-0074
+issues**, which recommends considering an external tracker over building PR-28 at all.
 **None of them adopts its surface**, and no Tier C spec may be written until the relevant one is
 Accepted. Read together they say something the tier's framing did not: **Tier C is four bounded
 contexts and a separate deployment, not four screens and a page.** Two recommend a smaller
