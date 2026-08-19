@@ -24,7 +24,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 ## Where work stands (2026-08-17)
 
 Current pins — verified with `git submodule status` at super-repo `124a686`:
-**governance `666ecbe`**, **backend `4668f75`**, **bff `9a76f1b`**, **webfrontend `1f5fd65`**.
+**governance `ad99778`**, **backend `4668f75`**, **bff `9a76f1b`**, **webfrontend `ea0677f`**.
 Backend and bff are untouched by Phase 4 so far; the phase has stayed in
 `governance` + `webfrontend`, as Phase 3.5 did.
 
@@ -70,6 +70,17 @@ grants; `webfrontend` only, may start now), **Tier B** (PRD requires it, no rout
 repository list, blame/history, pipelines, policy authoring; backend first), **Tier C** (the
 prototype shows it, nothing requires it; blocked until ADR-0070 is Accepted and the PRD carries
 PR-24…PR-32).
+
+**ADR-0078 IS ACCEPTED AND THERE WAS NOTHING TO MOVE.** `webfrontend`'s root has been the repository
+list since T-0055; no marketing page has ever existed here. What acceptance bought is a **guard**
+(T-0067): the root now fails a test if it becomes a splash page, and the failure message names
+ADR-0078 and says where a marketing page belongs instead. Verified it fails — a guard written against
+a mistake nobody has made yet is the easiest kind to write vacuously.
+
+**PR-32 is blocked on a decision this repository cannot make.** A marketing surface must be its own
+repository on its own origin (decisions 1 and 2, accepted and unbuilt), and the super-repo stores
+pins only. **If nobody will create and own one, withdraw PR-32 from the PRD** — ADR-0078 says so, and
+an open requirement nobody can start reads as planned work.
 
 **TIER C HAS ITS FIRST SURFACE: releases (PR-29's tags-and-notes half) is DONE end to end** —
 **ADR-0075 Accepted** with the alternative it recommended, SPEC-0056, T-0064…T-0066. A release here
