@@ -84,6 +84,12 @@ func main() {
 	// proves the severity rule allows a clean merge and fails CLOSED when the gate is engaged but
 	// its findings facts did not assemble. Decide-only — the backing store is never touched, so
 	// the READS assertion below is unaffected.
+	//
+	// valid_approvals is 2 while required_approvals is 1 because ADR-0085's approval_floor is a
+	// SECOND inequality in the bundle: required_approvals can raise the bar, never lower it. These
+	// cases are about the findings gate, so they clear the floor deliberately — otherwise the
+	// clean case denies on approvals and the missing-facts case denies for two reasons at once,
+	// which would stop proving that the findings facts are what failed closed.
 	owner := pep.Subject{ID: "u-3", TenantID: "acme", Roles: []string{"owner"}}
 	mergeCases := []struct {
 		name    string
@@ -92,12 +98,12 @@ func main() {
 		{"merge-findings-clean", map[string]string{
 			"findings_gate":             "true",
 			"findings_highest_severity": "MEDIUM",
-			"valid_approvals":           "1",
+			"valid_approvals":           "2",
 			"required_approvals":        "1",
 		}},
 		{"merge-findings-missing-facts", map[string]string{
 			"findings_gate":      "true",
-			"valid_approvals":    "1",
+			"valid_approvals":    "2",
 			"required_approvals": "1",
 		}},
 	}
