@@ -179,6 +179,15 @@ jobs:
       - name: make codegen-check
         run: make codegen-check
 
+      # --- SPEC-0066: the token layer follows from its source ------------------------------------
+      # Same composition-boundary reasoning as codegen-check above, one repo narrower: webfrontend's
+      # tokens.css is generated from design/tokens.json (ADR-0091), so a hand edit to the output or
+      # a value change without regenerating is drift. It runs here rather than only in webfrontend's
+      # own prebuild because npm ci for that repo is already done two steps up, and a gate that
+      # exists in one place is a gate the composition can rely on.
+      - name: make tokens-check
+        run: make tokens-check
+
       # --- T-0005: the authorization path across repos (SPEC-0002) --------------------------------
       # The other check that can only exist here. governance authors the Rego, backend evaluates it,
       # bff asks over gRPC, and each consumer generates its own copy of the policy contract — so all

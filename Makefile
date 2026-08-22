@@ -34,6 +34,9 @@ rulesets-check: ## fail if main-guard drifted, or if a pull-request rule came ba
 	@./scripts/apply-rulesets.sh check
 codegen-check: ## fail if any consumer's gen/ drifted from the pinned contracts (T-0020, ADR-0032)
 	@./scripts/check-codegen-fresh.sh
+
+tokens-check: ## SPEC-0066 AC4: fail if webfrontend/src/styles/tokens.css drifted from design/tokens.json, or a status colour lost its glyph (AC3)
+	@cd webfrontend && npm run --silent check:tokens
 policy-check: ## T-0005: run the real authz path — bff PEP → gRPC → backend PDP → governance/policies
 	@./scripts/check-policy-composition.sh
 threshold-parity: ## fail if the merge gate's Go severity threshold drifted from the reviewed rego (SPEC-0029 AC3)
