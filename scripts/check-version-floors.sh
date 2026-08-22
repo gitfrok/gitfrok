@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Super-repo fitness function: toolchain floors hold across the composition (ADR-0023).
-# Go 1.26 (backend, bff), Node >=26 (webfrontend). Guards against a submodule silently
+# Super-repo fitness function: toolchain floors hold across the composition (ADR-0089).
+# Go 1.27 (backend, bff), Node >=26 (webfrontend). Guards against a submodule silently
 # dropping below the pinned floor. T-0001 wires this; CI runs it on the super-repo.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 fail=0
 report() { echo "VERSION-FLOOR VIOLATION: $1"; fail=1; }
 
-GO_FLOOR="1.26"
+GO_FLOOR="1.27"
 NODE_FLOOR="26"
 
 check_go_mod() { # check_go_mod <path>
