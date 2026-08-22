@@ -34,8 +34,20 @@
 .github/prompts/
 .github/skills/
 openspec/
+# Same category, different tools: .agents/skills is another plugin drop, and
+# skills-lock.json is the per-developer lockfile that records which ones this
+# machine resolved. Neither is generated FROM governance and neither is input TO
+# anything the composition builds, so the reasoning above applies unchanged.
+.agents/
+skills-lock.json
 
 # Generated wholesale by the graphify tool and regenerated on every update — a navigation
 # aid, never a source of truth (CLAUDE.md). Committing it would put a derived, machine-
 # written map under review alongside the code it describes.
 graphify-out/
+
+# macOS Finder metadata. Written by the operating system into whatever directory
+# a Finder window has looked at, so it appears at the root and under .claude/
+# with no action from anyone, and it survives being deleted. Nothing about it is
+# this project's; it just kept showing up as untracked noise beside real work.
+.DS_Store
