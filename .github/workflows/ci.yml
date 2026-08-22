@@ -206,9 +206,15 @@ jobs:
   # This is the only lane that can check the composition on Darwin: surfaces-check needs all five
   # repos checked out, which is what `submodules: recursive` gives it and a standalone repo cannot.
   #
-  # A SEPARATE JOB, WHICH MEANS A SEPARATE REQUIRED-CHECK CONTEXT — registered alongside
-  # "super-repo fitness gates" by scripts/apply-rulesets.sh. Until `make rulesets-apply` runs with an
-  # admin token, this lane reports and does not block, in this repo and in the other four.
+  # A SEPARATE JOB WITH ITS OWN CHECK CONTEXT. No check context in this repo is a required check,
+  # and none is pending: ADR-0054 (Accepted) deliberately registers none — GitHub evaluates required
+  # checks only when a pull request merges, and with direct pushes the normal way work lands they
+  # would never fire, so listing one would advertise a protection that is not there. This lane's
+  # verdict enforces like every lane's: it runs on push to main and on pull request, and under
+  # ADR-0053 decision 2 a red main is a stop-everything condition — the next commit fixes it or
+  # reverts it. scripts/apply-rulesets.sh registers only the ADR-0054 main-guard ruleset and never
+  # registers check contexts. Earlier text here promised a future required-check registration;
+  # that contradicted ADR-0054 and was removed.
   portability:
     name: macOS portability
     runs-on: macos-latest
