@@ -96,6 +96,29 @@ all_want=$(for file in $MANIFESTS; do expected_images "$file"; done | sort -u)
 unmapped=$(comm -13 <(printf '%s\n' "$all_want") <(printf '%s\n' "$all_actual"))
 [ -z "$unmapped" ] || report "images in deploy/dev with no $VERSIONS entry: $(echo "$unmapped" | tr '\n' ' ')"
 
+# ------------------------------------------------- ADR-0090: the git-storaged base pin
+# ADR-0048 decision 4 called the base a "version floor of record", recorded in versions.env and
+# asserted here. It never was: the only copy lived in the Dockerfile, ungated, while the git it
+# carried fell three Alpine minors behind the flags the rebase landing needs. This closes that.
+#
+# The runtime stage is the last FROM with no `AS` clause, which is what the pattern below matches.
+GITSTORAGED_DOCKERFILE=backend/Dockerfile.gitstoraged
+if [ ! -f "$GITSTORAGED_DOCKERFILE" ]; then
+  report "$GITSTORAGED_DOCKERFILE is missing — the git-storaged base pin cannot be checked"
+elif [ -z "${GIT_STORAGED_BASE_IMAGE:-}" ]; then
+  report "$VERSIONS records no GIT_STORAGED_BASE_IMAGE (ADR-0090 decision 2)"
+else
+  base_from=$(sed -nE 's/^FROM[[:space:]]+([^[:space:]]+)[[:space:]]*$/\1/p' "$GITSTORAGED_DOCKERFILE" | tail -1)
+  if [ "$base_from" = "$GIT_STORAGED_BASE_IMAGE" ]; then
+    echo "  ok    git-storaged runtime base matches $VERSIONS ($GIT_STORAGED_BASE_IMAGE)"
+  else
+    report "$GITSTORAGED_DOCKERFILE ships FROM [$base_from], $VERSIONS says [$GIT_STORAGED_BASE_IMAGE]"
+  fi
+fi
+
+# The base is a third-party pin like any other, so it takes the shape and resolution checks below.
+all_want=$(printf '%s\n' "$all_want" "${GIT_STORAGED_BASE_IMAGE:-}" | grep -v '^$' | sort -u)
+
 # ----------------------------------------------------------------- ADR-0034: pin shape
 # These were a WARN until ADR-0034 was Accepted. A floating tag is whatever the node last pulled,
 # which is the opposite of a version floor of record — and a warning nobody must act on is a warning
