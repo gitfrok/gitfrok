@@ -18,6 +18,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 | how work is executed | `governance/docs/process/agdd.md`, `agentic-sdlc.md`, `definition-of-done.md`, `ci-gates.md` |
 | how the UI must look and behave | **ADR-0091** → **SPEC-0066** (the token source) → SPEC-0047 (the CVD laws, still binding) → ADR-0079/SPEC-0060 (the shell and the type scale) |
 | how a token gets changed | `webfrontend/design/README.md` — edit `tokens.json`, `npm run tokens`, commit both |
+| the brand kit the CVD laws come from | `webfrontend/design/gitfrok-brand-identity-v2.md` — §2 states the three laws |
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
 | what a review already found | `phase-2-code-review.md`, `-wave2.md`, `phase-3-code-review.md`, `phase-3.1-code-review.md`, `phase-3.1-plan-review.md` (this repo's root) |
@@ -192,39 +193,37 @@ Condensed from `AGENTS.md` — read it before editing anything.
 4. **`--gf-font-display` (`'Baloo 2'`) is unresolved** — the token exists and the comp's CDN import
    supplied the face, but ADR-0069 decision 5 (carried forward by ADR-0091) requires self-hosted
    WOFF2. Vendor the WOFF2 or retire the token. SPEC-0066 AC6 only forbids the CDN reference.
-5. **`./UI` at this repo's root is redundant and still untracked** — its contents live in
-   `webfrontend/design/` with the blocked CDN imports stripped. Deleting it is safe; nobody has.
-6. **The release-trust door is unmounted in dev** (no dev-safe seed path, MVP-RUNBOOK §6b). The
+5. **The release-trust door is unmounted in dev** (no dev-safe seed path, MVP-RUNBOOK §6b). The
    controlplane log says so on every start.
-7. **Usage dimensions show gap states** until dataplane telemetry emission is wired.
-8. `GITFROK_CLOUD=gke` is **annotated dev fiction**; real-cluster proof is T-0042's.
-9. **Backend integration tests skip without `TEST_DATABASE_URL`** — and the ones that skip are the
+6. **Usage dimensions show gap states** until dataplane telemetry emission is wired.
+7. `GITFROK_CLOUD=gke` is **annotated dev fiction**; real-cluster proof is T-0042's.
+8. **Backend integration tests skip without `TEST_DATABASE_URL`** — and the ones that skip are the
     cross-tenant isolation proofs. **Count the skips**; a green summary with six skips reads
     identically to one without.
-10. **Dependabot advisories are open** on the bff and webfrontend default branches — pre-existing.
-11. **One-node limits stay "no" on this cluster:** failover, CI gVisor RuntimeClass under rootless
+9. **Dependabot advisories are open** on the bff and webfrontend default branches — pre-existing.
+10. **One-node limits stay "no" on this cluster:** failover, CI gVisor RuntimeClass under rootless
     podman, durability quorum — all need the cluster lane.
-12. Proxy-only egress is unsolved (ADR-0017 follow-up) and can block a sale outright.
-13. The dataplane gRPC door is unauthenticated (Phase-2 limit (d)): tenant/actor/roles come off the
+11. Proxy-only egress is unsolved (ADR-0017 follow-up) and can block a sale outright.
+12. The dataplane gRPC door is unauthenticated (Phase-2 limit (d)): tenant/actor/roles come off the
     wire; mitigation is network isolation + RLS.
-14. Phase-2 in-process state does not survive a restart (attribution projection, pack assembly,
+13. Phase-2 in-process state does not survive a restart (attribution projection, pack assembly,
     code-search index; the index also has no cap — limit (e)).
-15. Two sources of schema truth: `deploy/dev/postgres.yaml`'s ConfigMap vs `backend/` migrations —
+14. Two sources of schema truth: `deploy/dev/postgres.yaml`'s ConfigMap vs `backend/` migrations —
     they agree; nothing enforces it.
-16. Per-consumer codegen gating is impossible while each `buf.gen.yaml` reads
+15. Per-consumer codegen gating is impossible while each `buf.gen.yaml` reads
     `../governance/contracts` — freshness is gated at the super-repo pin bump.
-17. First-party images in `deploy/dev` are pinned by tag, not digest (ADR-0035 decision 4).
-18. Host DNS for `*.gitsaas.test` needs root, so `dev-up.sh` prints the snippet rather than applying it.
-19. `git/v1` has no create-repository RPC — bare repos come back via RUNBOOK §8a's kubectl-exec recovery.
-20. **The CVD captures run against the stub BFF, not a cluster** — deliberately: the fixtures are
+16. First-party images in `deploy/dev` are pinned by tag, not digest (ADR-0035 decision 4).
+17. Host DNS for `*.gitsaas.test` needs root, so `dev-up.sh` prints the snippet rather than applying it.
+18. `git/v1` has no create-repository RPC — bare repos come back via RUNBOOK §8a's kubectl-exec recovery.
+19. **The CVD captures run against the stub BFF, not a cluster** — deliberately: the fixtures are
     state-dense in a way live data on a given day is not. They prove the ENCODINGS survive grayscale
     and deuteranopia; they are not a live walk, and the artifacts are gitignored.
-21. **Deepfreeze (dark) ships tokenized but unreachable** — no user-facing toggle, by ADR-0069 open
+20. **Deepfreeze (dark) ships tokenized but unreachable** — no user-facing toggle, by ADR-0069 open
     decision 3, carried forward. Both themes come from one source so they cannot drift.
-22. **PR-32 (marketing) is blocked on a decision this repository cannot make** — ADR-0078 requires
+21. **PR-32 (marketing) is blocked on a decision this repository cannot make** — ADR-0078 requires
     its own repository on its own origin. If nobody will own one, **withdraw PR-32 from the PRD**;
     an open requirement nobody can start reads as planned work.
-23. **PR-26's job logs and PR-27's policy authoring are deliberately undelivered** — ADR-0072 and
+22. **PR-26's job logs and PR-27's policy authoring are deliberately undelivered** — ADR-0072 and
     ADR-0073, both Accepted. Held by `check-contracts.sh` **check 13** (no job-output field on
     `CIJob`) and **check 14** (no authoring verb on `PolicyDecisionPoint`), each with a fixture
     proving it can fail. If you are about to add "just a log URL", the gate is stopping you on purpose.
