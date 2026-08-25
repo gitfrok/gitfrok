@@ -1,8 +1,12 @@
 # `deploy/gcp` — production infrastructure (OpenTofu + Terragrunt)
 
 **Decision of record: [ADR-0092](../../governance/docs/adr/0092-gcp-as-the-first-party-cloud-provisioned-by-opentofu.md)
-(Proposed).** Nothing here should be applied while that ADR is Proposed. Read it first; it explains
-every choice this tree makes, and where it and this README disagree, the ADR wins (ADR-0001).
+(Accepted).** Read it first; it explains every choice this tree makes, and where it and this README
+disagree, the ADR wins (ADR-0001).
+
+Accepted decides *where* the control plane runs. It does not make this tree appliable: both
+`project_id` values and the DNS apex are placeholders, and `prod-cp`'s `admin_networks` is
+`0.0.0.0/0`. Set all four before any `terragrunt apply` — no gate checks them.
 
 ## What this provisions, and what it refuses to
 
