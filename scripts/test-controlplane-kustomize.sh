@@ -35,6 +35,7 @@ expect_refusal ephemeral-address  "AC8 — the agent door taking an ephemeral ad
 expect_refusal literal-credential "AC4 — a database URL as a literal"
 expect_refusal fourth-workload    "AC1/AC2 — a fourth, third-party workload"
 expect_refusal no-acme-listener   "AC7 — the Gateway losing its :80 ACME listener"
+expect_refusal wrong-address-name "AC8 — a reserved-address name the tofu unit does not reserve"
 
 echo "check-controlplane-kustomize.sh: the shipped overlay"
 if "$gate" >/dev/null 2>&1; then

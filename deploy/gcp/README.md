@@ -28,6 +28,7 @@ So the units end at:
 | `network` | VPC, subnet with pod/service secondary ranges, Cloud Router + NAT |
 | `gke` | the regional cluster, a `system` node pool, and on the data plane a gVisor `runners` pool |
 | `artifact-registry` | the Docker repository, immutable tags (control plane only) |
+| `addresses` | the two reserved EXTERNAL addresses ADR-0095 decision 6 requires — a global one for the Gateway, a regional one for the L4 agent door (control plane only) |
 | `workload-identity` | Google service accounts and their keyless KSA bindings |
 | `zt-connector` | the Cloudflare Zero Trust connector VM, its service account, and the Secret Manager **container** for its tunnel token (ADR-0097) |
 
@@ -125,6 +126,14 @@ reader_members = ["serviceAccount:prod-dp-dataplane@gitfrok-prod-dp.iam.gservice
 It is two steps rather than a `dependency` block because the two environments hold separate state,
 and a read grant across a project boundary is worth seeing in a diff.
 
+**The three Cloudflare DNS records.** `addresses` outputs `dns_records`, which is the actual answer
+to "what do I type into Cloudflare": `app-gitfrok` and `auth-gitfrok` point at the global address and
+**may** be proxied; `agents-gitfrok` points at the regional address and must stay **DNS-only**. That
+last one is not a preference — the agent pins our CA to verify the server certificate, so a proxy
+that terminates TLS is untrusted by every agent and enrolment fails as a TLS error rather than as the
+topology mistake it is (ADR-0095 decisions 3–5). Cloudflare's dashboard defaults new A records to
+proxied, so the safe click and the correct click differ here.
+
 **The Zero Trust tunnel token.** `zt-connector` creates the Secret Manager secret and never its
 value — ADR-0092 decision 6 forbids a secret as an OpenTofu input, so the token would otherwise land
 in state. Read the unit's `manual_seam` output for the exact steps; the short version is: create the
@@ -161,6 +170,11 @@ This blocks a first deployment independently of the installer above.
 
 Ingress/TLS/DNS is **no longer open** — ADR-0095 (Accepted 2026-09-22) decided it, and this tree
 carries its two cluster-level halves: `gateway_api_config` and the L7 addon the managed Gateway
-controller needs. Still open per the ADRs: the **reserved static addresses** ADR-0095 decision 6
-requires (deliberately not provisioned yet — nothing consumes an address until the overlay exists),
-backup and restore for the in-cluster stateful set, and a staging environment.
+controller needs. The **reserved static addresses** ADR-0095 decision 6 requires now exist as the `addresses`
+unit, because `deploy/k8s/controlplane` began consuming them. They are referenced **by name**
+from the overlay, and `scripts/check-controlplane-kustomize.sh` asserts the two layers agree —
+a rename on either side otherwise fails at GKE programming time with no diff to read, while a
+hand-written Cloudflare record keeps pointing at whatever answered before.
+
+Still open per the ADRs: backup and restore for the in-cluster stateful set, and a staging
+environment.

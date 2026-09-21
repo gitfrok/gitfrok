@@ -93,10 +93,13 @@ fi
 
 # --- the parsed assertions ----------------------------------------------------------------------
 # Parsed as YAML, never grepped: a comment must not be able to satisfy or break an assertion.
-python3 - "$tmp/overlay.yaml" <<'PY' || fail=1
+python3 - "$tmp/overlay.yaml" "$(basename "$overlay")" "$root" <<'PY' || fail=1
 import sys, yaml
 
+import os
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+env_name = sys.argv[2]
+repo_root = sys.argv[3]
 bad = 0
 def report(msg):
     global bad
@@ -210,6 +213,33 @@ for g in gws:
         report(f"AC7: Gateway/{g['metadata']['name']} has no HTTPS :443 listener")
     if 80 not in ports:
         report(f"AC7: Gateway/{g['metadata']['name']} has no :80 listener — ACME HTTP-01 cannot solve")
+
+# AC8, cross-layer. Both addresses are referenced BY NAME across two layers, and a rename on either
+# side fails at PROGRAMMING time with no diff to read: GKE never assigns the address, while a
+# Cloudflare record written by hand keeps pointing at whatever answered before. So assert the
+# convention rather than trusting two files to stay in agreement.
+#
+# deploy/gcp/modules/addresses builds both names from env_name, so an overlay named <env> must name
+# exactly <env>-gateway and <env>-agent-door, and that environment must have an addresses unit.
+expected_gw = f"{env_name}-gateway"
+expected_door = f"{env_name}-agent-door"
+
+for g in gws:
+    got = (g["metadata"].get("annotations", {}) or {}).get("networking.gke.io/addresses")
+    if got != expected_gw:
+        report(f"AC8: Gateway/{g['metadata']['name']} names address {got!r}; "
+               f"deploy/gcp/modules/addresses reserves {expected_gw!r} for this environment")
+
+for sv in doors:
+    got = (sv["metadata"].get("annotations", {}) or {}).get("networking.gke.io/load-balancer-ip-addresses")
+    if got != expected_door:
+        report(f"AC8: agent door Service/{sv['metadata']['name']} names address {got!r}; "
+               f"deploy/gcp/modules/addresses reserves {expected_door!r} for this environment")
+
+unit = os.path.join(repo_root, "deploy", "gcp", "live", env_name, "addresses")
+if not os.path.isdir(unit):
+    report(f"AC8: this overlay names reserved addresses but deploy/gcp/live/{env_name}/addresses "
+           f"does not exist — the names resolve to nothing and GKE assigns ephemeral ones")
 
 sys.exit(bad)
 PY
