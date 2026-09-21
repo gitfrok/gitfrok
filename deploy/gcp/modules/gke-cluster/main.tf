@@ -41,10 +41,26 @@ resource "google_container_cluster" "this" {
     master_ipv4_cidr_block  = var.master_cidr
   }
 
-  # On the data plane this list is empty, which — with private_endpoint = true — means the API is
-  # reachable only from inside the VPC. That is ADR-0011's "no inbound path" made structural.
+  # This block must be EMITTED whenever the endpoint is private, even with zero cidr_blocks, and that
+  # is not a style choice: GKE rejects the cluster outright with
+  #
+  #   Error 400: Invalid value for "cluster.master_authorized_networks_config":
+  #   "...enable_master_authorized_networks" should be enabled if private endpoint is enabled.
+  #
+  # Found by applying it (2026-09-22). The two cases the same empty list produces are opposites, so
+  # both are written down:
+  #
+  #   private_endpoint = false, list empty -> block OMITTED -> the API is reachable from anywhere.
+  #   private_endpoint = true,  list empty -> block EMITTED with no cidr_blocks -> only the primary
+  #                                           range of the cluster's own subnet may reach the
+  #                                           control plane.
+  #
+  # The second is ADR-0097's posture and is exactly what the Zero Trust connector's placement in the
+  # node subnet relies on (deploy/gcp/modules/zt-connector). It is also why prod-dp had never been
+  # appliable: it has carried private_endpoint = true with an empty list since ADR-0092's tree was
+  # written, and nothing had ever applied it, so nothing had ever surfaced the refusal.
   dynamic "master_authorized_networks_config" {
-    for_each = length(var.master_authorized_networks) > 0 ? [1] : []
+    for_each = length(var.master_authorized_networks) > 0 || var.private_endpoint ? [1] : []
 
     content {
       dynamic "cidr_blocks" {
