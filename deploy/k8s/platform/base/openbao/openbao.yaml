@@ -175,12 +175,18 @@ spec:
               readOnly: true
             - name: data
               mountPath: /openbao/data
-          # A sealed node is UNREADY, not unhealthy. ADR-0066 decision 4 keeps a human quorum in the
-          # cold-start path, so restarting a sealed pod achieves nothing — /sys/health returns 501
-          # when sealed and this probe treats that as not-ready rather than as a reason to restart.
+          # A sealed node is UNREADY, not unhealthy. ADR-0066 decision 4 keeps a human quorum in
+          # the cold-start path, so restarting a sealed pod achieves nothing: liveness must not
+          # fail, and readiness must.
+          #
+          # The first version of this probe passed `sealedcode=204`, which tells OpenBao to answer
+          # 204 — success — while sealed. The comment said unready and the parameter said ready, and
+          # the cluster believed the parameter: all three pods reported 1/1 Ready with no unseal
+          # having happened. Only `uninitcode=204` remains, so an UNINITIALISED node is ready enough
+          # to be initialised (the runbook's first step needs to reach it) while a SEALED one is not.
           readinessProbe:
             httpGet:
-              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              path: /v1/sys/health?standbyok=true&uninitcode=204
               port: api
               scheme: HTTPS
             initialDelaySeconds: 10

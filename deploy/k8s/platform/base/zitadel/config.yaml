@@ -1,0 +1,46 @@
+---
+# Zitadel's configuration, mirroring deploy/dev's shape because that shape works and an env-var-only
+# attempt did not: leaving the server's own `Port` unset fails at boot with
+# "'Port' cannot parse value as 'uint16': strconv.ParseUint: invalid syntax", which names the field
+# and not the cause.
+#
+# NO CREDENTIAL APPEARS HERE. dev inlines `Password: zitadel` in its ConfigMap; production cannot
+# (ADR-0099 decision 7), so every password arrives as an env override backed by a Secret the
+# installer does not create. Zitadel resolves ZITADEL_*-style env vars over these keys, which is
+# what makes the split possible at all.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zitadel-config
+data:
+  zitadel.yaml: |
+    Log:
+      Level: info
+    Port: 8080
+    ExternalPort: 443
+    ExternalSecure: true
+    TLS:
+      Enabled: false
+    Database:
+      postgres:
+        Host: postgres-rw
+        Port: 5432
+        Database: zitadel
+        MaxOpenConns: 15
+        MaxIdleConns: 5
+        # Zitadel owns its own database and role rather than sharing `gitfrok` with the app: its
+        # migrations create and alter schemas wholesale, and the app's RLS baseline should not be in
+        # reach of them. The admin credentials are used once, by start-from-init, to create both.
+        User:
+          Username: zitadel
+          SSL:
+            Mode: require
+        Admin:
+          Username: postgres
+          SSL:
+            Mode: require
+  steps.yaml: |
+    FirstInstance:
+      InstanceName: Gitfrok
+      Org:
+        Name: Gitfrok

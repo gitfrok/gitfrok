@@ -76,6 +76,15 @@ metadata:
   name: redpanda-internal
 spec:
   clusterIP: None
+  # WITHOUT THIS, THE CLUSTER CANNOT BOOTSTRAP. A broker is not Ready until it has joined, and it
+  # cannot join until it can resolve its seeds — so a headless Service that publishes only ready
+  # addresses leaves every broker resolving nothing. Observed on the first apply:
+  # "Error requesting cluster bootstrap info from {host: redpanda-1.redpanda-internal} …
+  #  redpanda-1.redpanda-internal: No data", repeating forever.
+  #
+  # openbao-internal had this from the start, which is exactly why OpenBao formed a quorum on the
+  # same apply where Redpanda could not.
+  publishNotReadyAddresses: true
   selector:
     app: redpanda
   ports:
