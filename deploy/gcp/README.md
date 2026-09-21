@@ -66,9 +66,9 @@ There is no bootstrap unit.
 ## Running it
 
 ```sh
-cd live/prod-cp
-terragrunt run --all plan        # dependency order is derived from the dependency blocks
-terragrunt run --all apply
+cd live                          # NOT live/prod-cp — see the discovery note below
+terragrunt run --all plan --non-interactive --backend-bootstrap
+terragrunt run --all apply --non-interactive --backend-bootstrap
 ```
 
 A single unit:
@@ -78,6 +78,26 @@ cd live/prod-cp/gke
 terragrunt plan
 terragrunt apply
 ```
+
+**Three things verified against Terragrunt 1.1.4 on 2026-09-22, because the older spelling of each
+fails:**
+
+- The flag is **`--non-interactive`**, not `--terragrunt-non-interactive`. The old prefixed form is
+  rejected outright with *"flag `-terragrunt-non-interactive` is not a Terragrunt flag"* and exits
+  before doing anything. Harmless, but if you run it backgrounded the wrapper's exit code can read 0
+  — read the log, not the exit code.
+- **`--backend-bootstrap` is required** for the state bucket to be created. Without it Terragrunt
+  refuses rather than creating it, so "the bucket is created for you" below is true only with this
+  flag. (`--backend-require-bootstrap` is the opposite switch: fail if the bucket is absent.)
+- **`run --all` discovers units from the git root, not the working directory.** `cd live/prod-cp`
+  then `run --all` plans **prod-dp as well**. Scope it with `--filter`, or run from `live/` and
+  accept both, which is what the recipe above does.
+
+**Reauth (`invalid_rapt`).** This organization enforces periodic reauthentication. When ADC's proof
+token expires, every API call fails with
+`oauth2: "invalid_grant" "reauth related error (invalid_rapt)"` and no resource is created — a clean
+failure, not a partial one. Fix it with `gcloud auth application-default login`; nothing else in this
+tree can.
 
 `plan` works before anything exists because each `dependency` block carries `mock_outputs` for
 `validate` and `plan` only — an apply always uses real outputs.
