@@ -1,23 +1,22 @@
 ---
-# The BFF, and the one workload in this installer that CANNOT START as rendered. That is recorded
-# rather than worked around, because working around it would mean breaking ADR-0011.
+# The BFF, configured as a CONTROL-plane deployment (ADR-0094 decisions 4 and 5).
 #
-# bff/cmd/bff/main.go requires GITFROK_REPOSITORY_READER_ADDR and exits without it ("without
-# RepositoryReader the browser has no data to show"). That reader is git-storaged, which is
-# DATA-plane-side. So the control-plane BFF needs an address it must not have:
+# It renders no repository content, so it names NO RepositoryReader address — and under SPEC-0070
+# AC2 that is not merely unnecessary but required: a control-plane deployment must REFUSE TO START
+# with one configured. The refusal is the enforcement, which is why the address is absent rather
+# than empty.
 #
-#   - setting it to a data-plane address makes a control-plane process dial a data plane, which
-#     ADR-0011 forbids and `CheckNoDataPlaneDial` asserts;
-#   - omitting it makes the binary exit.
+# An earlier version of this file took the address from a ConfigMap the installer does not create,
+# with a comment arguing that no valid control-plane value exists. The comment was right about the
+# problem and wrong about the remedy: reading ADR-0094 decision 5 properly shows the answer is not a
+# value an operator supplies, it is the absence of the input plus a boot refusal. Recorded because a
+# confident comment is the kind of thing a reader trusts.
 #
-# ADR-0093 surfaced exactly this as its blocking gap and ADR-0094 settled it in principle — the
-# repository surface is served data-plane-side by its own bff+webfrontend pair, so a CONTROL-plane
-# BFF should not need a reader at all. The code has not caught up, and ADR-0094's register row says
-# nothing moves in bff/ until SPEC-0021 is amended for the data-plane premise.
-#
-# So the address is taken from a ConfigMap this installer does NOT create. An operator who supplies
-# one is making the ADR-0011 decision themselves, visibly, rather than inheriting it from a manifest.
-# SPEC-0067 open question 5 is this: meeting the spec does not produce a working control plane.
+# IT STILL CANNOT START, and the reason has moved one line down. main.go also requires
+# GITFROK_PDP_ADDR — correctly, since it "must not serve requests it cannot check" — and the only
+# PDP is the data plane's :9090, which ADR-0094 decision 7 forbids this deployment to dial. The
+# control plane opens 9091 agent, 9092 usage, 9093 residency and 9094 enrolment, and no PDP door.
+# That is SPEC-0070's blocking open question 1, and no manifest can answer it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,22 +41,20 @@ spec:
           env:
             - name: GITFROK_BFF_LISTEN_ADDR
               value: ":8080"
+            # The plane input SPEC-0070 AC1 requires. No default exists in the binary, deliberately:
+            # a default would silently pick a route set.
+            - name: GITFROK_PLANE
+              value: "control"
             # The control plane's own usage door — in-cluster, same plane, no ADR-0011 question.
             - name: GITFROK_USAGE_ADDR
               value: "controlplane:9092"
-            # See the header. Both of these name data-plane services and have no valid
-            # control-plane value today; they are inputs an operator must decide on, and the
-            # installer supplies neither.
-            - name: GITFROK_PDP_ADDR
-              valueFrom:
-                configMapKeyRef:
-                  name: gitfrok-bff-endpoints
-                  key: pdp-addr
-            - name: GITFROK_REPOSITORY_READER_ADDR
-              valueFrom:
-                configMapKeyRef:
-                  name: gitfrok-bff-endpoints
-                  key: repository-reader-addr
+            # GITFROK_REPOSITORY_READER_ADDR IS DELIBERATELY ABSENT, not omitted by oversight.
+            # SPEC-0070 AC2: a control-plane deployment refuses to start with one configured.
+            #
+            # GITFROK_PDP_ADDR is absent for a different and worse reason — there is nothing valid to
+            # put in it. The only PDP is the data plane's, which decision 7 forbids this deployment
+            # to reach, and the control plane serves none. SPEC-0070 open question 1 owns that, and
+            # an address invented here would be the wrong kind of fix.
             # OIDC (ADR-0045). Issuer and redirect are environment facts and come from the overlay.
             # The client id is a ConfigMap because Zitadel generates it server-side — it is an
             # identifier, not a credential, and the shipped BFF reads no client secret at all.
