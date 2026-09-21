@@ -214,6 +214,32 @@ for g in gws:
     if 80 not in ports:
         report(f"AC7: Gateway/{g['metadata']['name']} has no :80 listener — ACME HTTP-01 cannot solve")
 
+# SPEC-0070 AC10: the manifests must agree with the binary's contract. The binary REFUSES a
+# disagreement at boot, so a manifest that disagrees is a deployment that never starts — and an
+# earlier version of this base configured a RepositoryReader address from a ConfigMap, which
+# ADR-0094 decision 5 makes a refusal rather than a missing input.
+for w in workloads:
+    if w["metadata"]["name"] != "bff":
+        continue
+    for c in w["spec"]["template"]["spec"].get("containers", []) or []:
+        if c.get("name") != "bff":
+            continue
+        env = {e.get("name"): e for e in (c.get("env") or [])}
+        if (env.get("GITFROK_PLANE") or {}).get("value") != "control":
+            report("AC10: the control-plane bff does not set GITFROK_PLANE=control; the binary has no "
+                   "default and refuses to start without it (SPEC-0070 AC1)")
+        if "GITFROK_CONTROLPLANE_ADDR" not in env:
+            report("AC10: the control-plane bff names no GITFROK_CONTROLPLANE_ADDR — it could authorize "
+                   "nothing, and must not serve requests it cannot check (ADR-0006)")
+        for forbidden, why in (
+            ("GITFROK_REPOSITORY_READER_ADDR", "ADR-0094 decision 5 refuses a reader on the control plane"),
+            ("GITFROK_DATAPLANE_ADDR", "ADR-0100 decision 6 leaves a control-plane deployment no data-plane address"),
+            ("GITFROK_PDP_ADDR", "the legacy name for the data plane's door; the same refusal applies"),
+        ):
+            if forbidden in env:
+                report(f"AC10: the control-plane bff sets {forbidden} — {why}, so this deployment "
+                       f"would refuse to start")
+
 # AC8, cross-layer. Both addresses are referenced BY NAME across two layers, and a rename on either
 # side fails at PROGRAMMING time with no diff to read: GKE never assigns the address, while a
 # Cloudflare record written by hand keeps pointing at whatever answered before. So assert the

@@ -45,16 +45,22 @@ spec:
             # a default would silently pick a route set.
             - name: GITFROK_PLANE
               value: "control"
+            # The control plane's BFF door (T-0088). This deployment's PDP, evidence packs and
+            # auditor grants all come from here — its OWN instances of the bi-planar audit, identity
+            # and policy schemas (ADR-0101 decision 2), never the data plane's.
+            - name: GITFROK_CONTROLPLANE_ADDR
+              value: "controlplane:9095"
             # The control plane's own usage door — in-cluster, same plane, no ADR-0011 question.
             - name: GITFROK_USAGE_ADDR
               value: "controlplane:9092"
-            # GITFROK_REPOSITORY_READER_ADDR IS DELIBERATELY ABSENT, not omitted by oversight.
-            # SPEC-0070 AC2: a control-plane deployment refuses to start with one configured.
+            # GITFROK_REPOSITORY_READER_ADDR and GITFROK_DATAPLANE_ADDR ARE DELIBERATELY ABSENT.
+            # SPEC-0070 AC2 and ADR-0100 decision 6: a control-plane deployment refuses to start
+            # with either configured, so there is no data-plane address to dial and ADR-0011's rule
+            # is structural rather than asserted.
             #
-            # GITFROK_PDP_ADDR is absent for a different and worse reason — there is nothing valid to
-            # put in it. The only PDP is the data plane's, which decision 7 forbids this deployment
-            # to reach, and the control plane serves none. SPEC-0070 open question 1 owns that, and
-            # an address invented here would be the wrong kind of fix.
+            # The PDP gap that blocked this manifest is closed: T-0088 registered
+            # PolicyDecisionPoint on the control plane's own door above, backed by the OPA decision
+            # point this plane already ran in-process.
             # OIDC (ADR-0045). Issuer and redirect are environment facts and come from the overlay.
             # The client id is a ConfigMap because Zitadel generates it server-side — it is an
             # identifier, not a credential, and the shipped BFF reads no client secret at all.

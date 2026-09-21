@@ -1,0 +1,9 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: bff}
+spec:
+  template:
+    spec:
+      containers:
+        - name: bff
+          env: [{name: GITFROK_REPOSITORY_READER_ADDR, value: "git-storaged:9000"}]

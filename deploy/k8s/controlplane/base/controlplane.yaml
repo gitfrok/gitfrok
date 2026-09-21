@@ -64,6 +64,12 @@ spec:
             # Door 4: enrolment issuance (SPEC-0038 AC1).
             - name: GITFROK_ENROLMENT_GRPC_ADDR
               value: ":9094"
+            # Door 5: the BFF door (T-0088, ADR-0100 decision 1) — PolicyDecisionPoint,
+            # EvidenceService and AuditorGrantService for the control-plane BFF. Its own listener
+            # because this plane groups by caller, and these three share one caller and are required
+            # together; see cmd/controlplane-app/bffdoor.go.
+            - name: GITFROK_BFF_GRPC_ADDR
+              value: ":9095"
             - name: GITFROK_PAT_VERIFIER_KEY
               valueFrom:
                 secretKeyRef:
@@ -95,6 +101,8 @@ spec:
               containerPort: 9093
             - name: enrolment-grpc
               containerPort: 9094
+            - name: bff-grpc
+              containerPort: 9095
           # /healthz only, and that is a RECORDED LIMIT rather than a choice. SPEC-0067 AC9 wanted a
           # readiness signal that distinguishes a sealed OpenBao from an unreachable one; the shipped
           # binary serves one endpoint that does neither, so T-0084 stops here rather than adding a
@@ -157,3 +165,6 @@ spec:
     - name: enrolment-grpc
       port: 9094
       targetPort: enrolment-grpc
+    - name: bff-grpc
+      port: 9095
+      targetPort: bff-grpc
