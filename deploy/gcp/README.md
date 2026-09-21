@@ -29,6 +29,7 @@ So the units end at:
 | `gke` | the regional cluster, a `system` node pool, and on the data plane a gVisor `runners` pool |
 | `artifact-registry` | the Docker repository, immutable tags (control plane only) |
 | `workload-identity` | Google service accounts and their keyless KSA bindings |
+| `zt-connector` | the Cloudflare Zero Trust connector VM, its service account, and the Secret Manager **container** for its tunnel token (ADR-0097) |
 
 Every stateful dependency — Postgres, Valkey, Redpanda, SeaweedFS, OpenBao, Zitadel — runs
 **in-cluster** on the pins in `../dev/versions.env` (ADR-0092 decision 5). There is no Cloud SQL, no
@@ -56,10 +57,10 @@ no unit creates a load balancer.
    `agents-gitfrok` must stay **DNS-only** — a proxied record terminates TLS and breaks the
    client-certificate mTLS every agent depends on (ADR-0095 decision 5).
 3. **`admin_networks` is empty and both endpoints are private** (ADR-0097). There is no operator
-   CIDR to set, because Access authorizes a person rather than a network. **Neither cluster's
-   Kubernetes API is reachable until the Zero Trust connector exists** — that is ADR-0097
-   decisions 2–4, an open register row, and not yet built. The GCP API still answers, so
-   `gcloud container clusters describe` works; `kubectl` does not. Break-glass is in `env.hcl`.
+   CIDR to set, because Access authorizes a person rather than a network. The `zt-connector` unit
+   provides the path, and **it is inert until its tunnel token is added by hand** — see "The Zero
+   Trust tunnel token" below. Until then `gcloud container clusters describe` works and `kubectl`
+   does not. Break-glass is in `env.hcl`, and it takes both halves.
 4. **Authenticate:** `gcloud auth application-default login`. `gcloud auth login` alone does not
    satisfy the provider — it needs Application Default Credentials.
 
@@ -123,6 +124,19 @@ reader_members = ["serviceAccount:prod-dp-dataplane@gitfrok-prod-dp.iam.gservice
 
 It is two steps rather than a `dependency` block because the two environments hold separate state,
 and a read grant across a project boundary is worth seeing in a diff.
+
+**The Zero Trust tunnel token.** `zt-connector` creates the Secret Manager secret and never its
+value — ADR-0092 decision 6 forbids a secret as an OpenTofu input, so the token would otherwise land
+in state. Read the unit's `manual_seam` output for the exact steps; the short version is: create the
+tunnel in Cloudflare, `gcloud secrets versions add`, reset the instance, then add the private-network
+route and an Access policy. **Until that is done the connector boots, logs that the secret is empty
+and exits 0** — a healthy instance, no tunnel, and a Kubernetes API nobody can reach. It does not
+look broken, which is why it is written down here.
+
+The connector must stay in the cluster's **node subnet**. GKE grants the primary range of that subnet
+access to a private control-plane endpoint by default; from anywhere else the control plane refuses
+it with a timeout rather than an error naming the cause, and the fix would be maintaining the
+authorized-network list ADR-0097 decision 2 exists to avoid.
 
 **KSA annotations.** `workload-identity` outputs `ksa_annotations` — the annotation each Kubernetes
 service account needs to assume its Google identity. OpenTofu does not apply them (decision 4). Hand
