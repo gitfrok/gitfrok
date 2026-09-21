@@ -28,17 +28,21 @@ locals {
   services_cidr = "10.24.0.0/20"
   master_cidr   = "172.16.0.0/28"
 
-  # Who may reach the Kubernetes API. This is the operator's own network, NOT the agent path — the
-  # agent talks to the application surface over gRPC/mTLS (ADR-0017), never to the Kubernetes API.
+  # Who may reach the Kubernetes API from a public address: NOBODY. The endpoint is private
+  # (ADR-0097 decision 1) and this list is empty, which is the same shape prod-dp has always had.
+  # Operators reach the API through Cloudflare Zero Trust over a tunnel from a connector inside this
+  # VPC — Access authorizes the person, so there is no network location to allow-list.
   #
-  # DELIBERATELY EMPTY, AND THAT MEANS AN OPEN PUBLIC ENDPOINT. The deciding owner accepted an
-  # unrestricted Kubernetes API on 2026-09-22 when offered a specific operator CIDR instead. It is
-  # expressed as an empty list rather than as a `0.0.0.0/0` entry because GKE's
-  # master-authorized-networks API refuses that value, while the module omits the whole
-  # `master_authorized_networks_config` block when this list is empty — which, with
-  # `private_endpoint = false`, is the same posture the owner chose and the only one the API accepts.
+  # This is NOT the agent path. The agent talks to the application surface over gRPC/mTLS (ADR-0017),
+  # never to the Kubernetes API, and ADR-0095's three public hostnames are unaffected by any of this.
   #
-  # Authentication still applies; what is gone is the network restriction. Narrowing this to a real
-  # CIDR is a one-line change here and needs no ADR.
+  # History, so nobody re-derives it: earlier on 2026-09-22 this list was empty for the OPPOSITE
+  # reason — the owner had accepted an unrestricted public endpoint, and empty was how the module
+  # expresses that (GKE refuses a literal 0.0.0.0/0 entry, and the module omits the whole block when
+  # the list is empty). The owner reversed that within the day. The list looks identical and now
+  # means the inverse, because what changed is `private_endpoint` in the gke unit, not this value.
+  #
+  # ADR-0097 decision 5's break-glass, if Access is ever unavailable: put a real operator CIDR here
+  # AND set `private_endpoint = false` in `gke/terragrunt.hcl`. Both, or the CIDR does nothing.
   admin_networks = []
 }

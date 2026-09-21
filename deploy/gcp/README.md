@@ -6,10 +6,12 @@ disagree, the ADR wins (ADR-0001).
 
 **Updated 2026-09-22.** Both `project_id` values are real (`gitfrok-prod-cp`, `gitfrok-prod-dp`,
 created 2026-09-22 on billing `2025-10280-7Solutions`), the DNS apex is gone — ADR-0095 made
-Cloudflare authoritative and retired the Cloud DNS unit — and `prod-cp`'s `admin_networks` is an
-empty list, which is an **open public Kubernetes API** the deciding owner accepted on 2026-09-22.
-`env.hcl` records why it is an empty list rather than a `0.0.0.0/0` entry. No gate checks any of
-this, so read `env.hcl` before an apply rather than trusting this paragraph.
+Cloudflare authoritative and retired the Cloud DNS unit — and **both** clusters' Kubernetes API
+endpoints are private with no authorized networks (ADR-0097 decision 1) — operators reach them
+through Cloudflare Zero Trust, not from a public address. An open endpoint was briefly accepted
+earlier the same day and reversed within it; `env.hcl` keeps that history because the empty
+`admin_networks` list now means the inverse of what it meant then. No gate checks any of this, so
+read `env.hcl` before an apply rather than trusting this paragraph.
 
 ## What this provisions, and what it refuses to
 
@@ -36,7 +38,7 @@ EKS/AKS a four-unit change.
 ## Two environments, two shapes
 
 ```
-live/prod-cp     control plane — public API endpoint (UNRESTRICTED, see below), no DNS zone, no runner pool
+live/prod-cp     control plane — PRIVATE API endpoint (Zero Trust), no DNS zone, no runner pool
 live/prod-dp     data plane    — PRIVATE endpoint, no DNS zone, gVisor runner pool, no inbound path
 ```
 
@@ -53,10 +55,11 @@ no unit creates a load balancer.
    (`app-gitfrok`, `auth-gitfrok`, `agents-gitfrok`) are created operator-side in Cloudflare, and
    `agents-gitfrok` must stay **DNS-only** — a proxied record terminates TLS and breaks the
    client-certificate mTLS every agent depends on (ADR-0095 decision 5).
-3. **`admin_networks` is empty on purpose**, and that is an open public Kubernetes API accepted by
-   the owner on 2026-09-22. To narrow it, put the operator CIDR in `live/prod-cp/env.hcl` — but do
-   **not** write `0.0.0.0/0` as an entry, because GKE refuses that value; an empty list is how this
-   module expresses "unrestricted".
+3. **`admin_networks` is empty and both endpoints are private** (ADR-0097). There is no operator
+   CIDR to set, because Access authorizes a person rather than a network. **Neither cluster's
+   Kubernetes API is reachable until the Zero Trust connector exists** — that is ADR-0097
+   decisions 2–4, an open register row, and not yet built. The GCP API still answers, so
+   `gcloud container clusters describe` works; `kubectl` does not. Break-glass is in `env.hcl`.
 4. **Authenticate:** `gcloud auth application-default login`. `gcloud auth login` alone does not
    satisfy the provider — it needs Application Default Credentials.
 

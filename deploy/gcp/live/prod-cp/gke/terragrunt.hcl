@@ -30,8 +30,15 @@ inputs = {
 
   master_cidr = local.env.master_cidr
 
-  # Public API endpoint, restricted by list. The control plane is the side that must be reachable.
-  private_endpoint           = false
+  # PRIVATE API endpoint (ADR-0097 decision 1). The control plane is the side whose APPLICATION
+  # surface must be reachable — ADR-0095's Gateway and L4 door serve that — and its Kubernetes API is
+  # a different door entirely. Operators reach it through Cloudflare Zero Trust over a tunnel from
+  # inside the VPC (ADR-0097 decisions 2-4), so there is no authorized-network list to maintain and
+  # nothing reaches the API from the internet. This now matches prod-dp exactly.
+  #
+  # Create-time in practice: toggling this on a live cluster is not reliably in-place across provider
+  # versions, which is why ADR-0097 landed before the first apply rather than after.
+  private_endpoint           = true
   master_authorized_networks = local.env.admin_networks
 
   # No runner pool: the control plane runs no untrusted build code, so ADR-0012's gVisor pool has
