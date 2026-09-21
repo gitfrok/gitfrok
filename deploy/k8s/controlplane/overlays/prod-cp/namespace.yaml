@@ -1,0 +1,14 @@
+---
+# Kustomize's `namespace:` field rewrites every resource's metadata.namespace; it does NOT create
+# the namespace. Without this the whole overlay fails at apply with "namespaces \"gitfrok\" not
+# found" — eight times, once per resource — which is a confusing way to learn a one-object omission.
+# Found by server-dry-running the overlay against the real cluster, not by rendering it.
+#
+# It lives in the overlay rather than base/ because the name is an environment fact, and SPEC-0067
+# AC11 lets an overlay vary exactly that sort of thing.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitfrok
+  labels:
+    app.kubernetes.io/part-of: gitfrok-controlplane

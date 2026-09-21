@@ -7,6 +7,9 @@ kind: Kustomization
 namespace: gitfrok
 
 resources:
+  # The namespace comes first because everything else lands in it. `namespace:` above only rewrites
+  # metadata; it creates nothing.
+  - namespace.yaml
   - ../../base
   - gateway.yaml
   - agent-door.yaml

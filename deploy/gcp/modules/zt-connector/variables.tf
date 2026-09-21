@@ -48,3 +48,14 @@ variable "boot_image" {
   type        = string
   default     = "debian-cloud/debian-12"
 }
+
+variable "allow_iap_ssh" {
+  description = <<-DESC
+    Open :22 to IAP's fixed range so an operator with `roles/iap.tunnelResourceAccessor` can reach
+    this VM. Without it, ADR-0097 decision 3's break-glass does not exist and
+    `gcloud compute ssh --tunnel-through-iap` hangs. Set false only if a different operator path is
+    in place, because otherwise a connector whose tunnel is misconfigured cannot be fixed.
+  DESC
+  type        = bool
+  default     = true
+}

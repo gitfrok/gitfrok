@@ -82,9 +82,15 @@ resource "google_compute_instance" "connector" {
   # deletion protection. Recreate it and re-run the manual seam.
   allow_stopping_for_update = true
 
+  # Targeted by the IAP firewall rule below. A tag rather than a service account so the rule reads
+  # as what it is at a glance in `gcloud compute firewall-rules list`.
+  tags = ["zt-connector"]
+
   metadata = {
-    # Blocks project-wide SSH keys. Console/IAP SSH still works for an operator with the IAM role,
-    # which is the break-glass into the box itself rather than into the cluster.
+    # Blocks project-wide SSH keys. IAP SSH still works for an operator with the IAM role, which is
+    # the break-glass into the box itself rather than into the cluster — and that claim was FALSE
+    # until the firewall rule below existed: ADR-0097 decision 3 promised IAP SSH, nothing opened
+    # :22 from IAP's range, and `gcloud compute ssh --tunnel-through-iap` simply hung.
     block-project-ssh-keys = "TRUE"
   }
 
@@ -144,4 +150,35 @@ resource "google_compute_instance" "connector" {
     systemctl enable --now cloudflared
     log "cloudflared running"
   SCRIPT
+}
+
+# IAP TCP forwarding's fixed source range, and the only ingress either VPC has.
+#
+# This makes ADR-0097 decision 3's "IAP SSH still works for an operator with the IAM role" true. It
+# was written as a claim and shipped without the rule, so the break-glass into the connector did not
+# work — which is the worst kind of gap, because it is the path someone reaches for when the primary
+# one is already broken.
+#
+# 35.235.240.0/20 is Google's IAP range and is not routable from the internet: a packet can only
+# arrive from it after Google has authorized the operator against `roles/iap.tunnelResourceAccessor`.
+# So this is an ingress rule that opens nothing to the public, and it does NOT weaken ADR-0011 on
+# the data plane: it reaches one VM's :22, never a workload, never the agent channel, and never
+# repository data.
+resource "google_compute_firewall" "iap_ssh" {
+  count = var.allow_iap_ssh ? 1 : 0
+
+  name    = "${var.env_name}-allow-iap-ssh-connector"
+  project = var.project_id
+  network = var.network_name
+
+  description = "IAP TCP forwarding to the Zero Trust connector's SSH port (ADR-0097 decision 3's break-glass)."
+
+  direction     = "INGRESS"
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["zt-connector"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
 }
