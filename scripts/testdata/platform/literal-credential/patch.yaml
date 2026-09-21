@@ -1,0 +1,9 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: zitadel}
+spec:
+  template:
+    spec:
+      containers:
+        - name: zitadel
+          env: [{name: ZITADEL_MASTERKEY, value: "MasterkeyNeedsToHave32Characters"}]

@@ -1,0 +1,16 @@
+---
+# ADR-0095's issuer hostname. Zitadel bakes ExternalDomain into its OIDC discovery document, so this
+# value and the Gateway's auth-gitfrok listener must agree or every login fails at discovery with a
+# mismatched issuer — which reads as a client bug rather than a manifest one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zitadel
+spec:
+  template:
+    spec:
+      containers:
+        - name: zitadel
+          env:
+            - name: ZITADEL_EXTERNALDOMAIN
+              value: auth-gitfrok.7.solutions

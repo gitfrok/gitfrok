@@ -1,0 +1,9 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: openbao}
+spec:
+  template:
+    spec:
+      containers:
+        - name: openbao
+          env: [{name: GITFROK_CUSTODY_ALLOW_LOOPBACK_HTTP, value: "true"}]

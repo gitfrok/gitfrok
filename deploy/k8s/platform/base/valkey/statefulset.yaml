@@ -1,0 +1,72 @@
+---
+# A StatefulSet at ONE replica, and both halves of that are deliberate (ADR-0099 decisions 3 and 4).
+#
+# StatefulSet, because a Deployment with a ReadWriteOnce claim cannot roll — the shape deploy/dev
+# uses and the defect this tree exists to avoid.
+#
+# One replica, because this holds BFF sessions. Losing it logs everyone out, which is recoverable in
+# a way losing Postgres is not, and Valkey HA needs Sentinel or Cluster mode: a second failure
+# domain plus a client-side change (ADR-0052) for a benefit measured in avoided re-logins. ADR-0052
+# decision 4 also makes an unreachable store fatal at BFF startup, so this failing is loud rather
+# than silent. Revisit when session loss has a cost someone has named.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey
+spec:
+  replicas: 1
+  serviceName: valkey
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: valkey
+          image: docker.io/valkey/valkey:9.1.1
+          args: ["--appendonly", "yes", "--dir", "/data"]
+          ports:
+            - name: valkey
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: premium-rwo
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+spec:
+  type: ClusterIP
+  selector:
+    app: valkey
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey

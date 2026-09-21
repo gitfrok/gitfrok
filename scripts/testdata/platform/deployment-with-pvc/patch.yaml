@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: valkey-legacy}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: valkey-legacy}}
+  template:
+    metadata: {labels: {app: valkey-legacy}}
+    spec:
+      containers: [{name: valkey, image: "docker.io/valkey/valkey:9.1.1"}]
+      volumes: [{name: data, persistentVolumeClaim: {claimName: valkey-legacy}}]

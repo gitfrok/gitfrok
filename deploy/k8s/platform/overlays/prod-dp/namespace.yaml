@@ -1,0 +1,11 @@
+---
+# The same namespace the control-plane installer uses, and created by whichever of the two applies
+# first — both declare it, and applying a Namespace twice is idempotent. Kustomize's `namespace:`
+# field rewrites metadata and creates nothing, which is a lesson deploy/k8s/controlplane learned the
+# hard way: its overlay failed once per resource with "namespaces gitfrok not found".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitfrok
+  labels:
+    app.kubernetes.io/part-of: gitfrok

@@ -1,0 +1,72 @@
+---
+# The data plane's object tier. ONE replica, and ADR-0099 decision 4 is explicit that this is
+# adequate for ADR-0050's scope — large objects only, while live bare repos sit on block volumes
+# (ADR-0033) — and is NOT a durability answer. SeaweedFS replication on the data plane is an open
+# register row, deliberately unanswered here rather than defaulted to something reassuring.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: seaweedfs
+spec:
+  replicas: 1
+  serviceName: seaweedfs
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      containers:
+        - name: seaweedfs
+          image: docker.io/chrislusf/seaweedfs:4.40
+          args: ["server", "-dir=/data", "-s3", "-master.volumeSizeLimitMB=1024"]
+          ports:
+            - name: s3
+              containerPort: 8333
+            - name: filer
+              containerPort: 8888
+            - name: master
+              containerPort: 9333
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /cluster/status
+              port: master
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: premium-rwo
+        resources:
+          requests:
+            storage: 200Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+spec:
+  type: ClusterIP
+  selector:
+    app: seaweedfs
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: s3
+    - name: filer
+      port: 8888
+      targetPort: filer
+    - name: master
+      port: 9333
+      targetPort: master

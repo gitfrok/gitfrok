@@ -1,0 +1,19 @@
+# The data plane's stateful set. Three components, and the absences are the interesting part.
+#
+# No OpenBao: ADR-0066 makes custody control-plane-side, and check-custody-service.sh asserts that
+# no data-plane surface references it — an OpenBao here would fail that gate, correctly.
+# No Zitadel: the data plane validates tokens; it does not issue them (ADR-0093's partition).
+# Nothing publicly reachable: ADR-0011, and prod-dp has no Gateway and no reserved address at all.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitfrok
+
+resources:
+  - namespace.yaml
+  - ../../base/postgres
+  - ../../base/redpanda
+  - ../../base/seaweedfs
+
+patches:
+  - path: patch-postgres-backup.yaml

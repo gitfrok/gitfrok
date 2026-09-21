@@ -1,0 +1,48 @@
+---
+# ADR-0099 decision 2: the one operator, for the one component whose failure is unrecoverable.
+#
+# Three instances — one primary, two standbys — so a node loss leaves a quorum to elect from. The
+# backup stanza is not optional (decision 5): a hand-written StatefulSet's missing backup story is
+# the entire reason CloudNativePG is here, so a Cluster without one would defeat the decision that
+# adopted it. `check-platform-kustomize.sh` fails on its absence.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4
+
+  # Credentials are inputs, never authored here (decision 7). CNPG reads the superuser and the
+  # application role from Secrets an operator created.
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: postgres-superuser
+
+  bootstrap:
+    initdb:
+      database: gitfrok
+      owner: gitfrok_app
+      secret:
+        name: postgres-app
+
+  storage:
+    size: 100Gi
+    # Explicit, because the cluster default is not a decision (AC10, ADR-0033).
+    storageClass: premium-rwo
+
+  walStorage:
+    size: 20Gi
+    storageClass: premium-rwo
+
+  # The bucket is provisioned by deploy/gcp's `backups` unit. Credentials come from Workload
+  # Identity, so no service-account key exists here either — the same posture as the publisher.
+  backup:
+    barmanObjectStore:
+      destinationPath: "gs://PLACEHOLDER-BACKUP-BUCKET/postgres"
+      googleCredentials:
+        gkeEnvironment: true
+    retentionPolicy: "30d"
+
+  monitoring:
+    enablePodMonitor: false

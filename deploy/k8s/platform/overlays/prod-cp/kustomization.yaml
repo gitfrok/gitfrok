@@ -1,0 +1,23 @@
+# The control plane's stateful set (ADR-0099 decision 1 + the decision-4 table).
+#
+# OpenBao and Zitadel are here and NOT in prod-dp: ADR-0066 makes custody control-plane-side, and
+# check-custody-service.sh asserts that no data-plane surface references it at all. Zitadel is the
+# OIDC issuer for the browser surface, which is a control-plane concern by ADR-0093's partition.
+#
+# SeaweedFS is absent for the mirror reason: ADR-0050 scopes it to the data plane's large objects.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitfrok
+
+resources:
+  - namespace.yaml
+  - ../../base/postgres
+  - ../../base/valkey
+  - ../../base/redpanda
+  - ../../base/openbao
+  - ../../base/zitadel
+
+patches:
+  - path: patch-postgres-backup.yaml
+  - path: patch-zitadel-domain.yaml

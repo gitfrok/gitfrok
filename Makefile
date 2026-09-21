@@ -2,7 +2,7 @@
 .PHONY: bootstrap submodules dev-up dev-provision dev-smoke dev-north-star update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check runbook-check signed-releases-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
-verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5) + runbook completeness (T-0040 AC4) + control-plane installer (T-0084, SPEC-0067) and the proof its gate can fail (AC10)
+verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5) + runbook completeness (T-0040 AC4) + control-plane installer (T-0084, SPEC-0067) and the third-party stateful set (T-0086, SPEC-0069), each with the proof its gate can fail
 	@./scripts/check-dep-direction.sh
 	@./scripts/check-version-floors.sh
 	@./scripts/check-dev-images.sh
@@ -16,6 +16,8 @@ verify: ## super-repo fitness gates: dependency direction + version floors + dev
 # negative fixtures are never exercised rots into decoration, and this one's first version
 # had three false positives that only the fixtures would have caught.
 	@./scripts/test-controlplane-kustomize.sh
+	@./scripts/check-platform-kustomize.sh
+	@./scripts/test-platform-kustomize.sh
 lint-shell: ## shellcheck the fitness scripts (T-0009); CI gates this on every PR
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed: https://shellcheck.net"; exit 1; }
 	@shellcheck scripts/*.sh && echo "shellcheck: OK"
@@ -29,6 +31,10 @@ cp-kustomize-check: ## T-0084 / SPEC-0067: the control-plane installer renders t
 	@./scripts/check-controlplane-kustomize.sh
 cp-kustomize-test: ## SPEC-0067 AC10: prove check-controlplane-kustomize.sh refuses each defect it claims to catch
 	@./scripts/test-controlplane-kustomize.sh
+platform-check: ## T-0086 / SPEC-0069: the stateful set is StatefulSets with claims, ADR-0099's replica counts, no authored Secret, nothing publicly reachable, CNPG pinned and backing up
+	@./scripts/check-platform-kustomize.sh
+platform-test: ## SPEC-0069 AC11: prove check-platform-kustomize.sh refuses each defect it claims to catch
+	@./scripts/test-platform-kustomize.sh
 runbook-check: ## T-0040 AC4: runbook carries rotation (§6b), unseal (§6a), seal/custody-outage and clock-skew (§4a) entries, and §6b's cross-references resolve
 	@./scripts/check-runbook.sh
 signed-releases-check: ## T-0032: no unsigned/mis-signed release is applicable; release trust bundle intact (SPEC-0039 AC3, ADR-0044)

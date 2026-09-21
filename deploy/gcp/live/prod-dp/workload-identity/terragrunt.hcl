@@ -25,6 +25,14 @@ inputs = {
   # data-plane workload touches, and the registry lives in the control-plane project — so the read
   # grant is made THERE, against this account's email, not here.
   accounts = {
+    # CloudNativePG assumes this to write backups (ADR-0099 decision 5). The KSA is the one
+    # CNPG creates for the `postgres` Cluster, in the namespace the platform overlay installs
+    # into. Bucket-scoped object admin is granted by the `backups` unit, not project-wide here.
+    postgres = {
+      display_name = "CloudNativePG backups"
+      ksa          = "gitfrok/postgres"
+      roles        = []
+    }
     dataplane = {
       display_name = "gitfrok data plane"
       ksa          = "default/dataplane"

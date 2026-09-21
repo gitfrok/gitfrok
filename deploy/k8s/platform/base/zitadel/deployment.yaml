@@ -1,0 +1,105 @@
+---
+# The ONE component here that is correctly a Deployment: Zitadel is stateless given Postgres, so
+# replicas buy availability and cost nothing in consistency. AC2 exempts it by name, which is why
+# the exemption is a list rather than a judgement the gate has to make.
+#
+# Its hostname is not incidental. ADR-0095 force 3: ExternalDomain is baked into what its OIDC
+# discovery document advertises, which is why auth-gitfrok.7.solutions exists as its own name rather
+# than a path on the browser surface. The overlay supplies it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zitadel
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: zitadel
+  template:
+    metadata:
+      labels:
+        app: zitadel
+    spec:
+      serviceAccountName: zitadel
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: zitadel
+          image: ghcr.io/zitadel/zitadel:v4.16.2
+          args: ["start", "--masterkeyFromEnv", "--tlsMode", "external"]
+          env:
+            # Every one of these is a reference. The masterkey in particular is a credential the
+            # installer must not author (ADR-0099 decision 7) — it decrypts everything Zitadel
+            # stores, so a literal here would be the worst Secret in the tree.
+            - name: ZITADEL_MASTERKEY
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-masterkey
+                  key: masterkey
+            - name: ZITADEL_DATABASE_POSTGRES_HOST
+              value: postgres-rw
+            - name: ZITADEL_DATABASE_POSTGRES_PORT
+              value: "5432"
+            - name: ZITADEL_DATABASE_POSTGRES_DATABASE
+              value: zitadel
+            - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-postgres
+                  key: username
+            - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-postgres
+                  key: password
+            - name: ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE
+              value: require
+            - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-superuser
+                  key: username
+            - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-superuser
+                  key: password
+            - name: ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE
+              value: require
+            - name: ZITADEL_EXTERNALSECURE
+              value: "true"
+            - name: ZITADEL_EXTERNALPORT
+              value: "443"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /debug/ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zitadel
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zitadel
+spec:
+  type: ClusterIP
+  selector:
+    app: zitadel
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

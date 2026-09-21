@@ -1,0 +1,15 @@
+---
+# The bucket name is an environment fact, so it lives in the overlay rather than the base. It is the
+# bucket deploy/gcp/live/prod-cp/backups provisions; the value must match that unit's output, and
+# nothing cross-checks it yet — recorded in T-0086's notes rather than left implicit.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  backup:
+    barmanObjectStore:
+      destinationPath: "gs://gitfrok-prod-cp-postgres-backups/postgres"
+      googleCredentials:
+        gkeEnvironment: true
+    retentionPolicy: "30d"

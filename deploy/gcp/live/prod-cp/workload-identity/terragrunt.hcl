@@ -20,6 +20,14 @@ inputs = {
   # (ADR-0066) and its database is in-cluster (ADR-0092 decision 5), so there is nothing else in GCP
   # for a control-plane pod to reach.
   accounts = {
+    # CloudNativePG assumes this to write backups (ADR-0099 decision 5). The KSA is the one
+    # CNPG creates for the `postgres` Cluster, in the namespace the platform overlay installs
+    # into. Bucket-scoped object admin is granted by the `backups` unit, not project-wide here.
+    postgres = {
+      display_name = "CloudNativePG backups"
+      ksa          = "gitfrok/postgres"
+      roles        = []
+    }
     controlplane = {
       display_name = "gitfrok control plane"
       ksa          = "default/controlplane"

@@ -1,0 +1,14 @@
+---
+# The data plane's own bucket, in its own project. Separate from prod-cp's because a shared backup
+# target would be a path between planes, and ADR-0092 decision 2's whole point is that there is none.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  backup:
+    barmanObjectStore:
+      destinationPath: "gs://gitfrok-prod-dp-postgres-backups/postgres"
+      googleCredentials:
+        gkeEnvironment: true
+    retentionPolicy: "30d"

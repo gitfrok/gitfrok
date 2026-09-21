@@ -1,0 +1,209 @@
+---
+# The custody service (ADR-0066), carried from deploy/dev with one thing changed: it terminates TLS.
+#
+# Everything scripts/check-custody-service.sh asserts of the dev manifest holds here, and that is
+# not incidental — SPEC-0069 AC7 requires the gate be taught this path, because until it is the gate
+# proves properties about a Minikube file while production runs a different one:
+#
+#   three replicas          the Raft minimum (ADR-0066 decision 6)
+#   placement label         control-plane-side only; no data-plane surface references custody
+#   NO seal stanza          absence means Shamir, and that absence IS the decision (d4). A
+#                           cloud-KMS seal here would be a posture violation, not a convenience
+#   no static credential    Kubernetes auth is the only client path (d5), whose server-side half is
+#                           the ServiceAccount plus the token-review delegation below
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao
+  labels:
+    app: openbao
+    placement: control-plane
+---
+# The server-side half of Kubernetes auth: OpenBao reviews the tokens its clients present. Without
+# this the control plane's projected token cannot be exchanged, and custody has no client path at all.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-token-review
+  labels:
+    app: openbao
+    placement: control-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: openbao
+    namespace: gitfrok
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-config
+  labels:
+    app: openbao
+    placement: control-plane
+data:
+  server.hcl: |
+    # OpenBao server config — PRODUCTION (ADR-0066, ADR-0099 decision 6).
+    #
+    # The dev config's own comment said "a production control plane serves TLS on both listener
+    # addresses". This is that. The difference matters beyond hygiene: deploy/dev runs a busybox TCP
+    # proxy sidecar beside the control plane so the custody adapter can reach a plaintext listener
+    # over loopback, which is the only place the adapter admits plain http. Neither that sidecar nor
+    # GITFROK_CUSTODY_ALLOW_LOOPBACK_HTTP exists in deploy/k8s, so this listener MUST serve TLS or
+    # the control plane cannot reach custody at all.
+    #
+    # There is deliberately no seal stanza. Absence means Shamir, which is ADR-0066 decision 4, and
+    # check-custody-service.sh fails on a seal stanza rather than merely noting one.
+    ui = false
+    disable_mlock = true
+
+    listener "tcp" {
+      address         = "[::]:8200"
+      cluster_address = "[::]:8201"
+      tls_cert_file   = "/openbao/tls/tls.crt"
+      tls_key_file    = "/openbao/tls/tls.key"
+    }
+
+    storage "raft" {
+      path = "/openbao/data"
+
+      retry_join {
+        leader_api_addr = "https://openbao-0.openbao-internal:8200"
+        leader_ca_cert_file = "/openbao/tls/ca.crt"
+      }
+      retry_join {
+        leader_api_addr = "https://openbao-1.openbao-internal:8200"
+        leader_ca_cert_file = "/openbao/tls/ca.crt"
+      }
+      retry_join {
+        leader_api_addr = "https://openbao-2.openbao-internal:8200"
+        leader_ca_cert_file = "/openbao/tls/ca.crt"
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao-internal
+  labels:
+    app: openbao
+    placement: control-plane
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: openbao
+  ports:
+    - name: api
+      port: 8200
+    - name: cluster
+      port: 8201
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao
+  labels:
+    app: openbao
+    placement: control-plane
+spec:
+  type: ClusterIP
+  selector:
+    app: openbao
+  ports:
+    - name: api
+      port: 8200
+      targetPort: api
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao
+  labels:
+    app: openbao
+    placement: control-plane
+    # ADR-0066 decision 4's share shape, recorded on the object the way the dev manifest records it
+    # so the posture is readable without opening a runbook.
+    unseal: shamir-quorum-3-of-5
+spec:
+  replicas: 3
+  serviceName: openbao-internal
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: openbao
+  template:
+    metadata:
+      labels:
+        app: openbao
+        placement: control-plane
+    spec:
+      serviceAccountName: openbao
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        fsGroup: 1000
+      containers:
+        - name: openbao
+          image: docker.io/openbao/openbao:2.6.1
+          args: ["bao", "server", "-config=/openbao/config"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: BAO_API_ADDR
+              value: "https://$(POD_NAME).openbao-internal:8200"
+            - name: BAO_CLUSTER_ADDR
+              value: "https://$(POD_NAME).openbao-internal:8201"
+            - name: BAO_CACERT
+              value: /openbao/tls/ca.crt
+          ports:
+            - name: api
+              containerPort: 8200
+            - name: cluster
+              containerPort: 8201
+          volumeMounts:
+            - name: config
+              mountPath: /openbao/config
+              readOnly: true
+            - name: tls
+              mountPath: /openbao/tls
+              readOnly: true
+            - name: data
+              mountPath: /openbao/data
+          # A sealed node is UNREADY, not unhealthy. ADR-0066 decision 4 keeps a human quorum in the
+          # cold-start path, so restarting a sealed pod achieves nothing — /sys/health returns 501
+          # when sealed and this probe treats that as not-ready rather than as a reason to restart.
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: api
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: openbao-config
+        # An INPUT, not authored here (ADR-0099 decision 7). One of the seven manual seams.
+        - name: tls
+          secret:
+            secretName: openbao-tls
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: premium-rwo
+        resources:
+          requests:
+            storage: 10Gi
