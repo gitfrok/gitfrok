@@ -10,7 +10,7 @@
 
 locals {
   env_name   = "prod-dp"
-  project_id = "gitfrok-prod-dp"      # TODO: set to the real project before first apply
+  project_id = "gitfrok-prod-dp"      # created 2026-09-22, billing 2025-10280-7Solutions
   region     = "asia-southeast1"      # same region as the control plane; residency is a G7 fact
 
   labels = {

@@ -72,14 +72,24 @@ resource "google_container_cluster" "this" {
       enabled = true
     }
 
-    # No GCP L7 load balancer: ingress is a workload-layer decision and an open ADR-0092 follow-up.
+    # The GCP L7 load balancer is ENABLED because ADR-0095 decision 2 closed the ingress follow-up
+    # this was disabled for: the browser and issuer surfaces are served through Gateway API on GKE's
+    # managed controller, and that controller provisions GCLBs through this addon. Disabling it
+    # leaves a Gateway permanently unprogrammed with no error that names the cause.
     http_load_balancing {
-      disabled = true
+      disabled = false
     }
 
     horizontal_pod_autoscaling {
       disabled = false
     }
+  }
+
+  # Gateway API CRDs, installed and reconciled by GKE. ADR-0095 decision 2 chose Gateway API over an
+  # ingress controller of our own precisely so this stays GKE's to manage; without the channel set,
+  # the CRDs are absent and the overlay's Gateway cannot be applied at all.
+  gateway_api_config {
+    channel = "CHANNEL_STANDARD"
   }
 
   # Shielded nodes: secure boot and integrity monitoring, no reason not to.

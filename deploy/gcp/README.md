@@ -4,9 +4,12 @@
 (Accepted).** Read it first; it explains every choice this tree makes, and where it and this README
 disagree, the ADR wins (ADR-0001).
 
-Accepted decides *where* the control plane runs. It does not make this tree appliable: both
-`project_id` values and the DNS apex are placeholders, and `prod-cp`'s `admin_networks` is
-`0.0.0.0/0`. Set all four before any `terragrunt apply` — no gate checks them.
+**Updated 2026-09-22.** Both `project_id` values are real (`gitfrok-prod-cp`, `gitfrok-prod-dp`,
+created 2026-09-22 on billing `2025-10280-7Solutions`), the DNS apex is gone — ADR-0095 made
+Cloudflare authoritative and retired the Cloud DNS unit — and `prod-cp`'s `admin_networks` is an
+empty list, which is an **open public Kubernetes API** the deciding owner accepted on 2026-09-22.
+`env.hcl` records why it is an empty list rather than a `0.0.0.0/0` entry. No gate checks any of
+this, so read `env.hcl` before an apply rather than trusting this paragraph.
 
 ## What this provisions, and what it refuses to
 
@@ -23,7 +26,6 @@ So the units end at:
 | `network` | VPC, subnet with pod/service secondary ranges, Cloud Router + NAT |
 | `gke` | the regional cluster, a `system` node pool, and on the data plane a gVisor `runners` pool |
 | `artifact-registry` | the Docker repository, immutable tags (control plane only) |
-| `dns-zone` | the public zone (control plane only) |
 | `workload-identity` | Google service accounts and their keyless KSA bindings |
 
 Every stateful dependency — Postgres, Valkey, Redpanda, SeaweedFS, OpenBao, Zitadel — runs
@@ -34,7 +36,7 @@ EKS/AKS a four-unit change.
 ## Two environments, two shapes
 
 ```
-live/prod-cp     control plane — public API endpoint (authorized networks), a DNS zone, no runner pool
+live/prod-cp     control plane — public API endpoint (UNRESTRICTED, see below), no DNS zone, no runner pool
 live/prod-dp     data plane    — PRIVATE endpoint, no DNS zone, gVisor runner pool, no inbound path
 ```
 
@@ -44,13 +46,19 @@ no unit creates a load balancer.
 
 ## Before the first run
 
-1. **Create the two projects** and set `project_id` in both `env.hcl` files. Nothing here invents a
-   project.
-2. **Set `dns_name`** in `live/prod-cp/env.hcl` to the real apex, trailing dot included.
-3. **Set `admin_networks`** in `live/prod-cp/env.hcl` to the real operator CIDR. It ships as
-   `0.0.0.0/0` with a TODO, and that is not merely insecure — GKE's master-authorized-networks API
-   has historically refused `0.0.0.0/0` as an entry, so the placeholder may fail the apply outright.
-4. **Authenticate:** `gcloud auth application-default login`.
+1. ~~Create the two projects~~ — **done 2026-09-22**: `gitfrok-prod-cp` and `gitfrok-prod-dp`,
+   both linked to billing `2025-10280-7Solutions`.
+2. ~~Set `dns_name`~~ — **gone.** ADR-0095 decision 4 made Cloudflare authoritative for
+   `7.solutions` and decision 10 retired this tree's `dns-zone` unit. The three records
+   (`app-gitfrok`, `auth-gitfrok`, `agents-gitfrok`) are created operator-side in Cloudflare, and
+   `agents-gitfrok` must stay **DNS-only** — a proxied record terminates TLS and breaks the
+   client-certificate mTLS every agent depends on (ADR-0095 decision 5).
+3. **`admin_networks` is empty on purpose**, and that is an open public Kubernetes API accepted by
+   the owner on 2026-09-22. To narrow it, put the operator CIDR in `live/prod-cp/env.hcl` — but do
+   **not** write `0.0.0.0/0` as an entry, because GKE refuses that value; an empty list is how this
+   module expresses "unrestricted".
+4. **Authenticate:** `gcloud auth application-default login`. `gcloud auth login` alone does not
+   satisfy the provider — it needs Application Default Credentials.
 
 The state bucket is created for you, per environment, as `<project_id>-tfstate` with versioning on.
 There is no bootstrap unit.
@@ -99,10 +107,23 @@ them to whatever renders the manifests.
 
 ## What is missing, and is not an oversight
 
-**The control plane has no chart.** `../dev/*.yaml` is Minikube-only by ADR-0024, and ADR-0013's
-chart is the *data-plane* installer. So this tree can provision the control-plane cluster and
-nothing can yet deploy the control plane into it. That is an open ADR-0092 follow-up and it blocks a
-first real deployment — it is not something to work around here.
+**The control plane has no installer yet.** `../dev/*.yaml` is Minikube-only by ADR-0024, and
+ADR-0013's chart is the *data-plane* installer. ADR-0093 decided the control plane gets its own, and
+ADR-0096 (Accepted 2026-09-22) made it **Kustomize at `deploy/k8s/controlplane/`** — which **T-0084
+has not built**. So this tree can provision the control-plane cluster and nothing can yet deploy the
+control plane into it. It still blocks a first real deployment and is still not something to work
+around here.
 
-Also open, per the ADR: ingress/TLS/DNS records for the public surface, backup and restore for the
-in-cluster stateful set, and a staging environment.
+**Helm is gone from this tree's vocabulary** (ADR-0096 decision 1). Where a sentence above says
+"chart", read "installer": `deploy/helm/gitfrok-dataplane` is the last one left and T-0085 converts
+it.
+
+**The third-party stateful set has no production artifact.** ADR-0093 decision 2 declares Postgres,
+Valkey, Redpanda, OpenBao and Zitadel as *required inputs*; `../dev` is Minikube's and is not it.
+This blocks a first deployment independently of the installer above.
+
+Ingress/TLS/DNS is **no longer open** — ADR-0095 (Accepted 2026-09-22) decided it, and this tree
+carries its two cluster-level halves: `gateway_api_config` and the L7 addon the managed Gateway
+controller needs. Still open per the ADRs: the **reserved static addresses** ADR-0095 decision 6
+requires (deliberately not provisioned yet — nothing consumes an address until the overlay exists),
+backup and restore for the in-cluster stateful set, and a staging environment.
