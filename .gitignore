@@ -2,6 +2,14 @@
 # dev manifests, so there was nothing generated to ignore until now. Checked-in agent config
 # (.claude/settings.json, .cursor/rules/, opencode.json) is deliberate and stays tracked.
 
+# Credentials. Nothing in this repo needs a secret at rest -- the composition reads them from the
+# environment and the cluster reads them from platform secrets (ADR-0066 custody) -- so any .env
+# here is a local convenience holding a live key, and one already was: .env-cf carried a Cloudflare
+# zone/account id and an API token untracked-but-unignored, one `git add -A` away from the history.
+# The pattern is anchored to the leading dot on purpose: `deploy/dev/versions.env` is tracked image
+# pins, not a secret, and `*.env` would have swept it out from under the dev manifests.
+.env*
+
 # Qoder's generated repo wiki: ~1.7 MB of Markdown re-derived from the submodules and rewritten
 # wholesale on each run. Committing it would park a stale copy of the Source of Truth inside the repo
 # that defers to governance for every decision (invariant 21), and it would show up as churn in every
@@ -33,6 +41,11 @@
 .cursor/skills/
 .github/prompts/
 .github/skills/
+# Same category again: opencode's per-developer drop. The tracked, deliberate config is
+# `opencode.json` at the root -- outside this directory -- so the directory itself can go
+# wholesale, unlike .claude/ where some paths are kept. It currently holds 184 command and
+# skill files plus node_modules; its own .gitignore hides only the package files.
+.opencode/
 openspec/
 # Same category, different tools: .agents/skills is another plugin drop, and
 # skills-lock.json is the per-developer lockfile that records which ones this
