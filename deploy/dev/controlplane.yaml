@@ -102,7 +102,7 @@ spec:
       containers:
       - name: controlplane
         # Image mirrors deploy/dev/versions.env (CONTROLPLANE_IMAGE).
-        image: docker.io/gitfrok/controlplane-app:0.1.0
+        image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/controlplane-app:0.1.0
         imagePullPolicy: IfNotPresent
         env:
         - name: GITFROK_LISTEN_ADDR

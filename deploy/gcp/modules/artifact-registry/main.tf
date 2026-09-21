@@ -1,8 +1,10 @@
 # Where first-party images live. One of the four cloud APIs ADR-0092 decision 5 accepts, because
 # Kubernetes has no registry of its own.
 #
-# This module does not decide that Artifact Registry becomes the *publish* target for releases —
-# ADR-0047 leaves that to whichever registry can be verified offline, and it stays a follow-up.
+# ADR-0098 (Accepted 2026-09-22) makes this the publish target, replacing ADR-0047's ghcr.io. Two
+# consequences live in the inputs rather than here: the repository is made publicly readable on
+# purpose (decision 2 — a BYO customer must pull without a vendor credential), and exactly one
+# principal may write to it (decision 5's keyless publisher).
 
 resource "google_artifact_registry_repository" "images" {
   project       = var.project_id
@@ -25,5 +27,18 @@ resource "google_artifact_registry_repository_iam_member" "readers" {
   location   = google_artifact_registry_repository.images.location
   repository = google_artifact_registry_repository.images.name
   role       = "roles/artifactregistry.reader"
+  member     = each.value
+}
+
+# Write access, kept deliberately separate from read. There should be exactly one writer — the
+# keyless publisher of ADR-0098 decision 5 — while readers include `allUsers`. Collapsing the two
+# into one list is how a public registry acquires a public writer.
+resource "google_artifact_registry_repository_iam_member" "writers" {
+  for_each = toset(var.writer_members)
+
+  project    = var.project_id
+  location   = google_artifact_registry_repository.images.location
+  repository = google_artifact_registry_repository.images.name
+  role       = "roles/artifactregistry.writer"
   member     = each.value
 }

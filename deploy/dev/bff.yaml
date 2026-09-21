@@ -61,7 +61,7 @@ spec:
       - name: bff
         # Image mirrors deploy/dev/versions.env (BFF_IMAGE); dev-up.sh loads it
         # into the node, so a tag here and the record agree.
-        image: docker.io/gitfrok/bff:0.1.0
+        image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/bff:0.1.0
         imagePullPolicy: IfNotPresent
         env:
         # The data plane's policy door serves PDP, codereview, CI and OIDC on one

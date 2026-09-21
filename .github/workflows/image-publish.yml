@@ -1,0 +1,144 @@
+# First-party image publishing (ADR-0098, preserving ADR-0047's authority rule).
+#
+# ADR-0047: only protected `image-publish` runs from reviewed `main` or a `v*` release tag may
+# publish; pull-request jobs stay build-only and receive no signing material. ADR-0098 keeps that and
+# makes the GCP credential keyless — GitHub federates in, and no service-account key exists.
+#
+# Three gates have to agree before a push happens, and they are independent on purpose:
+#   1. this workflow's `environment: image-publish`, whose protection rules hold the reviewers and
+#      the Cosign secrets (deploy/dev/trust/image-publish/README.md);
+#   2. the Workload Identity Pool provider's attribute condition, which mints a GCP token only for
+#      this repository, this environment, and main-or-v* (deploy/gcp/modules/image-publish-identity);
+#   3. Artifact Registry's `writer_members`, which lists exactly one principal.
+#
+# Any one of them alone would be a single point of failure; all three is what makes "only a
+# protected run may publish" true rather than asserted.
+name: image-publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version for the tag and the .release manifests (e.g. 0.1.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  # Required for federation. This is the whole reason no key is needed.
+  id-token: write
+
+concurrency:
+  group: image-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # The reviewer gate and the Cosign secrets both live here. Removing this line does not merely
+    # skip a review — it makes the pool provider's attribute condition fail, because that condition
+    # requires assertion.environment to equal this name. The build would stop at authentication
+    # rather than publishing unreviewed, which is the failure mode worth having.
+    environment: image-publish
+
+    env:
+      REGISTRY: asia-southeast1-docker.pkg.dev
+      REPOSITORY: gitfrok-prod-cp/gitfrok
+      VERSION: ${{ inputs.version || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Every Dockerfile lives in a submodule; the super-repo is the only tree that holds them
+          # all at one consistent set of pins.
+          submodules: recursive
+
+      - name: Refuse a version that is not a release shape
+        run: |
+          set -euo pipefail
+          v="${VERSION#v}"
+          case "$v" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::VERSION '$VERSION' is not semver-shaped; ADR-0034 wants a pin that resolves to one thing forever"; exit 1 ;;
+          esac
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          # Both values are non-secret outputs of the image-publish-identity unit
+          # (`terragrunt output workflow_inputs`). Non-secret is the point of decision 5.
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_IMAGE_PUBLISHER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure the registry
+        run: gcloud auth configure-docker "$REGISTRY" --quiet
+
+      - uses: sigstore/cosign-installer@v4
+
+      - name: Build, push by digest, sign, and write the release manifest
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          RELEASE_SIGNING_KEY_PEM: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+
+          # component:context:dockerfile — the four first-party images. git-storaged and the operator
+          # ship from backend too; they are listed so a release publishes one coherent set rather
+          # than whichever images somebody remembered.
+          set -- \
+            "controlplane-app:backend:backend/Dockerfile.controlplane" \
+            "dataplane-app:backend:backend/Dockerfile.dataplane" \
+            "git-storaged:backend:backend/Dockerfile.gitstoraged" \
+            "operator-app:backend:backend/Dockerfile.operator" \
+            "bff:bff:bff/Dockerfile" \
+            "webfrontend:webfrontend:webfrontend/Dockerfile"
+
+          # The release-signing key is supplied for this run only and never touches the tree
+          # (scripts/sign-release.sh custody rule). mktemp in the runner's own space, 0600.
+          keyfile="$(mktemp)"; chmod 600 "$keyfile"
+          printf '%s' "$RELEASE_SIGNING_KEY_PEM" > "$keyfile"
+          trap 'rm -f "$keyfile"' EXIT
+
+          for spec in "$@"; do
+            component="${spec%%:*}"; rest="${spec#*:}"
+            context="${rest%%:*}"; dockerfile="${rest#*:}"
+            ref="$REGISTRY/$REPOSITORY/$component"
+
+            echo "::group::$component"
+            docker build -t "$ref:$VERSION" -f "$dockerfile" "$context"
+            docker push "$ref:$VERSION"
+
+            # The DIGEST is the pin, not the tag (ADR-0034/0035). Read it back from the registry
+            # rather than trusting the local build, so what gets signed is what was stored.
+            digest="$(gcloud artifacts docker images describe "$ref:$VERSION" --format='value(image_summary.digest)')"
+            [ -n "$digest" ] || { echo "::error::no digest for $component"; exit 1; }
+
+            # Sign the IMAGE with the image-publish key (ADR-0047).
+            cosign sign --key env://COSIGN_PRIVATE_KEY --yes "$ref@$digest"
+
+            # Sign the RELEASE IDENTITY with the release-signing key (ADR-0044). Two chains, two
+            # keys, two verifiers — check-signed-releases.sh and the backend rollout module.
+            ./scripts/sign-release.sh \
+              --component "$component" \
+              --version "$VERSION" \
+              --oci-ref "$ref" \
+              --digest "$digest" \
+              --key "$keyfile" \
+              --out "deploy/releases/$component-$VERSION.release"
+            echo "::endgroup::"
+          done
+
+      - name: The gates must still pass on what was just written
+        run: ./scripts/check-signed-releases.sh
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-manifests-${{ env.VERSION }}
+          path: deploy/releases/*.release

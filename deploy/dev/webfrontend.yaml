@@ -30,7 +30,7 @@ spec:
       - name: webfrontend
         # Image mirrors deploy/dev/versions.env (WEBFRONTEND_IMAGE); dev-up.sh
         # loads it into the node, so a tag here and the record agree.
-        image: docker.io/gitfrok/webfrontend:0.1.0
+        image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/webfrontend:0.1.0
         imagePullPolicy: IfNotPresent
         env:
         # The one per-environment upstream (SPEC-0021). The SSR server fetches

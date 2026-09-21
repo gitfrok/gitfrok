@@ -38,7 +38,7 @@ spec:
         runAsGroup: 65532
       containers:
         - name: bff
-          image: docker.io/gitfrok/bff:0.1.0
+          image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/bff:0.1.0
           env:
             - name: GITFROK_BFF_LISTEN_ADDR
               value: ":8080"

@@ -75,7 +75,7 @@ spec:
       - name: git-storaged
         # Image mirrors deploy/dev/versions.env (GIT_STORAGED_IMAGE); dev-up.sh
         # builds it into the node, so the manifest and the record agree.
-        image: docker.io/gitfrok/git-storaged:0.1.0
+        image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/git-storaged:0.1.0
         imagePullPolicy: IfNotPresent
         env:
         - name: GITFROK_GIT_STORAGE_ROOT

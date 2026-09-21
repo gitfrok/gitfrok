@@ -41,7 +41,7 @@ spec:
       - name: dataplane
         # Image mirrors deploy/dev/versions.env (DATAPLANE_IMAGE); dev-up.sh loads
         # it into the node, so a tag here and the record agree.
-        image: docker.io/gitfrok/dataplane-app:0.1.0
+        image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/dataplane-app:0.1.0
         imagePullPolicy: IfNotPresent
         env:
         - name: GITFROK_POLICY_BUNDLE_DIR

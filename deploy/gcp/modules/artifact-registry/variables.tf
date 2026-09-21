@@ -26,3 +26,14 @@ variable "reader_members" {
   type        = list(string)
   default     = []
 }
+
+variable "writer_members" {
+  description = <<-DESC
+    Principals permitted to PUSH. ADR-0098 decision 5 expects exactly one: the keyless
+    image-publisher service account, assumed by the protected `image-publish` workflow through
+    Workload Identity Federation. Anything else here is a second publish path that ADR-0047's
+    authority rule does not cover.
+  DESC
+  type        = list(string)
+  default     = []
+}

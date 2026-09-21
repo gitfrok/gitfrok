@@ -21,7 +21,7 @@ spec:
         runAsGroup: 65532
       containers:
         - name: webfrontend
-          image: docker.io/gitfrok/webfrontend:0.1.0
+          image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/webfrontend:0.1.0
           env:
             - name: GITFROK_BFF_ORIGIN
               value: "http://bff:8080"

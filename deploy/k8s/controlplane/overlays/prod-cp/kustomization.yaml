@@ -19,17 +19,17 @@ patches:
 
 # ADR-0096 decision 9 / ADR-0034-0035: one declarative entry per image, pinned by DIGEST.
 #
-# AC5 IS NOT MET AND IS NOT SILENTLY PASSED. These three images have no published digest to pin to:
-# deploy/dev/versions.env pins them by tag and states they are "never published to an external
-# registry in this environment" — dev-up.sh builds them into the Minikube node. deploy/releases/
-# carries signed digests for dataplane-app and operator-app only. So the tags below are honest
-# placeholders, `check-controlplane-kustomize.sh` reports AC5 as NOT RUN with that cause named on
-# its own output line, and the digests land when the images are first published to the Artifact
-# Registry the prod-cp environment provisions.
+# AC5 IS STILL NOT MET, AND IS STILL NOT SILENTLY PASSED — but the reason has narrowed. ADR-0098
+# settled WHERE the images live; nothing has published them there yet, so there is no digest to pin.
+# `check-controlplane-kustomize.sh` reports AC5 as NOT RUN with that cause on its own output line.
+#
+# When the image-publish workflow runs, each entry gains `digest: sha256:...` and drops `newTag`,
+# read from the `.release` manifest the same run signs. That is the moment AC5 closes, and the
+# release manifest rather than a human is where the value comes from.
 images:
-  - name: docker.io/gitfrok/controlplane-app
+  - name: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/controlplane-app
     newTag: 0.1.0
-  - name: docker.io/gitfrok/bff
+  - name: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/bff
     newTag: 0.1.0
-  - name: docker.io/gitfrok/webfrontend
+  - name: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/webfrontend
     newTag: 0.1.0

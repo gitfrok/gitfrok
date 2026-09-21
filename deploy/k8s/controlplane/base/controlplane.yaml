@@ -36,7 +36,7 @@ spec:
       containers:
         - name: controlplane
           # The overlay pins this by digest through the `images:` transformer (ADR-0096 decision 9).
-          image: docker.io/gitfrok/controlplane-app:0.1.0
+          image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/controlplane-app:0.1.0
           env:
             - name: GITFROK_LISTEN_ADDR
               value: ":8080"
