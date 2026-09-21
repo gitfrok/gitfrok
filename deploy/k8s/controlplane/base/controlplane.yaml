@@ -1,0 +1,159 @@
+---
+# The custody bundle's durable snapshot home. The snapshot carries only public material and key
+# references (SPEC-0044 AC1), but startup REFUSES the agent door without somewhere to persist it,
+# and it must survive rescheduling — hence a real claim rather than emptyDir.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: controlplane-custody-snapshot
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controlplane
+  template:
+    metadata:
+      labels:
+        app: controlplane
+    spec:
+      serviceAccountName: controlplane
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: controlplane
+          # The overlay pins this by digest through the `images:` transformer (ADR-0096 decision 9).
+          image: docker.io/gitfrok/controlplane-app:0.1.0
+          env:
+            - name: GITFROK_LISTEN_ADDR
+              value: ":8080"
+            - name: GITFROK_POLICY_BUNDLE_DIR
+              value: /etc/gitfrok/policy
+            # A NAME REFERENCE, never a literal. dev inlines this URL with its password
+            # (deploy/dev/controlplane.yaml); production cannot, and the gate enforces it — that is
+            # ADR-0093 decision 3 carried across by ADR-0096 decision 4.
+            - name: GITFROK_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-database
+                  key: url
+            # Door 1: the agent gateway (ADR-0017, SPEC-0038). Server names come from the overlay,
+            # because the certificate's SANs are an environment fact.
+            - name: GITFROK_AGENT_GRPC_ADDR
+              value: ":9091"
+            # Door 2: the usage view the BFF renders. Refuses to open without door 1, so both are
+            # set together or neither is.
+            - name: GITFROK_USAGE_GRPC_ADDR
+              value: ":9092"
+            # Door 3: residency Declare (SPEC-0043), PAT-verified before any policy decision.
+            - name: GITFROK_RESIDENCY_GRPC_ADDR
+              value: ":9093"
+            # Door 4: enrolment issuance (SPEC-0038 AC1).
+            - name: GITFROK_ENROLMENT_GRPC_ADDR
+              value: ":9094"
+            - name: GITFROK_PAT_VERIFIER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-pat-verifier
+                  key: key
+            # Custody (ADR-0066). https, with no loopback relaxation: dev runs a busybox tcp proxy
+            # sidecar because its OpenBao listener sets tls_disable and the adapter admits plain
+            # http only on loopback. Production terminates TLS properly, so the sidecar and the
+            # GITFROK_CUSTODY_ALLOW_LOOPBACK_HTTP flag are both absent here — deliberately, since
+            # carrying a dev relaxation into production is how it becomes permanent.
+            - name: GITFROK_CUSTODY_OPENBAO_ADDR
+              value: "https://openbao:8200"
+            - name: GITFROK_CUSTODY_TRANSIT_MOUNT
+              value: "transit"
+            - name: GITFROK_CUSTODY_KUBERNETES_ROLE
+              value: "agent-ca"
+            - name: GITFROK_CUSTODY_KEY_NAME
+              value: "agent-ca"
+            - name: GITFROK_CUSTODY_SNAPSHOT_FILE
+              value: /var/lib/gitfrok/custody/snapshot.json
+          ports:
+            - name: health
+              containerPort: 8080
+            - name: agent-grpc
+              containerPort: 9091
+            - name: usage-grpc
+              containerPort: 9092
+            - name: residency-grpc
+              containerPort: 9093
+            - name: enrolment-grpc
+              containerPort: 9094
+          # /healthz only, and that is a RECORDED LIMIT rather than a choice. SPEC-0067 AC9 wanted a
+          # readiness signal that distinguishes a sealed OpenBao from an unreachable one; the shipped
+          # binary serves one endpoint that does neither, so T-0084 stops here rather than adding a
+          # probe path the binary does not honour. Until that exists, this Deployment reports Ready
+          # while custody is sealed and the agent door is refusing (ADR-0066 decision 4).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: policy-bundle
+              mountPath: /etc/gitfrok/policy
+              readOnly: true
+            - name: custody-snapshot
+              mountPath: /var/lib/gitfrok/custody
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        # Both are INPUTS: the policy bundle is governance's (ADR-0006, invariant 2) and the claim is
+        # the cluster's. The installer creates neither ConfigMap.
+        - name: policy-bundle
+          configMap:
+            name: gitfrok-policy-bundle
+        - name: custody-snapshot
+          persistentVolumeClaim:
+            claimName: controlplane-custody-snapshot
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: controlplane
+spec:
+  type: ClusterIP
+  selector:
+    app: controlplane
+  ports:
+    - name: health
+      port: 8080
+      targetPort: health
+    - name: agent-grpc
+      port: 9091
+      targetPort: agent-grpc
+    - name: usage-grpc
+      port: 9092
+      targetPort: usage-grpc
+    - name: residency-grpc
+      port: 9093
+      targetPort: residency-grpc
+    - name: enrolment-grpc
+      port: 9094
+      targetPort: enrolment-grpc

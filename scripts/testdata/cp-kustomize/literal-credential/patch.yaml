@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+spec:
+  template:
+    spec:
+      containers:
+        - name: controlplane
+          env:
+            - name: GITFROK_DATABASE_URL
+              value: postgres://gitfrok_app:gitfrok_app@postgres:5432/gitfrok

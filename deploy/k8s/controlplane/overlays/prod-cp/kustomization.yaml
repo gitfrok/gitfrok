@@ -1,0 +1,32 @@
+# ADR-0092's control-plane environment (live/prod-cp). One overlay exists today; ADR-0096's register
+# row asks for a stated rule about what a second may vary, and SPEC-0067 AC11 is that rule for now:
+# hostnames, addresses, replicas and image digests, never which workloads exist.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitfrok
+
+resources:
+  - ../../base
+  - gateway.yaml
+  - agent-door.yaml
+
+patches:
+  - path: patch-endpoints.yaml
+
+# ADR-0096 decision 9 / ADR-0034-0035: one declarative entry per image, pinned by DIGEST.
+#
+# AC5 IS NOT MET AND IS NOT SILENTLY PASSED. These three images have no published digest to pin to:
+# deploy/dev/versions.env pins them by tag and states they are "never published to an external
+# registry in this environment" — dev-up.sh builds them into the Minikube node. deploy/releases/
+# carries signed digests for dataplane-app and operator-app only. So the tags below are honest
+# placeholders, `check-controlplane-kustomize.sh` reports AC5 as NOT RUN with that cause named on
+# its own output line, and the digests land when the images are first published to the Artifact
+# Registry the prod-cp environment provisions.
+images:
+  - name: docker.io/gitfrok/controlplane-app
+    newTag: 0.1.0
+  - name: docker.io/gitfrok/bff
+    newTag: 0.1.0
+  - name: docker.io/gitfrok/webfrontend
+    newTag: 0.1.0

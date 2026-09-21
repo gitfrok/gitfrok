@@ -1,0 +1,34 @@
+---
+# ADR-0095 decisions 3, 4 and 5: the agent door, and the reason it is a separate address rather than
+# a path on the Gateway above.
+#
+# `platform/agentclient` pins our CA to verify the SERVER certificate as well as the client ones
+# (agentclient.go:90-92) and `cmd/dataplane-app` takes GITFROK_AGENT_CA_BUNDLE through require().
+# So the agent does not consult system roots, and ANY intermediary that terminates TLS here is
+# untrusted by every agent — not misconfigured, untrusted. That rules out the Gateway, Cloudflare's
+# proxy, and an identity-forwarding proxy alike; the last of those would also re-open SPEC-0002
+# limit (d), the caller-asserted subject SPEC-0043 AC6 spent a task closing.
+#
+# Hence: L4, TCP passthrough, TLS completed by controlplane-app itself, and the DNS record for
+# agents-gitfrok.7.solutions permanently DNS-only in Cloudflare. That record is one dashboard click
+# from breaking every enrolment, and the click looks like a security improvement — which is why
+# ADR-0095's register row asks for a live `dig` gate that no manifest check can substitute for.
+apiVersion: v1
+kind: Service
+metadata:
+  name: controlplane-agent-door
+  annotations:
+    # The reserved REGIONAL address, by name. Same open register row as the Gateway's: without it
+    # GKE hands out an ephemeral address, and a hand-written DNS record then advertises an address
+    # that moved the next time this Service is recreated.
+    networking.gke.io/load-balancer-ip-addresses: prod-cp-agent-door
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app: controlplane
+  ports:
+    - name: agent-grpc
+      port: 443
+      targetPort: agent-grpc
+      protocol: TCP

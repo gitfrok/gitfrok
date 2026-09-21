@@ -2,7 +2,7 @@
 .PHONY: bootstrap submodules dev-up dev-provision dev-smoke dev-north-star update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check runbook-check signed-releases-check
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
-verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5) + runbook completeness (T-0040 AC4)
+verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5) + runbook completeness (T-0040 AC4) + control-plane installer (T-0084, SPEC-0067) and the proof its gate can fail (AC10)
 	@./scripts/check-dep-direction.sh
 	@./scripts/check-version-floors.sh
 	@./scripts/check-dev-images.sh
@@ -11,6 +11,11 @@ verify: ## super-repo fitness gates: dependency direction + version floors + dev
 	@./scripts/check-byo-chart.sh
 	@./scripts/check-custody-service.sh
 	@./scripts/check-runbook.sh
+	@./scripts/check-controlplane-kustomize.sh
+# The failability proof runs in verify beside the gate it tests, deliberately: a gate whose
+# negative fixtures are never exercised rots into decoration, and this one's first version
+# had three false positives that only the fixtures would have caught.
+	@./scripts/test-controlplane-kustomize.sh
 lint-shell: ## shellcheck the fitness scripts (T-0009); CI gates this on every PR
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed: https://shellcheck.net"; exit 1; }
 	@shellcheck scripts/*.sh && echo "shellcheck: OK"
@@ -20,6 +25,10 @@ byo-chart-check: ## T-0031: the BYO chart carries no secret, token is reference-
 	@./scripts/check-byo-chart.sh
 custody-check: ## T-0040 AC5: custody service is 3-node Raft, control-plane-side, Shamir-only, credential-free; no data-plane chart references it (ADR-0066 decisions 5–7)
 	@./scripts/check-custody-service.sh
+cp-kustomize-check: ## T-0084 / SPEC-0067: the control-plane installer renders three first-party workloads, authors no Secret, keeps the agent door L4 on a reserved address
+	@./scripts/check-controlplane-kustomize.sh
+cp-kustomize-test: ## SPEC-0067 AC10: prove check-controlplane-kustomize.sh refuses each defect it claims to catch
+	@./scripts/test-controlplane-kustomize.sh
 runbook-check: ## T-0040 AC4: runbook carries rotation (§6b), unseal (§6a), seal/custody-outage and clock-skew (§4a) entries, and §6b's cross-references resolve
 	@./scripts/check-runbook.sh
 signed-releases-check: ## T-0032: no unsigned/mis-signed release is applicable; release trust bundle intact (SPEC-0039 AC3, ADR-0044)

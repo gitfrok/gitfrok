@@ -1,0 +1,87 @@
+---
+# ADR-0095 decision 2: the browser and issuer surfaces share one Gateway on GKE's MANAGED
+# controller, which is why this installer contains no ingress controller of its own.
+#
+# The :80 listener is not a redirect convenience — ADR-0095 decision 7 issues certificates over ACME
+# HTTP-01 through this Gateway precisely so that no Cloudflare credential has to live in the
+# cluster. Remove the listener and issuance stops; the running certificates keep working until they
+# expire, so the breakage arrives up to 90 days later.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gitfrok-cp
+  annotations:
+    # The reserved global address ADR-0095 decision 6 requires. It is referenced BY NAME so the
+    # record and the Gateway agree before the address exists — and it does not exist yet: its
+    # OpenTofu unit is an open register row, deliberately unbuilt because nothing consumed an
+    # address until this file. Applying this overlay before that unit lands leaves the Gateway
+    # unprogrammed.
+    networking.gke.io/addresses: prod-cp-gateway
+spec:
+  gatewayClassName: gke-l7-global-external-managed
+  listeners:
+    - name: acme-http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: app-https
+      protocol: HTTPS
+      port: 443
+      hostname: app-gitfrok.7.solutions
+      tls:
+        mode: Terminate
+        certificateRefs:
+          # cert-manager CREATES this Secret at runtime; this installer only names it. Referencing
+          # a Secret is not authoring one, which is the distinction SPEC-0067 AC3 turns on.
+          - name: app-gitfrok-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: auth-https
+      protocol: HTTPS
+      port: 443
+      hostname: auth-gitfrok.7.solutions
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: auth-gitfrok-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-gitfrok
+spec:
+  parentRefs:
+    - name: gitfrok-cp
+      sectionName: app-https
+  hostnames:
+    - app-gitfrok.7.solutions
+  rules:
+    - backendRefs:
+        - name: webfrontend
+          port: 4321
+---
+# auth-gitfrok routes to Zitadel, which this installer does NOT render: ADR-0093 decision 2 makes it
+# a required input, and ADR-0095 force 3 gives it its own hostname because ExternalDomain is baked
+# into what its OIDC discovery document advertises. So this route dangles until Zitadel is installed
+# by whatever owns the third-party stateful set — an open row that blocks a first deployment.
+# A backendRef is a reference, not a workload, so AC2 still holds.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: auth-gitfrok
+spec:
+  parentRefs:
+    - name: gitfrok-cp
+      sectionName: auth-https
+  hostnames:
+    - auth-gitfrok.7.solutions
+  rules:
+    - backendRefs:
+        - name: zitadel
+          port: 8080

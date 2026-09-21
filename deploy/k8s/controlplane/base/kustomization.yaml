@@ -1,0 +1,22 @@
+# The control-plane installer's environment-agnostic half (SPEC-0067, ADR-0096 decision 2).
+#
+# What is NOT here, on purpose:
+#   - hostnames, addresses, replica counts and image digests — the overlay's (SPEC-0067 AC11)
+#   - Postgres, Valkey, Redpanda, OpenBao, Zitadel — third-party software on its own lifecycle,
+#     and therefore a required INPUT, not content (ADR-0093 decision 2 via ADR-0096 decision 4)
+#   - any Secret, and any secretGenerator. Every credential is a name reference.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - serviceaccount.yaml
+  - controlplane.yaml
+  - bff.yaml
+  - webfrontend.yaml
+
+# includeSelectors is false deliberately: a label transformer that rewrites selectors makes a
+# future label change a Deployment-recreating change.
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: gitfrok-controlplane
