@@ -120,6 +120,16 @@ jobs:
             digest="$(gcloud artifacts docker images describe "$ref:$VERSION" --format='value(image_summary.digest)')"
             [ -n "$digest" ] || { echo "::error::no digest for $component"; exit 1; }
 
+            # ADR-0098 decision 4 ("docker.io/gitfrok/* is retired from the tree") finishes HERE,
+            # because this is the first moment the replacement ref is knowable: the digest exists
+            # only once the image is pushed. The BYO chart still pins the retired registry, and
+            # check-signed-releases.sh (this workflow's last step) cross-asserts that values.yaml's
+            # operator pin EQUALS the signed manifest's oci_ref and digest. Without this rewrite the
+            # run publishes and signs all six images and then fails its own gate on drift it created.
+            # The updated values.yaml ships in this run's artifact alongside the manifests.
+            python3 scripts/sync-chart-pin.py "$component" "$ref" "$digest"
+
+
             # Sign the IMAGE with the image-publish key (ADR-0047).
             cosign sign --key env://COSIGN_PRIVATE_KEY --yes "$ref@$digest"
 
@@ -141,4 +151,8 @@ jobs:
       - uses: actions/upload-artifact@v5
         with:
           name: release-manifests-${{ env.VERSION }}
-          path: deploy/releases/*.release
+          # values.yaml rides along because the run rewrote its pins (ADR-0098 decision 4); commit
+          # the two together or the tree drifts back the moment someone reruns the gate locally.
+          path: |
+            deploy/releases/*.release
+            deploy/helm/gitfrok-dataplane/values.yaml

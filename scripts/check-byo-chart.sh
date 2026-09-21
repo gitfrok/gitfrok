@@ -243,11 +243,36 @@ if command -v helm >/dev/null 2>&1; then
       > "$tmp/render-operator.yaml" 2> "$tmp/template-op.err"; then
     report "helm template with operator.enabled=true failed (no image values supplied):"; sed 's/^/  /' "$tmp/template-op.err"
   else
-    if ! grep -qE 'image:[[:space:]]*"?docker.io/gitfrok/operator-app@sha256:[0-9a-f]{64}' "$tmp/render-operator.yaml"; then
-      report "rendered operator Deployment does not carry the vendor's digest-pinned image with zero image values supplied (SPEC-0045 AC1)"
-    fi
-    if grep -qE 'docker\.io/gitfrok/operator-app:[^@]' "$tmp/render-operator.yaml"; then
-      report "the operator image is referenced by mutable tag instead of its digest pin"
+    # The expected repository is READ from values.yaml rather than named here. ADR-0098 decision 4
+    # retired docker.io/gitfrok/*, and the publish workflow rewrites this pin to the registry it
+    # actually published to (scripts/sync-chart-pin.py), so a hardcoded registry in this gate would
+    # fail the moment that rewrite is committed. The assertion stays anchored to the SIGNED release
+    # because check-signed-releases.sh separately cross-asserts values.yaml's pin against the
+    # manifest's oci_ref and digest — this reads the same value one hop away, it does not trust the
+    # chart on its own.
+    op_repo="$(sed -n 's/^[[:space:]]*repository:[[:space:]]*\(.*operator-app\)[[:space:]]*$/\1/p' "$chart/values.yaml" | head -1)"
+    if [ -z "$op_repo" ]; then
+      report "values.yaml carries no operator-app repository — the rendered operator pin cannot be checked against it (SPEC-0045 AC1)"
+    else
+      found_pin=0
+      # Every operator-app reference in the render must be exactly "<repo>@sha256:<64 hex>".
+      # A tag-shaped reference fails the same loop, so the mutable-tag case needs no separate grep.
+      while IFS= read -r oref; do
+        [ -n "$oref" ] || continue
+        case "$oref" in
+          "$op_repo@sha256:"*)
+            d="${oref#*@sha256:}"
+            case "$d" in
+              *[!0-9a-f]* | "") report "operator image digest is not 64 hex characters: $oref" ;;
+              *) [ "${#d}" -eq 64 ] && found_pin=1 || report "operator image digest is not 64 hex characters: $oref" ;;
+            esac
+            ;;
+          *) report "operator image is not the vendor's digest pin from values.yaml ($op_repo@sha256:...): $oref" ;;
+        esac
+      done <<EOF
+$(grep -oE '[A-Za-z0-9._/-]*operator-app[@:][A-Za-z0-9:._-]*' "$tmp/render-operator.yaml")
+EOF
+      [ "$found_pin" -eq 1 ] || report "rendered operator Deployment does not carry the vendor's digest-pinned image with zero image values supplied (SPEC-0045 AC1)"
     fi
     if grep -nE '^kind:[[:space:]]*(Secret|Service|Ingress)[[:space:]]*$' "$tmp/render-operator.yaml"; then
       report "rendered operator manifests carry a Secret or inbound surface"
