@@ -4,29 +4,42 @@
 (Accepted).** Read it first; it explains every choice this tree makes, and where it and this README
 disagree, the ADR wins (ADR-0001).
 
-> **Nothing billable is provisioned, and the free scaffolding is.** As of 2026-09-22, after a build,
-> a teardown, a rebuild (15/15 units), a full sweep to zero, and then a deliberate partial rebuild of
-> only the units that cost nothing.
+> **Both environments are up, in a deliberately minimum-cost shape.** As of 2026-09-22, after a
+> build, a teardown, a rebuild, a full sweep to zero, a free-scaffolding-only rebuild, and then this
+> one. Read the cost table at the bottom before changing any of it.
 >
-> **Applied and running at ~$0:** `project-services`, `workload-identity` (7 service accounts),
-> `image-publish-identity` (the WIF pool and publisher SA), `artifact-registry` (empty, public-read
-> per ADR-0098) and `backups` (two empty buckets). The two VPCs and subnets survived every teardown
-> and were never re-applied. **Verified absent in both projects:** clusters, instances, disks,
-> routers and addresses — all zero.
+> **The shape, and it is not the shape ADR-0092 was written against:**
 >
-> **Not applied, because these are what cost money:** `gke` (~$750/mo and effectively the whole
-> bill), Cloud NAT (~$32/mo per gateway — it lives in the `network` unit but `enable_nat` turns it
-> off), `addresses` (~$7/mo each, since a *reserved but unused* static IP still bills) and
-> `zt-connector` (~$7/mo each). Applying `network` as written recreates NAT, so the free rebuild
-> skips it entirely rather than relying on the VPC being idempotent.
+> - **Both clusters are ZONAL** (`asia-southeast1-a`), not regional. This is the single largest
+>   lever in the tree and the one most likely to be re-broken by accident: a regional cluster
+>   creates `min_nodes` nodes **per zone**, so a floor of 1 across three zones was three nodes per
+>   cluster, six in total. The module (`var.location`) defaults to the region, so **deleting the
+>   `location` line from a `gke/terragrunt.hcl` silently triples that environment's node bill.**
+>   The trade is the managed control plane's multi-zone spread. Residency is unaffected — the zone
+>   is inside the same region (G7).
+> - **`e2-standard-4`, `min_nodes = 2`, 100GB `pd-balanced`** on both system pools. Two rather than
+>   one because nothing in `../k8s/platform/base` declares CPU or memory requests: every pod is
+>   therefore schedulable, the cluster autoscaler never sees a pending pod to scale up *for*, and an
+>   undersized floor shows up as **eviction under memory pressure**, not as a pending pod.
+> - **prod-dp's runner pool is capped at 4**, down from 20, and is `e2-standard-4` (not shared-core,
+>   so ADR-0012's GKE Sandbox constraint still holds). `min_nodes = 0` keeps it free while idle; the
+>   ceiling is purely a bound on what a busy queue can spend.
+> - **PVCs are `standard-rwo`**, set in the overlays: prod-cp 550Gi→190Gi, prod-dp 710Gi→200Gi. See
+>   each overlay's `patch-storage.yaml`. **When the git tier lands it needs its own `premium-rwo`
+>   claim** (ADR-0033) — nothing currently deployed carries that contract, which is why this was
+>   available at all.
 >
-> [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) covers both directions, including the disk sweep
-> that a cluster deletion does not do for you. **Read the present tense below as "what an apply
-> creates", not "what is running".**
+> **Applied in both projects:** `project-services`, `workload-identity`, `network` (VPC + subnet +
+> Cloud Router + NAT), `gke`, `zt-connector`, `backups`. **prod-cp only:** `addresses`,
+> `artifact-registry`, `image-publish-identity`. There is deliberately no `live/prod-dp/addresses`.
 >
-> **OpenTofu state is stale by design here**: the clusters and their downstream resources were
-> deleted out of band with `gcloud`, so a `plan` will want to recreate everything. That is correct
-> and is how the rebuild is meant to start.
+> **Not running, and not for cost reasons:** the first-party control plane. No image has ever been
+> published to Artifact Registry, and OpenBao must be initialised and unsealed by an operator before
+> the control-plane overlay can start at all (ADR-0066 decision 4 — the shares never enter this repo,
+> the cluster, or any environment file). Both are covered in `../k8s/README.md`.
+>
+> [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) covers both directions, including the disk
+> sweep that a cluster deletion does not do for you.
 
 **Updated 2026-09-22.** Both `project_id` values are real (`gitfrok-prod-cp`, `gitfrok-prod-dp`,
 created 2026-09-22 on billing `2025-10280-7Solutions`), the DNS apex is gone — ADR-0095 made
@@ -50,7 +63,7 @@ So the units end at:
 |---|---|
 | `project-services` | the APIs the environment is allowed to use |
 | `network` | VPC, subnet with pod/service secondary ranges, Cloud Router + NAT |
-| `gke` | the regional cluster, a `system` node pool, and on the data plane a gVisor `runners` pool |
+| `gke` | the cluster — **zonal in both environments today**, regional if `location` is unset — a `system` node pool, and on the data plane a gVisor `runners` pool |
 | `artifact-registry` | the Docker repository, immutable tags (control plane only) |
 | `addresses` | the two reserved EXTERNAL addresses ADR-0095 decision 6 requires — a global one for the Gateway, a regional one for the L4 agent door (control plane only) |
 | `workload-identity` | Google service accounts and their keyless KSA bindings |
@@ -200,3 +213,27 @@ hand-written Cloudflare record keeps pointing at whatever answered before.
 
 Still open per the ADRs: backup and restore for the in-cluster stateful set, and a staging
 environment.
+
+## Cost, and which line each lever moves
+
+The environment ran at roughly **$920/month** in its first shape. The table is what changed, in
+units — the dollar figures come from `../TEARDOWN-RUNBOOK.md`'s reading of the actual bill and are
+ratios to reason with, not a quote.
+
+| Line | Was | Is | Lever |
+|---|---|---|---|
+| Nodes | 6 × `n2-standard-4` (2 clusters × 3 zones) | **4** × `e2-standard-4` (2 × 2) | `location` — zonal |
+| Cluster management | 2 | 2 | unchanged; one zonal cluster may fall under GKE's free-tier credit |
+| Boot disks | 6 × 200–500GB `pd-ssd` | 4 × 100GB `pd-balanced` | `system_pool.disk_*` |
+| PVCs | 1,260Gi `premium-rwo` | **390Gi** `standard-rwo` | the overlays' `patch-storage.yaml` |
+| Cloud NAT | 2 | 2 | required by private nodes (ADR-0011) — not reducible |
+| Connector VMs | 2 × `e2-micro` | 2 × `e2-micro` | required by ADR-0097 — not reducible |
+| CI runner ceiling | 20 × `n2-standard-8` | **4** × `e2-standard-4` | idle cost is zero either way; this bounds a busy queue |
+
+**The two levers that look free and are not.** Deleting a `location` line triples that
+environment's nodes, and it looks like tidying. Raising a PVC is easy; *lowering* one is not
+possible without destroying the volume, so the sizes here were chosen while the disks held nothing
+and should be raised deliberately rather than restored by reflex.
+
+**Spot VMs were considered and rejected.** OpenBao, Postgres and Redpanda are quorum workloads;
+preemption costs a quorum, not a pod.

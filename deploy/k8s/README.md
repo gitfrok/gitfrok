@@ -45,7 +45,7 @@ Both Kubernetes API endpoints are **private with no authorized networks** (ADR-0
 ```sh
 gcloud compute ssh prod-cp-zt-connector --zone=asia-southeast1-a --project=gitfrok-prod-cp \
   --tunnel-through-iap --ssh-flag=-D --ssh-flag=1080 --ssh-flag=-N --ssh-flag=-f
-gcloud container clusters get-credentials prod-cp-gke --region=asia-southeast1 \
+gcloud container clusters get-credentials prod-cp-gke --zone=asia-southeast1-a \
   --project=gitfrok-prod-cp --internal-ip
 HTTPS_PROXY=socks5://localhost:1080 kubectl get nodes
 ```
@@ -221,7 +221,7 @@ hand-rolled form fails `Permission denied (publickey)`, because gcloud is what p
 ```sh
 gcloud compute ssh prod-cp-zt-connector --zone=asia-southeast1-a --project=gitfrok-prod-cp \
   --tunnel-through-iap --ssh-flag=-D --ssh-flag=1080 --ssh-flag=-N --ssh-flag=-f
-gcloud container clusters get-credentials prod-cp-gke --region=asia-southeast1 \
+gcloud container clusters get-credentials prod-cp-gke --zone=asia-southeast1-a \
   --project=gitfrok-prod-cp --internal-ip
 HTTPS_PROXY=socks5://localhost:1080 kubectl get nodes
 ```

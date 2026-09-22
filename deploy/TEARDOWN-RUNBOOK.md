@@ -44,9 +44,9 @@ to step 2. Step 2 is faster and is what the documented run did.
 ### 2. Delete the clusters directly
 
 ```sh
-gcloud container clusters delete prod-cp-gke --region=asia-southeast1 \
+gcloud container clusters delete prod-cp-gke --zone=asia-southeast1-a \
   --project=gitfrok-prod-cp --quiet --async
-gcloud container clusters delete prod-dp-gke --region=asia-southeast1 \
+gcloud container clusters delete prod-dp-gke --zone=asia-southeast1-a \
   --project=gitfrok-prod-dp --quiet --async
 ```
 
@@ -69,7 +69,8 @@ until [ "$(gcloud container clusters list --project=gitfrok-prod-cp \
 **Deleting a GKE cluster does not reclaim disks that were provisioned by `PersistentVolumeClaim`s.**
 On the documented run this left **13 orphaned `pd-ssd` volumes totalling 550 GB — about $90/month**,
 still present after every node was gone: the OpenBao, Postgres, Redpanda and Valkey volumes from
-`k8s/platform`. Nothing in `deploy/gcp` declares them, so no `destroy` will ever remove them, and
+`k8s/platform`. (Those overlays now claim `standard-rwo` and less of it — 390 GB across both
+environments — so the bill for forgetting this step is smaller than it was, and the step is not.) Nothing in `deploy/gcp` declares them, so no `destroy` will ever remove them, and
 they do not appear in any plan.
 
 ```sh
@@ -226,16 +227,24 @@ new shares, and `bao operator init` is once per cluster, ever.
 
 ## Cost, so the next teardown can be prioritised
 
-Roughly, per month, for what this environment ran:
+Roughly, per month. **The right-hand column is the shape as of 2026-09-22's minimum-cost rebuild;
+the left is what the environment cost before it**, and the difference is worth knowing before a
+teardown is justified on cost grounds alone.
 
-| | ~Cost | Killed by |
-|---|---|---|
-| 6 × `n2-standard-4` nodes (2 clusters × 3) | $600 | step 1 or 2 |
-| 550 GB `pd-ssd` PVC volumes | $90 | **step 3 only** |
-| 2 × Cloud NAT | $64 | step 1 or 4 |
-| 2 × GKE cluster management | $150 | step 1 or 2 |
-| 2 × `e2-micro` connector VMs | $14 | step 1 |
-| Reserved addresses, Artifact Registry, backup buckets | a few $ | step 1 |
+| | First shape | Now | Killed by |
+|---|---|---|---|
+| Nodes | 6 × `n2-standard-4` — $600 | 4 × `e2-standard-4` | step 1 or 2 |
+| PVC volumes | 550 GB `pd-ssd` — $90 | 390 GB `pd-balanced` | **step 3 only** |
+| Cloud NAT | 2 × — $64 | unchanged | step 1 or 4 |
+| GKE cluster management | 2 × — $150 | unchanged | step 1 or 2 |
+| `e2-micro` connector VMs | 2 × — $14 | unchanged | step 1 |
+| Reserved addresses, Artifact Registry, backup buckets | a few $ | unchanged | step 1 |
+
+Roughly **$920/month → $500–600**. The floor matters more than the saving: **cluster management,
+NAT and the connector are per-cluster fixed costs**, so no further parameter change moves them. The
+only lever left is collapsing the two environments into one — which ADR-0092 considered by name and
+rejected, because it collapses ADR-0011's inbound asymmetry. Cost is not a reason to revisit that
+without an ADR.
 
 If you are tearing down under time pressure, the order that stops the most spend soonest is:
 **clusters (steps 1–2), then disks (step 3), then everything else.**
