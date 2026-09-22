@@ -66,7 +66,15 @@ spec:
         env:
         # The data plane's policy door serves PDP, codereview, CI and OIDC on one
         # gRPC listener (ADR-0041).
-        - name: GITFROK_PDP_ADDR
+        # T-0087 / ADR-0094 decision 5: the BFF refuses to start without a plane, and there is
+        # deliberately no default. This dev BFF is the DATA-plane shape — a data-plane door and
+        # git-storaged as RepositoryReader, no control-plane door — which the manifest already was;
+        # it simply never said so, and has crash-looped with "GITFROK_PLANE is not set" since.
+        - name: GITFROK_PLANE
+          value: "data"
+        # ADR-0100 decision 5 renamed GITFROK_PDP_ADDR, which asserted a role this door no longer
+        # has alone. The old name is accepted for one release only.
+        - name: GITFROK_DATAPLANE_ADDR
           value: "dataplane:9090"
         - name: GITFROK_REPOSITORY_READER_ADDR
           value: "git-storaged:9000"
