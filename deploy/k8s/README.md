@@ -32,7 +32,7 @@ which workloads exist (SPEC-0067 AC11).
 | Zitadel | **yes** | no — the OIDC issuer serves the browser surface |
 | SeaweedFS | no | yes — ADR-0050 scopes it to data-plane large objects |
 | first-party workloads | `controlplane/overlays/prod-cp` | `dataplane/overlays/prod-dp` (ADR-0107, Accepted) |
-| a public inbound path | the Gateway on `app-`/`auth-gitfrok` | **yes** — the Git door on `git-gitfrok` (ADR-0107) |
+| a public inbound path | the Gateway on `app-`/`auth-gitfrok` | **yes** — the Git door on `gitfrok` and `git-gitfrok` (ADR-0107, ADR-0108) |
 
 `check-platform-kustomize.sh` and `check-controlplane-kustomize.sh` assert this asymmetry. It is
 not an accident of what got written first.
@@ -202,7 +202,8 @@ and the control-plane overlay dry-ran **13/13 clean** with the ADR-0104 CA mount
 | Redpanda / Valkey / SeaweedFS | 3/3, 1/1, n/a | 3/3, n/a, 1/1 |
 | Zitadel | 2/2 Running | n/a |
 | First-party workloads | applied — `bff` 1/1, `webfrontend` 1/1, `controlplane` **0/1 CrashLoopBackOff** (sealed barrier) | applied — `dataplane` 1/1, `git-storaged` 1/1 |
-| Public surface | `app-`/`auth-gitfrok`, **Let's Encrypt at the origin** | **`git-gitfrok`**, Google-managed cert (ADR-0107) |
+| Public surface | `app-`/`auth-gitfrok`, **Let's Encrypt at the origin** | **`gitfrok`** and **`git-gitfrok`**, Google-managed certs (ADR-0107/0108) |
+| Tenants | — | `7solutions` (`welcome.git`); `dev` (`hello.git`, a bring-up proof) |
 | Out-of-band Secrets | all 9 present, incl. `openbao-ca` | 5 present (`postgres-*`, `gitfrok-database`, `gitfrok-pat-verifier`, `gitfrok-seaweedfs-s3`) |
 | App database | 21 tables, 7 schemas | 21 tables, 7 schemas |
 
@@ -351,6 +352,14 @@ matches on it, and the published `HTTPRoute` only exposes that prefix:
 git clone https://admin:$PAT@gitfrok.7.solutions/git/<tenant>/<repo>.git
 ```
 
+### One thing about this door that is wrong
+
+**The repository volume violates ADR-0106 decision 4.** That Accepted ADR says the git tier "must
+declare its own `premium-rwo` claim"; `git-storaged-repositories` was shipped as `standard-rwo`.
+`storageClassName` is immutable on a PVC, so the fix is a migration — copy the bare repos out,
+recreate the claim as `premium-rwo`, copy them back — during which Git is down. Not done; recorded in
+T-0092.
+
 ### Three things about this door that are decisions
 
 - **DNS-only in Cloudflare, and it must stay that way.** A `git push` is one request whose body is
@@ -358,7 +367,8 @@ git clone https://admin:$PAT@gitfrok.7.solutions/git/<tenant>/<repo>.git
   small push and fails on the first large one. `agents-gitfrok` is DNS-only for a different reason
   (ADR-0095 decision 5) and `app-`/`auth-gitfrok` are proxied — the three are not interchangeable.
 - **TLS is a Google-managed certificate**, attached by the `networking.gke.io/certmap` annotation,
-  not cert-manager. Its renewal depends on the `_acme-challenge.git-gitfrok` **CNAME** in Cloudflare.
+  not cert-manager. Renewal depends on the `_acme-challenge.gitfrok` and `_acme-challenge.git-gitfrok`
+  **CNAMEs** in Cloudflare.
   Deleting that record breaks renewal months later and silently.
 - **No SSH.** `GITFROK_GIT_SSH_ADDR` exists in the binary and is set in zero deployments. An L7
   Gateway cannot carry SSH; ADR-0107 decision 7 records why that is a separate decision rather than

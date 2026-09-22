@@ -20,12 +20,21 @@ make dev-up         # Minikube dev cluster on *.gitsaas.test with mkcert TLS (AD
 make dev-smoke      # assert the cluster is actually serving
 ```
 
+## Production
+
+Live on GCP. **Git hosting:** `https://gitfrok.7.solutions/git/<tenant>/<repo>.git` — clone and push
+work today; repository creation and PAT issuance are still operator steps
+([`deploy/k8s/README.md`](deploy/k8s/README.md) § *Using the Git host*). The web app is up at
+`app-gitfrok.7.solutions` but **nobody can log in yet**, and the control plane waits on the OpenBao
+unseal ceremony. [`HANDOFF.md`](HANDOFF.md) has the full state and what blocks the rest.
+
 ## Where to look
 
 - **[`HANDOFF.md`](HANDOFF.md)** — where work stands, and the one page a new session should read.
 - **`AGENTS.md`** (this repo) → **`governance/AGENTS.md`** — the rules, in that order.
 - **`governance/docs/adr/README.md`** — decisions; governance is the Source of Truth (ADR-0001).
 - **[`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md)** — run the dev cluster, step by step.
+- **[`deploy/k8s/README.md`](deploy/k8s/README.md)** / **[`deploy/gcp/README.md`](deploy/gcp/README.md)** — production workloads / infrastructure.
 - **`governance/docs/architecture/04-repository-topology.md`** — submodule workflow.
 
 Submodule URLs are relative (`../<repo>.git`), so SSH and HTTPS clones both work unmodified.

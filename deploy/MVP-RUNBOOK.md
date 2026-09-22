@@ -261,6 +261,15 @@ Live bare repositories touch neither tier: `GITFROK_GIT_STORAGE_ROOT` stays on t
 
 ## 6a. OpenBao custody service — initialize and quorum unseal (T-0040 AC5)
 
+> **Production (GKE, namespace `gitfrok`) does not use the commands below.** It uses
+> `scripts/openbao-operator.sh all <shares-file>`, which runs this section's init, unseal and wiring
+> as one command, keeps the root credential off disk and revokes it on exit. **Only a share-holder
+> runs it, in their own terminal** — never through an agent session or a `!` prefix, where the five
+> shares would land in a transcript. The blocks below are the dev cluster's (`--context gitfrok`,
+> namespace `default`); production's role binds namespace `gitfrok`, and a role bound to the wrong
+> namespace fails login with the same 503 a sealed barrier gives. The script's `unseal` and `wire`
+> paths have not yet run against a real barrier (T-0092 item 5).
+
 `dev-up` applies `deploy/dev/openbao.yaml`: three OpenBao 2.6 nodes on integrated Raft storage
 (one PVC per node), control-plane-side only (ADR-0066). The pods boot **sealed** and report
 NotReady until a quorum of share-holders unseals them — that is the intended state, not a failed

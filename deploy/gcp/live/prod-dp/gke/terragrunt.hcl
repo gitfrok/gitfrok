@@ -52,8 +52,9 @@ inputs = {
 
     # 100GB pd-balanced, down from 500GB pd-ssd. The old size cited ADR-0033's live bare repos, but
     # that contract belongs to the git tier's PVCs -- which are their own persistent disks, not this
-    # boot disk, and which have no manifest in deploy/k8s at all yet. When the git tier does land it
-    # needs a premium-rwo CLAIM; it will not need a bigger node boot disk.
+    # boot disk. The git tier landed on 2026-09-23 (deploy/k8s/dataplane) and did NOT need a bigger
+    # boot disk. It also shipped its claim as standard-rwo, which VIOLATES ADR-0106 decision 4's
+    # premium-rwo requirement for the git tier -- recorded in governance T-0092, not yet fixed.
     disk_size_gb = 100
     disk_type    = "pd-balanced"
   }

@@ -78,20 +78,38 @@ EKS/AKS a four-unit change.
 
 ```
 live/prod-cp     control plane — PRIVATE API endpoint (Zero Trust), no DNS zone, no runner pool
-live/prod-dp     data plane    — PRIVATE endpoint, no DNS zone, gVisor runner pool, no inbound path
+live/prod-dp     data plane    — PRIVATE endpoint, no DNS zone, gVisor runner pool, ONE public door: Git
 ```
 
-`prod-dp` is us as our own first customer. It is not a second control plane, and its lack of any
-inbound path is ADR-0011 made structural: the cluster API is private, nothing publishes a name, and
-no unit creates a load balancer.
+`prod-dp` is us as our own first customer. It is not a second control plane. **Its management path is
+inbound-closed** — ADR-0011 made structural: the cluster API is private and the agent dials out.
+
+**It is not inbound-closed for Git, and that changed on 2026-09-23.** ADR-0107 (Accepted) publishes
+the Git door, and ADR-0108 names it `gitfrok.7.solutions` for tenants; `git-gitfrok.7.solutions` is
+the same door. The sentence this paragraph used to end with — "nothing publishes a name, and no unit
+creates a load balancer" — cited ADR-0011 for something ADR-0011 does not say: it governs the
+management channel, not the tenant protocol ADR-0041 had already terminated here.
+
+**What publishes it is NOT in OpenTofu yet**, and that is a defect against ADR-0092, not a design:
+
+| created by hand (gcloud / Cloudflare API) on 2026-09-23 | what a `tofu destroy` / rebuild does |
+|---|---|
+| global address `prod-dp-git-gateway` (`136.81.46.141`) | leaves it billing / does not recreate it |
+| Certificate Manager: DNS authorizations `git-gitfrok-dnsauth`, `gitfrok-apex-dnsauth`; certificates `git-gitfrok-cert`, `gitfrok-apex-cert`; map `gitfrok-dp-certmap` | same |
+| Cloudflare: `git-gitfrok` and `gitfrok` A records (DNS-only), and their two `_acme-challenge` CNAMEs | outside OpenTofu by ADR-0095 decision 10 — expected, but undocumented until now |
+
+The address and the Certificate Manager objects belong in an `addresses`-style unit for `prod-dp`;
+T-0092 records it. `modules/addresses` still describes `prod-dp` as reserving nothing, which is no
+longer true of the environment even though it is still true of the module.
 
 ## Before the first run
 
 1. ~~Create the two projects~~ — **done 2026-09-22**: `gitfrok-prod-cp` and `gitfrok-prod-dp`,
    both linked to billing `2025-10280-7Solutions`.
 2. ~~Set `dns_name`~~ — **gone.** ADR-0095 decision 4 made Cloudflare authoritative for
-   `7.solutions` and decision 10 retired this tree's `dns-zone` unit. The three records
-   (`app-gitfrok`, `auth-gitfrok`, `agents-gitfrok`) are created operator-side in Cloudflare, and
+   `7.solutions` and decision 10 retired this tree's `dns-zone` unit. The records
+   (`app-gitfrok`, `auth-gitfrok`, `agents-gitfrok`, and since ADR-0107/0108 `git-gitfrok` and
+   `gitfrok`) are created operator-side in Cloudflare, and
    `agents-gitfrok` must stay **DNS-only** — a proxied record terminates TLS and breaks the
    client-certificate mTLS every agent depends on (ADR-0095 decision 5).
 3. **`admin_networks` is empty and both endpoints are private** (ADR-0097). There is no operator

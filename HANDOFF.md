@@ -11,7 +11,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 |---|---|
 | the rules before editing anything | `AGENTS.md` (this repo) → `governance/AGENTS.md` → `governance/docs/agents/invariants.md` |
 | what the product must do | `governance/docs/product/PRD.md` (`PR-#` rows, phases, non-goals) |
-| why it is built this way | `governance/docs/adr/` — index in its `README.md` — ADR-0000 through ADR-0103 |
+| why it is built this way | `governance/docs/adr/` — index in its `README.md` — ADR-0000 through ADR-0108 |
 | a task to pick up | `governance/docs/tasks/` — one file each, own `Status:` and `Repo(s):` |
 | what is actually done | `governance/docs/backlog/README.md` — the epic tables are more current than the task files |
 | phase intent and exit criteria | `governance/docs/roadmap/README.md`, `governance/docs/plans/` |
@@ -21,6 +21,8 @@ work stands and how to run it*; governance says *what and why*. Verified against
 | the brand kit the CVD laws come from | `webfrontend/design/gitfrok-brand-identity-v2.md` — §2 states the three laws |
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
 | to deploy to **production** (GKE) | [`deploy/k8s/README.md`](deploy/k8s/README.md) — the bring-up order, and why unseal gates it |
+| to **use** the Git host (create a repo, issue a PAT, clone) | [`deploy/k8s/README.md`](deploy/k8s/README.md) § *Using the Git host* |
+| what the first deployment still owes | `governance/docs/tasks/T-0092-the-debt-the-first-deployment-took-on.md` |
 | what production **infrastructure** exists | [`deploy/gcp/README.md`](deploy/gcp/README.md) — OpenTofu units and their manual seams |
 | to tear production down, or rebuild it | [`deploy/TEARDOWN-RUNBOOK.md`](deploy/TEARDOWN-RUNBOOK.md) — including the orphaned disks a destroy leaves behind |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
@@ -28,50 +30,74 @@ work stands and how to run it*; governance says *what and why*. Verified against
 
 ## Current pins
 
-Verified with `git submodule status` at super-repo **`4a4978a`**:
-**governance `01852a7`** · **backend `92c8acf`** · **bff `3c02149`** · **webfrontend `f4d1612`**.
+Verified with `git submodule status` at super-repo **`c94058b`**:
+**governance `8085a46`** · **backend `7a8dccd`** · **bff `3c02149`** · **webfrontend `f4d1612`**.
 
-**Read the image claim carefully, it changed.** The images that are signed and published are the
-`docker.io/gitfrok/*` ones the dev cluster runs. **ADR-0098 retired that registry** and moved
-first-party publishing to `asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok`, where **nothing
-has been published yet** — the registry is empty, and the `image-publish` workflow has never run
-because `COSIGN_PRIVATE_KEY` does not exist. So: dev runs published images; production has no images
-at all.
+**Check what is unpushed before trusting these pins elsewhere:** `git status -sb` here and in
+`governance/`. On 2026-09-23 both were well ahead of `origin/main`. Push governance first, then the
+super-repo, or the pins reference commits nobody else has. (A count written into this file is wrong
+by the next commit, so none is given.)
 
-## Production on GCP: built, proven, then torn down (2026-09-22)
+**The image claim changed again.** `asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok` now holds
+all five first-party images at `0.1.0` — `bff`, `controlplane-app`, `webfrontend`, `dataplane-app`,
+`git-storaged` — and production runs them. **They were built with podman and pushed by hand, not by
+the `image-publish` workflow**, so they are unsigned, have no `.release` manifest, are pinned by tag
+rather than digest, and have burned `0.1.0` under the registry's `immutableTags`. T-0092 item 3.
+`operator-app` is not published at all.
 
-Phase work above is about the **dev** cluster. Production is a separate, newer story and this is its
-whole state:
+## Production on GCP — live, and serving Git (2026-09-23)
 
-**Nothing is running.** Both GKE clusters and everything billable were destroyed on 2026-09-22 to
-stop cost. Verified zero in `gitfrok-prod-cp` and `gitfrok-prod-dp`: clusters, nodes, disks,
-routers, addresses, forwarding rules, registries. The two projects and their `*-tfstate` buckets
-still exist; the three Cloudflare DNS records still exist and now point at **released** addresses,
-which is worse than nothing and should be removed.
+Rebuilt at minimum cost on 2026-09-22 (ADR-0106: both clusters zonal, `asia-southeast1-a`,
+2 × `e2-standard-4` each), and on 2026-09-23 it became a working Git host.
 
-**What was proven while it was up**, and is a property of the manifests rather than of that cluster:
-the third-party stateful set reached **12 pods 1/1** on `prod-cp` (OpenBao 3/3 sealed by design,
-Postgres 3/3 via CNPG, Redpanda 3/3, Valkey, Zitadel 2/2), and the control-plane overlay dry-ran
-**13/13** clean against it. Three base-manifest defects were found only by running it, which is why
-that evidence is kept rather than deleted with the cluster.
+**What works, proven from outside the cluster:**
 
-**The two things that still block a usable production deployment**, both reserved for a human by
-governance rather than by tooling:
+| | |
+|---|---|
+| **Git hosting** | `https://gitfrok.7.solutions/git/<tenant>/<repo>.git` (ADR-0108) — `git clone` and `git push` proven; `git-gitfrok.7.solutions` is the same door (ADR-0107). First tenant: **`7solutions`**, repo `welcome.git`. Tenant isolation proven: a `7solutions` PAT is refused by tenant `dev` |
+| **TLS** | browser-trusted everywhere: Let's Encrypt at the origin for `app-`/`auth-gitfrok` (cert-manager, ADR-0095 decision 7's own mechanism); Google-managed for the two Git names |
+| **Data plane (prod-dp)** | `dataplane` 1/1, `git-storaged` 1/1, Postgres/Redpanda/SeaweedFS — installed from `deploy/k8s/dataplane/overlays/prod-dp` |
+| **Control plane (prod-cp)** | `bff`, `webfrontend`, Zitadel, Postgres, Redpanda, Valkey, OpenBao all Running — **except `controlplane`, CrashLoopBackOff on the sealed barrier** |
+| **Databases** | all twelve backend migrations applied on both clusters — they had **zero tables** until 2026-09-23 |
+| **Tree == cluster** | `kubectl diff` empty for the controlplane, dataplane and cert-manager installers; `make verify` exit 0 |
 
-1. **OpenBao initialise + quorum unseal.** Five shares to five holders, out of band — ADR-0066
-   decision 4 and `deploy/MVP-RUNBOOK.md` §6a. No auto-unseal exists anywhere, deliberately. The
-   control plane composes its agent CA exclusively through custody, so a sealed barrier means the
-   agent door cannot sign and enrolment issuance refuses.
-2. **`COSIGN_PRIVATE_KEY` and the GitHub `image-publish` environment.** ADR-0044's custody rule puts
-   the release private key only in the protected pipeline, so it cannot be generated into the tree.
-   Nothing is published until it exists. `deploy/k8s/README.md` carries the exact variable values.
+**Using it** is three operator steps — create the bare repo, issue a PAT over a port-forward, clone
+with the `/git/` prefix. `deploy/k8s/README.md` § *Using the Git host* has the exact commands.
+**"Ready to use" is true for an operator, not for a tenant:** there is no self-service repo creation
+or credential issuance yet (T-0092 item 7).
+
+**What still blocks a complete product**, in order of how badly:
+
+1. **OpenBao is uninitialised and sealed**, so the control plane cannot start. The ceremony is one
+   command, `scripts/openbao-operator.sh all <shares-file>`, and **only a share-holder runs it, in
+   their own terminal** — never through an agent session or a `!` prefix, because the five Shamir
+   shares would land in a transcript (ADR-0066 decision 4). Its `unseal`/`wire` paths have never run.
+2. **Nobody can log in.** Two independent causes (T-0092 item 8): Zitadel redirects every authorize
+   to `/ui/v2/login/login` and no Login V2 service is deployed; and `controlplane-app` never
+   registers `OIDCLogin`, so the control plane's BFF cannot complete a login regardless.
+3. **A PAT dies on every data-plane restart.** `cmd/dataplane-app` composes `identity.NewInMemory`
+   unconditionally; `identity.NewPostgres` exists and nothing calls it (T-0092 item 2).
+4. **Every OpenBao restart re-seals** — Shamir + Raft, no auto-unseal. On a zonal autoscaling pool
+   that is every node upgrade (T-0092 item 6; an ADR-0066 decision, the owner's).
+5. **The git-storaged volume violates ADR-0106 decision 4.** That Accepted ADR requires the git tier
+   to declare a `premium-rwo` claim; the shipped PVC is `standard-rwo`. `storageClassName` is
+   immutable on a PVC, so fixing it means migrating the live repositories to a new volume (T-0092
+   item 12).
+
+**Infrastructure created outside OpenTofu**, which ADR-0092 says should not happen and T-0092 item 11
+records (`deploy/TEARDOWN-RUNBOOK.md` step 4a lists the manual deletions until it is fixed): the `prod-dp-git-gateway` global address, the Certificate Manager DNS authorizations,
+certificates and map (`gitfrok-dp-certmap`), and the Cloudflare records for `git-gitfrok`,
+`gitfrok`, and their two `_acme-challenge` CNAMEs. A `tofu destroy` will not remove them and a
+rebuild will not recreate them.
 
 Decisions made for production that were not in the Phase story: **ADR-0092** (GCP + OpenTofu),
 **0093** (control plane gets its own installer), **0095** (Cloudflare-authoritative DNS, and why the
 agent door can never be proxied), **0096** (Kustomize only, no Helm), **0097** (private API
 endpoints reached through Zero Trust), **0098** (Artifact Registry, `docker.io` retired), **0099**
-(the third-party stateful set), **0100/0101** (which plane serves and owns what), and **0102/0103**
-still **Proposed**.
+(the third-party stateful set), **0100/0101** (which plane serves and owns what), **0104/0105**,
+**0106** (cost is the binding constraint), **0107** (the data plane publishes the Git door) and
+**0108** (`gitfrok.7.solutions` is its tenant-facing name) — all Accepted. **0102/0103** are still
+**Proposed**.
 
 ## Where work stands (2026-08-23)
 
@@ -257,6 +283,7 @@ Condensed from `AGENTS.md` — read it before editing anything.
 16. First-party images in `deploy/dev` are pinned by tag, not digest (ADR-0035 decision 4).
 17. Host DNS for `*.gitsaas.test` needs root, so `dev-up.sh` prints the snippet rather than applying it.
 18. `git/v1` has no create-repository RPC — bare repos come back via RUNBOOK §8a's kubectl-exec recovery.
+    **In production this is how every repository is created**, not a recovery step (T-0092 item 7).
 19. **The CVD captures run against the stub BFF, not a cluster** — deliberately: the fixtures are
     state-dense in a way live data on a given day is not. They prove the ENCODINGS survive grayscale
     and deuteranopia; they are not a live walk, and the artifacts are gitignored.

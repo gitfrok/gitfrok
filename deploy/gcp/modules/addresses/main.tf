@@ -12,8 +12,14 @@
 # (`networking.gke.io/addresses`, `networking.gke.io/load-balancer-ip-addresses`) and GKE resolves
 # the name at programming time.
 #
-# Control plane only. `prod-dp` reserves nothing, publishes nothing, and has no inbound path at all
-# (ADR-0011) — so this unit is instantiated once, the way `artifact-registry` is.
+# Instantiated for the control plane only, the way `artifact-registry` is.
+#
+# THIS USED TO SAY `prod-dp` "reserves nothing, publishes nothing, and has no inbound path at all
+# (ADR-0011)". Since 2026-09-23 that is false of the environment: ADR-0107 publishes the data plane's
+# Git door and ADR-0108 names it `gitfrok.7.solutions`. Its address, `prod-dp-git-gateway`, was
+# created BY HAND with gcloud and is not managed by this module or any other unit — a gap against
+# ADR-0092 that governance T-0092 records. ADR-0011 governs the management channel, which stays
+# inbound-closed; it never said anything about the tenant Git protocol.
 
 resource "google_compute_global_address" "gateway" {
   count = var.gateway ? 1 : 0

@@ -34,8 +34,11 @@ spec:
   # the FUSE arm; 0 of 229 on block. git-storaged refuses a FUSE repository root outright, so a
   # misconfiguration here fails to start rather than corrupting refs (invariant 7).
   accessModes: ["ReadWriteOnce"]
-  # Stated, never inherited. The cluster default is standard-rwo today; a default that changes
-  # under a StatefulSet's feet is the failure this line exists to prevent (ADR-0106).
+  # Stated, never inherited — and currently WRONG. ADR-0106 decision 4 (Accepted) requires the git
+  # tier to declare its own `premium-rwo` claim, because ADR-0033's block-volume contract attaches
+  # to this claim and not to a cluster default. This shipped as standard-rwo on 2026-09-23 and the
+  # violation is recorded in governance T-0092. The field is immutable on a PVC: changing this line
+  # alone makes the next `kubectl apply` fail, so the fix is a repository migration, not an edit.
   storageClassName: standard-rwo
   resources:
     requests:

@@ -101,6 +101,28 @@ also drop the VPCs and subnets. On the documented run that retry died on a trans
 `lookup oauth2.googleapis.com: no such host` on the workstation, which is why the direct commands
 are recorded here as the fallback rather than an afterthought.
 
+### 4a. Delete what the Git door created by hand — no unit declares any of it
+
+Since 2026-09-23 (ADR-0107, ADR-0108) `prod-dp` publishes the Git door, and **everything that
+publishes it was created with gcloud, not OpenTofu** (T-0092). `terragrunt destroy` does not know it
+exists. Deleting the cluster removes the Gateway's forwarding rule and URL map, but **not** the
+reserved address — which keeps billing — and not the certificates.
+
+```sh
+P=gitfrok-prod-dp
+gcloud certificate-manager maps entries delete git-gitfrok --map=gitfrok-dp-certmap --project=$P --quiet
+gcloud certificate-manager maps entries delete gitfrok-apex --map=gitfrok-dp-certmap --project=$P --quiet
+gcloud certificate-manager maps delete gitfrok-dp-certmap --project=$P --quiet
+gcloud certificate-manager certificates delete git-gitfrok-cert gitfrok-apex-cert --project=$P --quiet
+gcloud certificate-manager dns-authorizations delete git-gitfrok-dnsauth gitfrok-apex-dnsauth --project=$P --quiet
+gcloud compute addresses delete prod-dp-git-gateway --global --project=$P --quiet
+```
+
+Order matters: a map entry holds its certificate, and a map attached to a live target proxy refuses
+deletion — so the cluster (step 2) goes first. The step-5 sweep catches the address; **it does not
+look at Certificate Manager**, so check that by hand:
+`gcloud certificate-manager certificates list --project=gitfrok-prod-dp`.
+
 ### 5. Sweep, and only then believe it
 
 Nothing is torn down until this prints zeros. Run for **both** projects — and note the shell:
@@ -139,7 +161,7 @@ done
 | `gitfrok-prod-cp-tfstate`, `gitfrok-prod-dp-tfstate` | created by `--backend-bootstrap`, never declared by a unit, so no `destroy` targets them | a few KB — nil |
 | The VPCs (`prod-cp-vpc`, `prod-dp-vpc`, `default`) | networks and subnets are not billed | nil |
 | Both GCP projects | deleting them is a separate, bigger decision | nil once empty |
-| The three Cloudflare DNS records | not in this tree at all (ADR-0095 decision 4 put them in a vendor console) | nil, but they now point at **released addresses** |
+| The Cloudflare DNS records — `app-`, `auth-`, `agents-`, `git-gitfrok` and `gitfrok`, plus the two `_acme-challenge` CNAMEs | not in this tree at all (ADR-0095 decision 4 put them in a vendor console) | nil, but the A records now point at **released addresses** |
 
 **The definitive stop**, if an empty project is not enough assurance:
 
@@ -213,7 +235,11 @@ Two things the rebuild does not restore at all, because they were never in the t
   the tunnel, adding the token, resetting the instance and adding the private-network route are all
   Cloudflare-API calls; the **Access policy naming who may use that route is not**, and until it
   exists every device enrolled on the account can reach the route.
-- **The three Cloudflare records**, which must be repointed at the **new** reserved addresses — and
+- **Everything step 4a deleted**, recreated by hand in the same order reversed: reserve
+  `prod-dp-git-gateway`, create both DNS authorizations and put their `_acme-challenge` CNAMEs in
+  Cloudflare (DNS-only), create the two certificates and the map, then apply the dataplane overlay.
+  The Gateway references the map by name and the address by name, so neither may be renamed.
+- **The Cloudflare records**, which must be repointed at the **new** reserved addresses — and
   note *repointed*, not recreated: a teardown leaves them in place, resolving to released IPs. On
   the documented rebuild the global address came back **identical** (`34.98.93.111`, so `app-` and
   `auth-gitfrok` needed no change) while the agent door's did not — and the old agent IP had by then
