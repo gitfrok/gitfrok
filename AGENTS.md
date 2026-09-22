@@ -37,6 +37,13 @@ webfrontend ──HTTP──▶ bff ──gRPC──▶ backend ──imports─
    never in-place edits to a submodule path.
 6. **Clone/pull with `--recurse-submodules`** (`make bootstrap`).
 
+**No agent deploys to, changes, or tears down production (ADR-0109).** No `terragrunt apply`/`destroy`
+against `deploy/gcp/live/*`, no `kubectl apply`/`delete` against a production cluster, no push to the
+production registry, no DNS change in `7.solutions`. Prepare the diff, plan or script; a human runs it.
+An agent's "verified" about production is not accepted until a human reproduces it. The owner made
+this decision after trusting an agent with production cost money and delivered a product no tenant
+could use; ADR-0109 lists what went wrong.
+
 ## Start
 `make bootstrap` → read `governance/AGENTS.md` → pick a task in `governance/docs/tasks/` →
 follow the AGDD loop (`governance/docs/process/agdd.md`).

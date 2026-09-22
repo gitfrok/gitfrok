@@ -47,6 +47,13 @@ rather than digest, and have burned `0.1.0` under the registry's `immutableTags`
 
 ## Production on GCP — purged to $0 (2026-09-23), after it had served Git
 
+> **Read ADR-0109 before touching production.** The owner's verdict on letting an AI agent deploy
+> this project: *"you are worthless and liar to trust you to deploy on prodcution that improbable
+> and waste money with a lame and useless projects."* Agents no longer deploy to, change, or tear
+> down production; they prepare, and a human runs it. ADR-0109 lists the twelve things the agent got
+> wrong on 2026-09-22/23. Everything this section calls "proven" was proven by that agent — under
+> ADR-0109 decision 2 it is a pointer to what to check, not a result to rely on.
+
 **Nothing is running and nothing bills.** On the owner's instruction ("purge everything to $0 on
 productions") both clusters and everything billable in `gitfrok-prod-cp` and `gitfrok-prod-dp` were
 destroyed on 2026-09-23, and the seven `*gitfrok*` Cloudflare records were deleted rather than left
@@ -109,7 +116,7 @@ agent door can never be proxied), **0096** (Kustomize only, no Helm), **0097** (
 endpoints reached through Zero Trust), **0098** (Artifact Registry, `docker.io` retired), **0099**
 (the third-party stateful set), **0100/0101** (which plane serves and owns what), **0104/0105**,
 **0106** (cost is the binding constraint), **0107** (the data plane publishes the Git door) and
-**0108** (`gitfrok.7.solutions` is its tenant-facing name) — all Accepted. **0102/0103** are still
+**0108** (`gitfrok.7.solutions` is its tenant-facing name) and **0109** (agents do not deploy to production) — all Accepted. **0102/0103** are still
 **Proposed**.
 
 ## Where work stands (2026-08-23)
