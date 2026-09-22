@@ -44,6 +44,15 @@ An agent's "verified" about production is not accepted until a human reproduces 
 this decision after trusting an agent with production cost money and delivered a product no tenant
 could use; ADR-0109 lists what went wrong.
 
+**Deploy and test on minikube with podman and mkcert ONLY (owner rule, 2026-09-23).** Every deployment
+and every test tier — TDD, unit, e2e, SIT — runs on the local dev cluster:
+`MINIKUBE_DRIVER=podman make dev-up` (minikube, podman driver, mkcert TLS on `*.gitsaas.test`,
+ADR-0024; `deploy/MVP-RUNBOOK.md`). The driver must be set explicitly — `dev-up.sh` otherwise lets
+minikube choose. **Do not propose, offer or ask about deploying to production** — not as a next step
+and not as an option in a question — until the owner grants permission unprompted. The owner's words:
+"deploy and test(TDD,unittest,e2e,sit) on minikube with podman and mkcert only" and "don't ask me to
+deploy on productions until i give you a permission".
+
 ## Start
 `make bootstrap` → read `governance/AGENTS.md` → pick a task in `governance/docs/tasks/` →
 follow the AGDD loop (`governance/docs/process/agdd.md`).

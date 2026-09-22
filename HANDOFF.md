@@ -245,6 +245,10 @@ says so.
 
 Condensed from `AGENTS.md` — read it before editing anything.
 
+- **Deploy and test on minikube + podman + mkcert ONLY** (owner rule, 2026-09-23): TDD, unit, e2e and
+  SIT all run on `MINIKUBE_DRIVER=podman make dev-up`. **Never deploy to production, and never ask or
+  offer to**, until the owner grants permission unprompted (ADR-0109).
+
 - **Governance is SoT.** Decisions, contracts, policies and shared surface live only in `governance/`
   (invariants 21–25). New decision → **Proposed ADR and stop**; new behaviour → spec first; API
   change → governance PR first, additive only.
