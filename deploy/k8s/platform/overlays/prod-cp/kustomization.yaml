@@ -21,3 +21,19 @@ resources:
 patches:
   - path: patch-postgres-backup.yaml
   - path: patch-zitadel-domain.yaml
+
+  # Storage cost posture — prod-cp only, so the base and prod-dp are untouched. See
+  # patch-storage.yaml for why pd-balanced is correct on this side of the split.
+  - path: patch-storage.yaml
+  - path: patch-redpanda-storage.yaml
+    target:
+      kind: StatefulSet
+      name: redpanda
+  - path: patch-storageclass-only.yaml
+    target:
+      kind: StatefulSet
+      name: openbao
+  - path: patch-storageclass-only.yaml
+    target:
+      kind: StatefulSet
+      name: valkey

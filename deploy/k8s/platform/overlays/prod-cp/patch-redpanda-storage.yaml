@@ -1,0 +1,12 @@
+# Redpanda: 50Gi pd-ssd -> 20Gi pd-balanced, per patch-storage.yaml's reasoning.
+#
+# JSON6902 rather than a strategic merge, deliberately: `volumeClaimTemplates` is an ATOMIC list in
+# the StatefulSet schema, so a strategic-merge patch replaces the whole list instead of merging into
+# it — a patch naming only `storage:` would silently drop accessModes and the claim's name. These
+# two paths cannot do that, and fail loudly if the claim ever stops being `data` at index 0.
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/storageClassName
+  value: standard-rwo
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+  value: 20Gi

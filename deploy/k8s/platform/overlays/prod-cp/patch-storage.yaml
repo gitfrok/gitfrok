@@ -1,0 +1,30 @@
+# Cost posture for the control plane's persistent volumes. prod-cp only — the base keeps its
+# sizes, so prod-dp (the git tier, ADR-0033) is untouched by every line here.
+#
+# TWO changes, for two different reasons.
+#
+# 1. premium-rwo -> standard-rwo. premium-rwo is pd-ssd; standard-rwo is pd-balanced, about 40%
+#    cheaper per GB. ADR-0033's latency contract is about live bare repos on block volumes, and the
+#    git tier is a DATA-PLANE concern — nothing on this side has it. `check-platform-kustomize.sh`
+#    AC10 requires a storageClassName to be EXPLICIT rather than defaulted, and it still is.
+#
+# 2. Smaller claims. 550Gi of pd-ssd was roughly $90/mo for an environment holding no data.
+#
+# The direction matters more than the numbers: a PVC can be EXPANDED in place (both CNPG and GKE's
+# CSI driver support it), but shrinking one means destroying the volume and its contents. So at zero
+# data the reversible mistake is sizing small, and that is what this does. Raise any of these the
+# moment real data arrives; nothing here is a capacity judgement about production load.
+#
+# Nothing goes below 10Gi on purpose: a GCE persistent disk bills a 10GB minimum, so a 5Gi claim
+# would cost exactly what a 10Gi one does and only buy an earlier disk-full.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  storage:
+    size: 20Gi
+    storageClass: standard-rwo
+  walStorage:
+    size: 10Gi
+    storageClass: standard-rwo

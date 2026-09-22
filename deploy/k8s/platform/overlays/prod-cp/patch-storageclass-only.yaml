@@ -1,0 +1,8 @@
+# OpenBao and Valkey: storage CLASS only, sizes untouched.
+#
+# Both already claim 10Gi, which is the GCE persistent-disk billing minimum — shrinking them buys
+# nothing and only brings disk-full closer. So the pd-ssd -> pd-balanced switch is the whole saving
+# available here, and the size is left exactly as the base declares it.
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/storageClassName
+  value: standard-rwo
