@@ -1,0 +1,30 @@
+# TWO FLAGS, NOT ONE, AND THAT IS THE WHOLE BUG.
+#
+# `--feature-gates=ExperimentalGatewayAPISupport=true` alone is NOT enough and has not been since
+# cert-manager 1.15. There is a separate controller flag, and the controller's own `--help` says so:
+#
+#   --enable-gateway-api   Whether gateway API integration is enabled within cert-manager.
+#                          The ExperimentalGatewayAPISupport feature gate must also be enabled
+#                          (default as of 1.15).
+#
+# With only the gate set, every ACME HTTP-01 challenge using a `gatewayHTTPRoute` solver fails with
+# "gateway api is not enabled" AFTER creating its solver Pod and Service — so the deployment looks
+# configured, the pods look healthy, and nothing ever gets a certificate.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  template:
+    spec:
+      containers:
+        - name: cert-manager-controller
+          args:
+            - --v=2
+            - --cluster-resource-namespace=$(POD_NAMESPACE)
+            - --leader-election-namespace=kube-system
+            - --acme-http01-solver-image=quay.io/jetstack/cert-manager-acmesolver:v1.21.2
+            - --max-concurrent-challenges=60
+            - --feature-gates=ExperimentalGatewayAPISupport=true
+            - --enable-gateway-api

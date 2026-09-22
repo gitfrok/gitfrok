@@ -18,7 +18,7 @@
 #   AC9   the CNPG Cluster declares a backup target
 #   AC10  storage classes are explicit; nothing relies on the cluster default
 #   AC12  renders are deterministic
-#   plus  the vendored CNPG operator manifest matches its recorded digest
+#   plus  EVERY vendored operator manifest matches the digest its README records
 #
 # Exit: 0 clean · 1 violation · 3 environment problem (kubectl absent)
 
@@ -26,7 +26,6 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 plat="$root/deploy/k8s/platform"
-cnpg_dir="$plat/operators/cloudnative-pg"
 
 fail=0
 report() { echo "PLATFORM VIOLATION: $1"; fail=1; }
@@ -38,20 +37,48 @@ for d in "$plat/base" "$plat/overlays/prod-cp" "$plat/overlays/prod-dp"; do
 done
 [ "$fail" -eq 0 ] || { echo "platform: FAIL"; exit 1; }
 
-# --- the vendored operator matches its pin ------------------------------------------------------
+# --- every vendored operator matches its pin ----------------------------------------------------
 # A vendored megabyte is trustworthy only by digest; ADR-0099 accepted a controller to own, not a
 # file nobody checks.
-manifest=$(find "$cnpg_dir" -name 'cnpg-*.yaml' | head -1)
-if [ -z "$manifest" ]; then
-  report "no vendored CloudNativePG manifest under operators/cloudnative-pg"
+#
+# OPERATORS ARE DISCOVERED, NOT LISTED, and that is the same correction T-0091 made to the location
+# gate. This block named `cloudnative-pg` explicitly while it was the only operator, so the day a
+# second one was vendored — cert-manager, 2026-09-23, a megabyte carrying cluster-wide RBAC and a
+# webhook that intercepts admission — it was covered by nothing and the gate still said OK. A
+# hard-coded list is a gate that is silently wrong exactly when it is most needed.
+#
+# The convention it discovers: one directory per operator, one *.yaml release manifest over 100 KiB
+# (the small ones beside it are local additions, not the vendored artifact), and a README carrying
+# its SHA-256 as an indented 64-hex line.
+operators_dir="$plat/operators"
+if [ ! -d "$operators_dir" ]; then
+  report "no operators/ directory under $plat"
 else
-  recorded=$(grep -oE '^    [0-9a-f]{64}$' "$cnpg_dir/README.md" 2>/dev/null | tr -d ' ' | head -1)
-  actual=$(shasum -a 256 "$manifest" | awk '{print $1}')
-  if [ -z "$recorded" ]; then
-    report "operators/cloudnative-pg/README.md records no SHA-256 for $(basename "$manifest")"
-  elif [ "$recorded" != "$actual" ]; then
-    report "vendored CNPG digest mismatch: README says $recorded, file is $actual"
-  fi
+  found_any=0
+  for op in "$operators_dir"/*/; do
+    [ -d "$op" ] || continue
+    name=$(basename "$op")
+    found_any=1
+    manifest=""
+    for cand in "$op"*.yaml; do
+      [ -f "$cand" ] || continue
+      # 100 KiB floor: the vendored upstream release, never a local patch or kustomization.
+      size=$(wc -c < "$cand" | tr -d ' ')
+      [ "$size" -gt 102400 ] && { manifest="$cand"; break; }
+    done
+    if [ -z "$manifest" ]; then
+      report "operators/$name has no vendored release manifest (no *.yaml over 100 KiB)"
+      continue
+    fi
+    recorded=$(grep -oE '^    [0-9a-f]{64}$' "$op/README.md" 2>/dev/null | tr -d ' ' | head -1)
+    actual=$(shasum -a 256 "$manifest" | awk '{print $1}')
+    if [ -z "$recorded" ]; then
+      report "operators/$name/README.md records no SHA-256 for $(basename "$manifest")"
+    elif [ "$recorded" != "$actual" ]; then
+      report "vendored $name digest mismatch: README says $recorded, file is $actual"
+    fi
+  done
+  [ "$found_any" -eq 1 ] || report "operators/ is empty — the gate found nothing to check, which is not the same as finding nothing wrong"
 fi
 
 # --- secretGenerator, parsed rather than grepped ------------------------------------------------

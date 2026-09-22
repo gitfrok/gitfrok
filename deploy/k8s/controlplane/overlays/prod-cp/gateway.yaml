@@ -93,3 +93,28 @@ spec:
     - backendRefs:
         - name: zitadel
           port: 8080
+---
+# GKE GATEWAY DOES NOT INFER A HEALTH CHECK FROM THE READINESS PROBE. That inference is an
+# Ingress + BackendConfig behaviour; the Gateway controller defaults to `GET /` expecting 200 and
+# looks at nothing else.
+#
+# Zitadel's Deployment declares `readinessProbe: /debug/ready` and answers 404 on `/`. So the
+# default check marked its backend UNHEALTHY while the pods were Ready and `auth-gitfrok` served
+# 502/503 for an hour on 2026-09-22 — with every Kubernetes-side signal green. This policy is the
+# fix, and it is in the installer rather than in an operator's shell history because the next
+# cluster would reproduce the outage exactly.
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: zitadel
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /debug/ready
+        portSpecification: USE_SERVING_PORT
+  targetRef:
+    group: ""
+    kind: Service
+    name: zitadel

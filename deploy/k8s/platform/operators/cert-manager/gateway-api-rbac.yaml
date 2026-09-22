@@ -1,0 +1,47 @@
+---
+# UPSTREAM SHIPS NO GATEWAY API RBAC, and this is the part that is easy to get wrong twice.
+#
+# `cert-manager.yaml` — the static release manifest this directory vendors — contains no rule for
+# `gateway.networking.k8s.io` at all. Only the Helm chart renders those rules, and only when its
+# `config.enableGatewayAPI` value is set. An operator who installs the static manifest and turns the
+# feature on therefore gets a controller that is *configured* for Gateway API and *forbidden* from
+# using it, and the failure surfaces as a challenge that creates its solver Pod and Service and then
+# stops — never as a permission error anyone would grep for.
+#
+# Scoped to what the gateway-shim and the HTTP-01 solver actually do: read Gateways, and own the
+# ephemeral solver HTTPRoutes. No write on Gateways themselves.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-gateway-shim
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: cert-manager
+    app.kubernetes.io/component: controller
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "httproutes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways/finalizers", "httproutes/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["create", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-gateway-shim
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: cert-manager
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-gateway-shim
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager
+    namespace: cert-manager
