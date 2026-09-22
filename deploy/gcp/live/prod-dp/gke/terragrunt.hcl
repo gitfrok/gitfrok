@@ -36,23 +36,43 @@ inputs = {
   private_endpoint           = true
   master_authorized_networks = []
 
+  # ZONAL, same lever as prod-cp: `min_nodes` on a regional cluster is per ZONE, so a floor of 1
+  # was three nodes. Delete this line to restore the multi-zone spread; the module defaults to the
+  # region, which is what this environment had.
+  location = "asia-southeast1-a"
+
   system_pool = {
-    machine_type = "n2-standard-4"
-    min_nodes    = 1
-    max_nodes    = 6
-    # The git tier keeps live bare repos on block volumes (ADR-0033), and SeaweedFS FUSE serves only
-    # large objects (ADR-0050) — so the node disk under the git PVCs is the latency-critical one.
-    disk_size_gb = 500
-    disk_type    = "pd-ssd"
+    machine_type = "e2-standard-4"
+
+    # Two, for the reason prod-cp's unit spells out: nothing in deploy/k8s/platform/base declares
+    # CPU or memory requests, so the cluster autoscaler never sees a pending pod and the floor is
+    # the entire budget. Seven pods here -- Postgres 3, Redpanda 3, SeaweedFS 1.
+    min_nodes = 2
+    max_nodes = 4
+
+    # 100GB pd-balanced, down from 500GB pd-ssd. The old size cited ADR-0033's live bare repos, but
+    # that contract belongs to the git tier's PVCs -- which are their own persistent disks, not this
+    # boot disk, and which have no manifest in deploy/k8s at all yet. When the git tier does land it
+    # needs a premium-rwo CLAIM; it will not need a bigger node boot disk.
+    disk_size_gb = 100
+    disk_type    = "pd-balanced"
   }
 
   # ADR-0012: CI jobs are untrusted build code and run gVisor-sandboxed. Scaled by KEDA on queue
-  # depth from zero, hence min_nodes = 0.
+  # depth from zero, hence min_nodes = 0 -- this pool is free while idle, and every number below is
+  # about what it costs when it is NOT.
   runner_pool = {
-    machine_type = "n2-standard-8"
+    # e2-standard-4. GKE Sandbox refuses SHARED-CORE machine types, which is what the module's
+    # variable comment means by "not a free choice" -- e2-micro/small/medium are out, e2-standard-4
+    # is not shared-core and is allowed.
+    machine_type = "e2-standard-4"
     min_nodes    = 0
-    max_nodes    = 20
-    disk_size_gb = 200
+
+    # Four, not twenty. The ceiling is the only thing standing between a busy queue and a four-figure
+    # month, and no CI job has ever run here. Raise it when real throughput demands it -- that is a
+    # one-line change with no rebuild, unlike everything else in this file.
+    max_nodes    = 4
+    disk_size_gb = 100
     disk_type    = "pd-balanced"
   }
 }
