@@ -18,6 +18,19 @@ spec:
       labels:
         app: seaweedfs
     spec:
+      # The same shape Postgres, Valkey, Redpanda and OpenBao already carry, and the reason this
+      # one lacked it is that prod-dp's overlay had never been applied to a cluster. The image's
+      # entrypoint chowns /data and then `su-exec`s to uid 1000; with `capabilities: drop: ALL`
+      # that setgroups(2) is denied and the container exits before SeaweedFS starts:
+      #   chown: /data: Operation not permitted
+      #   su-exec: setgroups: Operation not permitted
+      # fsGroup makes the kubelet own the volume correctly, and starting as 1000 makes the
+      # entrypoint's own step a no-op rather than a failure. Dropping the capability back in
+      # would buy the same start-up at the cost of the capability, which is the wrong trade.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: seaweedfs
           image: docker.io/chrislusf/seaweedfs:4.40
