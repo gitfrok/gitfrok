@@ -279,10 +279,25 @@ expected_gw = f"{env_name}-gateway"
 expected_door = f"{env_name}-agent-door"
 
 for g in gws:
-    got = (g["metadata"].get("annotations", {}) or {}).get("networking.gke.io/addresses")
-    if got != expected_gw:
-        report(f"AC8: Gateway/{g['metadata']['name']} names address {got!r}; "
-               f"deploy/gcp/modules/addresses reserves {expected_gw!r} for this environment")
+    # `spec.addresses`, NOT the `networking.gke.io/addresses` annotation. This gate asserted the
+    # annotation until 2026-09-22 and was asserting a string GKE never reads: that annotation is an
+    # INGRESS mechanism, and a Gateway carrying it auto-provisions its own address while reporting
+    # PROGRAMMED=True. The assertion was green, the manifest looked right, and the reserved address
+    # sat unused with every DNS record pointing at it. Asserting the annotation is worse than
+    # asserting nothing, because it reads like coverage.
+    addrs = [a for a in (g["spec"].get("addresses") or []) if a.get("type") == "NamedAddress"]
+    if (g["metadata"].get("annotations", {}) or {}).get("networking.gke.io/addresses"):
+        report(f"AC8: Gateway/{g['metadata']['name']} carries networking.gke.io/addresses — that is an "
+               f"Ingress annotation, ignored by the Gateway API, and the Gateway will silently take an "
+               f"address of its own. Use spec.addresses with type NamedAddress")
+    if not addrs:
+        report(f"AC8: Gateway/{g['metadata']['name']} declares no NamedAddress in spec.addresses — it "
+               f"would auto-provision an EPHEMERAL address and a hand-written DNS record would go stale")
+    else:
+        got = addrs[0].get("value")
+        if got != expected_gw:
+            report(f"AC8: Gateway/{g['metadata']['name']} names address {got!r}; "
+                   f"deploy/gcp/modules/addresses reserves {expected_gw!r} for this environment")
 
 for sv in doors:
     got = (sv["metadata"].get("annotations", {}) or {}).get("networking.gke.io/load-balancer-ip-addresses")

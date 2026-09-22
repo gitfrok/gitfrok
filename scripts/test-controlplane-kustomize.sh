@@ -106,6 +106,8 @@ expect_refusal no-acme-listener/prod-cp AC7 "has no :80 listener" \
   "AC7 — the Gateway losing its :80 ACME listener"
 expect_refusal wrong-address-name/prod-cp AC8 "gitfrok-gateway-typo" \
   "AC8 — a reserved-address name the tofu unit does not reserve"
+expect_refusal ignored-address-annotation/prod-cp AC8 "that is an Ingress annotation" \
+  "AC8 — the right address name on the annotation GKE ignores, which is the defect that shipped"
 expect_refusal reader-on-control/prod-cp AC10 "sets GITFROK_REPOSITORY_READER_ADDR" \
   "AC10 — a reader address on the control plane, which the binary refuses at boot"
 expect_refusal https-no-ca-mount/prod-cp AC11 "no volumeMount covers that path" \

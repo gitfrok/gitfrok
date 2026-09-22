@@ -10,15 +10,23 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: gitfrok-cp
-  annotations:
-    # The reserved global address ADR-0095 decision 6 requires. It is referenced BY NAME so the
-    # record and the Gateway agree before the address exists — and it does not exist yet: its
-    # OpenTofu unit is an open register row, deliberately unbuilt because nothing consumed an
-    # address until this file. Applying this overlay before that unit lands leaves the Gateway
-    # unprogrammed.
-    networking.gke.io/addresses: prod-cp-gateway
 spec:
   gatewayClassName: gke-l7-global-external-managed
+
+  # The reserved global address ADR-0095 decision 6 requires, referenced BY NAME so the DNS record
+  # and the Gateway agree.
+  #
+  # THIS WAS `networking.gke.io/addresses` AS AN ANNOTATION UNTIL 2026-09-22, AND GKE SILENTLY
+  # IGNORED IT. That annotation is an *Ingress* mechanism; the Gateway API equivalent is this
+  # `spec.addresses` block. The failure has no error: the Gateway reports PROGRAMMED=True and
+  # serves happily — on an address it auto-provisioned for itself
+  # (`gkegw1-osku-...`, 34.98.93.111), while `prod-cp-gateway` sat RESERVED and unused and every
+  # DNS record pointed at the wrong IP. Found only by comparing the Gateway's address against
+  # `gcloud compute addresses list`; patching to this form moved it onto the reserved address
+  # within a minute.
+  addresses:
+    - type: NamedAddress
+      value: prod-cp-gateway
   listeners:
     - name: acme-http
       protocol: HTTP
