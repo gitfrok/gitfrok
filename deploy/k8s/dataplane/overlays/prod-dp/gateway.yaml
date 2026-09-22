@@ -1,0 +1,87 @@
+---
+# THE PUBLIC GIT DOOR. This is the one property that separates this overlay from the BYO installer
+# ADR-0096 decision 3 reserves the sibling path for: that one renders "NO inbound surface — no
+# Service, no Ingress", because a customer's cluster must open no holes (ADR-0011). The vendor's own
+# data plane is the opposite case — it is the SaaS, and a git host nobody can reach is not one.
+# ADR-0095 decision 11 left this open ("the vendor's own data plane publishes nothing under this
+# ADR"); invariant 12 makes that a decision to take rather than assume, so it is taken in the
+# Proposed ADR this overlay cites and is NOT smuggled in as a manifest detail.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gitfrok-dp
+  annotations:
+    # TLS comes from Certificate Manager, not from a Secret in this cluster and not from
+    # cert-manager. Two reasons, and neither is convenience: a Google-managed certificate renews
+    # without anything in the cluster holding a private key or an ACME account, and the HTTP-01
+    # solver path is exactly what is still unresolved on the control plane's Gateway.
+    networking.gke.io/certmap: gitfrok-dp-certmap
+spec:
+  gatewayClassName: gke-l7-global-external-managed
+  # The RESERVED address, by name. Not the `networking.gke.io/addresses` annotation — that is an
+  # INGRESS annotation which the Gateway controller ignores in silence while reporting
+  # PROGRAMMED=True and provisioning its own ephemeral IP, which is how the control plane's DNS
+  # record pointed at nothing for an hour.
+  addresses:
+    - type: NamedAddress
+      value: prod-dp-git-gateway
+  listeners:
+    - name: git-https
+      protocol: HTTPS
+      port: 443
+      hostname: "git-gitfrok.7.solutions"
+      tls:
+        mode: Terminate
+        options:
+          networking.gke.io/cert-manager-certs: ""
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: git-gitfrok
+spec:
+  parentRefs:
+    - name: gitfrok-dp
+  hostnames:
+    - "git-gitfrok.7.solutions"
+  rules:
+    # Only `/git/` is published. The front door's own prefix is `/git/`
+    # (backend/internal/gitfrontdoor/http.go), and publishing `/` would put the LFS batch route and
+    # every future handler on the internet by default rather than by decision.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /git/
+      backendRefs:
+        - name: dataplane
+          port: 8081
+---
+# GKE Gateway DOES NOT INFER A HEALTH CHECK FROM THE READINESS PROBE — that inference only happens
+# for Ingress + BackendConfig. Its default probes `/` on the serving port and expects 200.
+#
+# The Git front door answers 404 to `/`, to `/healthz` and to `/git/` alike: it serves only real Git
+# transport paths. Measured, not assumed. So the default health check marks this backend
+# PERMANENTLY UNHEALTHY and the door returns 502 while every pod is Ready — the same failure that
+# made auth-gitfrok serve 502 for an hour.
+#
+# The probe therefore targets the plane's dedicated health listener on 8080 while traffic is served
+# on 8081. That is what `port` + USE_FIXED_PORT exist for.
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: dataplane-git
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /healthz
+        port: 8080
+        portSpecification: USE_FIXED_PORT
+  targetRef:
+    group: ""
+    kind: Service
+    name: dataplane

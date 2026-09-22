@@ -1,0 +1,155 @@
+---
+# The Git storage tier (ADR-0004, SPEC-0015). Separate workload, not a sidecar: ADR-0041 decision 4
+# makes THIS the policy-enforcement point — `prepareWith` calls the PDP with `repo.read`/`repo.write`
+# immediately before `git-upload-pack` or `git-receive-pack` — so a mistakenly permissive front door
+# still cannot reach a repository. Putting it in the front door's pod would not change that, but it
+# would let a front-door compromise read the volume directly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-storaged
+  labels:
+    app.kubernetes.io/name: git-storaged
+    app.kubernetes.io/part-of: gitfrok-dataplane
+spec:
+  selector:
+    app.kubernetes.io/name: git-storaged
+  ports:
+    - name: grpc
+      port: 9000
+      targetPort: grpc
+      protocol: TCP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: git-storaged-repositories
+  labels:
+    app.kubernetes.io/name: git-storaged
+    app.kubernetes.io/part-of: gitfrok-dataplane
+spec:
+  # ADR-0033: live bare repositories stay on a BLOCK volume, and this is measured rather than
+  # preferred — SeaweedFS-FUSE was benchmarked and disqualified because its rename() is not atomic,
+  # and git renames a .lock over the ref on every update. 36 of 428 concurrent ref reads failed on
+  # the FUSE arm; 0 of 229 on block. git-storaged refuses a FUSE repository root outright, so a
+  # misconfiguration here fails to start rather than corrupting refs (invariant 7).
+  accessModes: ["ReadWriteOnce"]
+  # Stated, never inherited. The cluster default is standard-rwo today; a default that changes
+  # under a StatefulSet's feet is the failure this line exists to prevent (ADR-0106).
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-storaged
+  labels:
+    app.kubernetes.io/name: git-storaged
+    app.kubernetes.io/part-of: gitfrok-dataplane
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate. This pod mounts a ReadWriteOnce PVC, so a rolling update starts the
+  # replacement while the old pod still holds the volume and the rollout DEADLOCKS — it does not
+  # fail, it hangs, which is worse.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: git-storaged
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: git-storaged
+        app.kubernetes.io/part-of: gitfrok-dataplane
+    spec:
+      serviceAccountName: gitfrok-dataplane
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: git-storaged
+          image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/git-storaged
+          env:
+            - name: GITFROK_GIT_STORAGE_ROOT
+              value: /var/lib/gitfrok/repositories
+            - name: GITFROK_GIT_STORAGE_LISTEN_ADDR
+              value: ":9000"
+            # The audit sink. The role must be gitfrok_app, never the superuser — db.Open refuses a
+            # superuser DSN precisely so row-level security actually binds.
+            - name: GITFROK_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-database
+                  key: url
+            - name: GITFROK_POLICY_BUNDLE_DIR
+              value: /etc/gitfrok/policy
+            # The large-object tier (ADR-0050, SPEC-0023): all five or none. A node with three of
+            # them has an operator who intended LFS and a deployment that would refuse it.
+            - name: GITFROK_SEAWEEDFS_S3_ENDPOINT
+              value: "http://seaweedfs:8333"
+            - name: GITFROK_SEAWEEDFS_S3_REGION
+              value: "us-east-1"
+            - name: GITFROK_SEAWEEDFS_S3_BUCKET
+              value: "gitfrok"
+            - name: GITFROK_SEAWEEDFS_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-seaweedfs-s3
+                  key: access-key
+            - name: GITFROK_SEAWEEDFS_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-seaweedfs-s3
+                  key: secret-key
+            - name: GITFROK_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: grpc
+              containerPort: 9000
+              protocol: TCP
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          # git-storaged serves gRPC and NO HTTP health endpoint, so the probe is a TCP connect. It
+          # is honest about what it proves: the listener is up, and nothing more.
+          livenessProbe:
+            tcpSocket: { port: grpc }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket: { port: grpc }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # NOT read-only, and that is not laziness: git writes lock files, temporary objects and
+            # hooks inside the repository tree, and git-storaged rewrites the pre-receive hook on
+            # every push. The repository volume is the only writable path it needs.
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: repositories
+              mountPath: /var/lib/gitfrok/repositories
+            - name: policy
+              mountPath: /etc/gitfrok/policy
+              readOnly: true
+      volumes:
+        - name: repositories
+          persistentVolumeClaim:
+            claimName: git-storaged-repositories
+        - name: policy
+          configMap:
+            name: gitfrok-policy-bundle

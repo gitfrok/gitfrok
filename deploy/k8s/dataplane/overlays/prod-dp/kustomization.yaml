@@ -1,0 +1,26 @@
+# ADR-0092's data-plane environment (live/prod-dp), first-party half.
+#
+# WHAT THIS OVERLAY MAY VARY, borrowed from SPEC-0067 AC11 because the same rule should hold on
+# both planes: hostnames, addresses, replicas and image digests — never which workloads exist.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitfrok
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - gateway.yaml
+
+# ADR-0096 decision 9 / ADR-0034-0035: one declarative entry per image, pinned by DIGEST.
+#
+# AC5 IS NOT MET HERE EITHER, and it is not silently passed. These are tags, not digests, for the
+# same reason the control-plane overlay's are: the images were built and pushed by hand during
+# bring-up rather than by the image-publish workflow, so no signed `.release` manifest exists to
+# read a digest from. When that workflow runs, each entry gains `digest: sha256:...` and drops
+# `newTag`, and the release manifest rather than a human is where the value comes from.
+images:
+  - name: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/dataplane-app
+    newTag: 0.1.0
+  - name: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/git-storaged
+    newTag: 0.1.0

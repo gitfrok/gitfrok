@@ -1,0 +1,134 @@
+---
+# The data-plane binary (ADR-0025: one binary per plane). It opens the Git protocol front doors
+# ADR-0041 terminates here, and it is the ONLY plane that registers OIDCLogin — see the overlay.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitfrok-dataplane
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dataplane
+  labels:
+    app.kubernetes.io/name: dataplane
+    app.kubernetes.io/part-of: gitfrok-dataplane
+spec:
+  selector:
+    app.kubernetes.io/name: dataplane
+  ports:
+    - name: health
+      port: 8080
+      targetPort: health
+    - name: git-http
+      port: 8081
+      targetPort: git-http
+    - name: policy-grpc
+      port: 9090
+      targetPort: policy-grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dataplane
+  labels:
+    app.kubernetes.io/name: dataplane
+    app.kubernetes.io/part-of: gitfrok-dataplane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dataplane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dataplane
+        app.kubernetes.io/part-of: gitfrok-dataplane
+    spec:
+      serviceAccountName: gitfrok-dataplane
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: dataplane
+          image: asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/dataplane-app
+          env:
+            - name: GITFROK_POLICY_BUNDLE_DIR
+              value: /etc/gitfrok/policy
+            - name: GITFROK_LISTEN_ADDR
+              value: ":8080"
+            - name: GITFROK_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-database
+                  key: url
+            # The three front-door variables are ONE unit: loadFrontDoorConfig refuses a partial
+            # configuration rather than serving half a boundary. A Git transport listener without
+            # GITFROK_GIT_STORAGE_ADDR, or without a PAT verifier key of at least 32 decoded bytes,
+            # fails the rollout at start.
+            - name: GITFROK_GIT_STORAGE_ADDR
+              value: "git-storaged:9000"
+            - name: GITFROK_GIT_HTTP_ADDR
+              value: ":8081"
+            - name: GITFROK_POLICY_GRPC_ADDR
+              value: ":9090"
+            - name: GITFROK_PAT_VERIFIER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-pat-verifier
+                  key: key
+            - name: GITFROK_SEAWEEDFS_S3_ENDPOINT
+              value: "http://seaweedfs:8333"
+            - name: GITFROK_SEAWEEDFS_S3_REGION
+              value: "us-east-1"
+            - name: GITFROK_SEAWEEDFS_S3_BUCKET
+              value: "gitfrok"
+            - name: GITFROK_SEAWEEDFS_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-seaweedfs-s3
+                  key: access-key
+            - name: GITFROK_SEAWEEDFS_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gitfrok-seaweedfs-s3
+                  key: secret-key
+          ports:
+            - name: health
+              containerPort: 8080
+            - name: git-http
+              containerPort: 8081
+            - name: policy-grpc
+              containerPort: 9090
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/gitfrok/policy
+              readOnly: true
+      volumes:
+        - name: policy
+          configMap:
+            name: gitfrok-policy-bundle
