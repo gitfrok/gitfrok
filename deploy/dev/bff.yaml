@@ -74,7 +74,8 @@ spec:
         # CONSEQUENCE, measured 2026-09-23: a data-plane BFF serves NO /login (404). ADR-0094
         # decision 4 puts identity and login on the control plane, whose backend door does not
         # register OIDCLogin — so neither plane value yields a working login on this code. That is
-        # governance T-0092 item 8 / ADR-0102 (Proposed), not a dev misconfiguration.
+        # governance T-0092 item 8 / ADR-0102 (Accepted 2026-09-23, not yet implemented), not a dev
+        # misconfiguration.
         - name: GITFROK_PLANE
           value: "data"
         # ADR-0100 decision 5 renamed GITFROK_PDP_ADDR, which asserted a role this door no longer

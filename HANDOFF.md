@@ -116,8 +116,8 @@ agent door can never be proxied), **0096** (Kustomize only, no Helm), **0097** (
 endpoints reached through Zero Trust), **0098** (Artifact Registry, `docker.io` retired), **0099**
 (the third-party stateful set), **0100/0101** (which plane serves and owns what), **0104/0105**,
 **0106** (cost is the binding constraint), **0107** (the data plane publishes the Git door) and
-**0108** (`gitfrok.7.solutions` is its tenant-facing name) and **0109** (agents do not deploy to production) — all Accepted. **0102/0103** are still
-**Proposed**.
+**0108** (`gitfrok.7.solutions` is its tenant-facing name) and **0109** (agents do not deploy to production) — all Accepted. **0102** was accepted on 2026-09-23 (with a marked
+correction); **0103** is still **Proposed**.
 
 ## Where work stands (2026-08-23)
 
