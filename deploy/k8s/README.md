@@ -216,9 +216,37 @@ overlay's address names match the `addresses` unit in `../gcp`, and the ADR-0100
 
 ## What is deliberately absent
 
-**No Secret is authored by any manifest here.** Every credential arrives by `secretKeyRef` against a
-Secret an operator created out of band. A `secretGenerator` in an overlay would put plaintext in
-git, and the platform gate fails on one.
+**No Secret is authored by any manifest here.** Every credential arrives by `secretKeyRef` or a
+volume against a Secret an operator created out of band. A `secretGenerator` in an overlay would put
+plaintext in git, and the platform gate fails on one.
+
+The nine an operator creates, and which overlay consumes each:
+
+| Secret | Keys | Consumed by |
+|---|---|---|
+| `postgres-superuser` | `username`, `password` | platform, both overlays (CNPG) |
+| `postgres-app` | `username`, `password` | platform, both overlays (CNPG) |
+| `zitadel-masterkey` | `masterkey` | platform, `prod-cp` |
+| `zitadel-postgres` | `password` | platform, `prod-cp` |
+| `zitadel-admin` | `username`, `password` | platform, `prod-cp` |
+| `openbao-tls` | `tls.crt`, `tls.key`, `ca.crt` | platform, `prod-cp` — the custody **server**'s key |
+| `gitfrok-database` | `url` | controlplane, `prod-cp` |
+| `gitfrok-pat-verifier` | `key` | controlplane, `prod-cp` |
+| **`openbao-ca`** | `ca.crt` | controlplane, `prod-cp` (ADR-0104, SPEC-0071) |
+
+**`openbao-ca` is the only one of the nine that is not secret** — it is a CA certificate, a public
+verification input. It is called out because both mistakes cost something: handling it as a secret
+makes rotation harder than it is, and reading "one of these is public" as "these are roughly public"
+is how the other eight get mishandled.
+
+It is deliberately **not** `openbao-tls`, which carries `tls.key`. That Secret also contains a usable
+`ca.crt`, so mounting it into the control plane would *work* — which is why
+`check-controlplane-kustomize.sh` refuses it by name rather than relying on convention. Create it
+from the CA that signed the running `openbao-tls`:
+
+```sh
+kubectl -n gitfrok create secret generic openbao-ca --from-file=ca.crt=<path-to-ca.crt>
+```
 
 **`agents-gitfrok.7.solutions` has no Gateway route and must stay DNS-only in Cloudflare.** The agent
 pins our CA to verify the *server* certificate, so any TLS-terminating proxy in front of the agent

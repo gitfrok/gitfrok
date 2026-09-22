@@ -1,0 +1,18 @@
+# SPEC-0071 AC11: an https custody address with the CA mount removed. The env var still points at a
+# path, so the Deployment reads as configured — and the control plane would start and fail at the
+# first custody call, which is precisely ADR-0104's failure wearing a configuration.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+spec:
+  template:
+    spec:
+      containers:
+        - name: controlplane
+          volumeMounts:
+            - name: custody-ca
+              $patch: delete
+      volumes:
+        - name: custody-ca
+          $patch: delete

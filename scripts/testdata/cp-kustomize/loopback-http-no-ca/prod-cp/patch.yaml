@@ -1,0 +1,26 @@
+# SPEC-0071 AC11's POSITIVE case, and the one that keeps the gate honest. A loopback-http custody
+# address needs no CA: dev serves custody with tls_disable and the platform gate already refuses
+# that relaxation reaching production. A gate written from the two refusals alone fails this, and
+# would make the dev composition ungateable.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+spec:
+  template:
+    spec:
+      containers:
+        - name: controlplane
+          env:
+            - name: GITFROK_CUSTODY_OPENBAO_ADDR
+              value: "http://127.0.0.1:8200"
+            - name: GITFROK_CUSTODY_ALLOW_LOOPBACK_HTTP
+              value: "true"
+            - name: GITFROK_CUSTODY_CA_FILE
+              $patch: delete
+          volumeMounts:
+            - name: custody-ca
+              $patch: delete
+      volumes:
+        - name: custody-ca
+          $patch: delete

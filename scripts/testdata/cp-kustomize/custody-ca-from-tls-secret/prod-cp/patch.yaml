@@ -1,0 +1,15 @@
+# SPEC-0071 AC10: the shortcut that would WORK. openbao-tls already contains a ca.crt, so mounting
+# it instead of openbao-ca produces a functioning deployment — and hands the control plane the
+# custody server's PRIVATE KEY, which it has no business holding. Refused by name, because
+# "it works" is exactly why someone would do it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+spec:
+  template:
+    spec:
+      volumes:
+        - name: custody-ca
+          secret:
+            secretName: openbao-tls

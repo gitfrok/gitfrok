@@ -1,0 +1,15 @@
+# SPEC-0071 AC11, the other half: the CA is mounted and nothing tells the binary to use it. An
+# empty GITFROK_CUSTODY_CA_FILE means "system pool only", so this verifies against roots that
+# cannot contain a private CA while a CA sits unread on the filesystem.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+spec:
+  template:
+    spec:
+      containers:
+        - name: controlplane
+          env:
+            - name: GITFROK_CUSTODY_CA_FILE
+              $patch: delete

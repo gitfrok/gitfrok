@@ -267,6 +267,67 @@ if not os.path.isdir(unit):
     report(f"AC8: this overlay names reserved addresses but deploy/gcp/live/{env_name}/addresses "
            f"does not exist — the names resolve to nothing and GKE assigns ephemeral ones")
 
+# SPEC-0071 AC10/AC11, ADR-0104 decision 6. The pairing whose absence let ADR-0104's gap exist.
+#
+# Two independently correct halves that nothing checked agreed: the custody address was https, and
+# nothing gave the control plane a CA that could verify a privately-signed certificate. Each file
+# was right on its own. This is the assertion that makes them one fact.
+#
+# CONDITIONAL, deliberately. Loopback http needs no CA — dev serves custody with tls_disable, and
+# the platform gate already refuses that relaxation reaching production. A rule that demanded a CA
+# unconditionally would make the dev composition ungateable, so `loopback-http-no-ca` exists as a
+# POSITIVE fixture asserting this does not over-fire.
+CUSTODY_ADDR_ENV = "GITFROK_CUSTODY_OPENBAO_ADDR"
+CUSTODY_CA_ENV = "GITFROK_CUSTODY_CA_FILE"
+CUSTODY_CA_VOLUME_SECRET = "openbao-ca"
+# openbao-tls carries tls.key. It also carries a ca.crt, so mounting it here WORKS — which is
+# precisely why it needs a refusal by name rather than a convention.
+CUSTODY_SERVER_TLS_SECRET = "openbao-tls"
+
+for w in workloads:
+    if w["metadata"]["name"] != "controlplane":
+        continue
+    spec = w["spec"]["template"]["spec"]
+    for c in spec.get("containers", []):
+        env = {e["name"]: e for e in c.get("env", []) if isinstance(e, dict) and "name" in e}
+        addr = (env.get(CUSTODY_ADDR_ENV, {}) or {}).get("value", "")
+        if not addr.startswith("https://"):
+            continue  # loopback http, or no custody at all: no CA is required
+
+        ca_path = (env.get(CUSTODY_CA_ENV, {}) or {}).get("value", "")
+        if not ca_path:
+            report(f"AC11: {CUSTODY_ADDR_ENV} is {addr!r} but {CUSTODY_CA_ENV} is unset. Custody's "
+                   f"certificate is privately signed by necessity, so this verifies against the "
+                   f"system pool and every custody call fails TLS (ADR-0104)")
+
+        mounts = {m["name"]: m for m in c.get("volumeMounts", []) if isinstance(m, dict)}
+        volumes = {v["name"]: v for v in spec.get("volumes", []) if isinstance(v, dict)}
+
+        # The mount that actually backs ca_path, found by mountPath rather than by volume name:
+        # naming is a convention and the path is the contract the binary reads.
+        backing = None
+        for m in mounts.values():
+            mp = m.get("mountPath", "")
+            if mp and (ca_path == mp or ca_path.startswith(mp.rstrip("/") + "/")):
+                backing = m
+                break
+        if ca_path and backing is None:
+            report(f"AC11: {CUSTODY_CA_ENV} is {ca_path!r} and no volumeMount covers that path — "
+                   f"the binary would fail at construction reading a file nothing supplies")
+        elif backing is not None:
+            vol = volumes.get(backing["name"], {})
+            secret_name = (vol.get("secret") or {}).get("secretName")
+            if secret_name == CUSTODY_SERVER_TLS_SECRET:
+                report(f"AC10: the custody CA is mounted from {CUSTODY_SERVER_TLS_SECRET!r}, which "
+                       f"holds the custody SERVER'S PRIVATE KEY. It contains a usable ca.crt, so "
+                       f"this would work — mount {CUSTODY_CA_VOLUME_SECRET!r} instead (ADR-0104 "
+                       f"decision 4)")
+            elif secret_name != CUSTODY_CA_VOLUME_SECRET:
+                report(f"AC10: the custody CA volume is backed by {secret_name!r}; ADR-0104 decision 4 "
+                       f"names {CUSTODY_CA_VOLUME_SECRET!r}, an operator-created Secret carrying ca.crt alone")
+            if not backing.get("readOnly"):
+                report("AC8: the custody CA mount is not readOnly")
+
 sys.exit(bad)
 PY
 

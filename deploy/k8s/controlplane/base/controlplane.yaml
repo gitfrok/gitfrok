@@ -82,6 +82,13 @@ spec:
             # carrying a dev relaxation into production is how it becomes permanent.
             - name: GITFROK_CUSTODY_OPENBAO_ADDR
               value: "https://openbao:8200"
+            # ADR-0104 / SPEC-0071 AC8. The address above is https and custody's certificate is
+            # privately signed by necessity — its SANs are openbao-N.openbao-internal, which no
+            # public CA issues for — so without this the binary verifies against the system pool,
+            # one ca-certificates.crt in a FROM scratch image, and every custody call fails TLS.
+            # The two travel together or not at all; check-controlplane-kustomize.sh asserts it.
+            - name: GITFROK_CUSTODY_CA_FILE
+              value: /etc/gitfrok/custody-ca/ca.crt
             - name: GITFROK_CUSTODY_TRANSIT_MOUNT
               value: "transit"
             - name: GITFROK_CUSTODY_KUBERNETES_ROLE
@@ -126,6 +133,9 @@ spec:
               readOnly: true
             - name: custody-snapshot
               mountPath: /var/lib/gitfrok/custody
+            - name: custody-ca
+              mountPath: /etc/gitfrok/custody-ca
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -140,6 +150,13 @@ spec:
         - name: custody-snapshot
           persistentVolumeClaim:
             claimName: controlplane-custody-snapshot
+        # A THIRD input, and the ninth out-of-band credential — the only public one. It is
+        # `openbao-ca` and never `openbao-tls`: that Secret holds the custody server's PRIVATE KEY,
+        # and mounting it here would work, which is exactly why the gate refuses it by name.
+        # ADR-0099 decision 7 holds: no installer authors this Secret.
+        - name: custody-ca
+          secret:
+            secretName: openbao-ca
 ---
 apiVersion: v1
 kind: Service
