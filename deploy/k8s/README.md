@@ -96,8 +96,10 @@ have the same ordering constraint, every time.
 
 ## What blocks a first real deployment today
 
-Three things. The first two are operator-held; the third is a gap in the tree, recorded rather
-than worked around.
+Two things, both operator-held. A third — the control plane could not trust the custody CA — was
+found during the 2026-09-22 rebuild and is now closed; it is kept below rather than deleted,
+because a blocker that was real and got fixed is evidence, and the next reader should not have to
+rediscover why the CA mount is there.
 
 **1. The first-party images are not published.** `controlplane/overlays/prod-cp/kustomization.yaml`
 pins `newTag: 0.1.0` against `asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/*`, and nothing
@@ -132,6 +134,18 @@ work and only the owner can tell them apart:
 
 **2. OpenBao is uninitialised and sealed** on the live `prod-cp` cluster — step 3 above, awaiting a
 share quorum.
+
+**~~3. The control plane cannot trust the custody CA.~~ Closed 2026-09-22** by ADR-0104 (Accepted),
+SPEC-0071 (Implemented), T-0089 (`backend@7a8dccd`) and T-0090 (`super-repo@a3d59c3`). The client
+takes a CA appended to the system pool and refuses an unusable one at construction; the installer
+mounts `openbao-ca`; and `check-controlplane-kustomize.sh` now refuses an `https` custody address
+that travels without a mounted CA. The Secret exists on `prod-cp`, created from the CA that signed
+the running `openbao-tls` — verified by fingerprint and by `openssl verify` against the serving
+certificate, not by assuming the file on disk was the right one. With it in place
+`kubectl apply -k controlplane/overlays/prod-cp --dry-run=server` is **13/13 clean** against the live
+cluster.
+
+So two blockers remain, not three, and both are operator-held.
 
 **3. The control plane has no way to trust the custody CA, and this blocks step 4 independently of
 both of the above.** `openbao-tls` is necessarily signed by a private CA — its SANs are
@@ -168,7 +182,8 @@ teardown this replaced and what a rebuild does *not* restore.
 | Postgres (CNPG) | 3/3, `ContinuousArchiving=True` | 3/3, `ContinuousArchiving=True` |
 | Redpanda / Valkey / SeaweedFS | 3/3, 1/1, n/a | 3/3, n/a, 1/1 |
 | Zitadel | 2/2 Running | n/a |
-| First-party workloads | **not applied** — no published images | not applicable until T-0085 |
+| First-party workloads | **not applied** — no published images; overlay dry-runs 13/13 clean | not applicable until T-0085 |
+| Out-of-band Secrets | all 9 present, incl. `openbao-ca` | 2 present (`postgres-*`) |
 
 `connected as gitfrok_app to gitfrok ssl=on` verified from inside prod-cp, as on the first build.
 
