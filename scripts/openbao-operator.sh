@@ -35,7 +35,11 @@
 #   scripts/openbao-operator.sh all    ~/gitfrok-openbao-shares.txt   # init + unseal + wire
 #   scripts/openbao-operator.sh unseal ~/gitfrok-openbao-shares.txt   # every cold restart, after
 #
-# Environment: KUBECONFIG must already point at prod-cp. Source ~/.gitfrok/kube-path.sh prod-cp.
+# Environment: KUBECONFIG must point at the target cluster, and kubectl's current context must BE
+# that cluster — the script passes no --context.
+#   production:  . ~/.gitfrok/kube-path.sh prod-cp            (namespace gitfrok, TLS — the defaults)
+#   dev cluster: KUBECONFIG=~/.kube/config GITFROK_NS=default \
+#                GITFROK_OPENBAO_LOCAL_ADDR=http://127.0.0.1:8200 scripts/openbao-operator.sh all <file>
 #
 # Exit: 0 done · 1 refused or failed · 3 environment problem
 set -euo pipefail
@@ -52,6 +56,12 @@ THRESHOLD=3
 ROLE="${GITFROK_CUSTODY_ROLE:-agent-ca}"
 CONSUMER_SA="${GITFROK_CUSTODY_SA:-controlplane}"
 TRANSIT_MOUNT="${GITFROK_CUSTODY_TRANSIT_MOUNT:-transit}"
+
+# The barrier's own loopback address, as seen from INSIDE each pod. Production serves TLS on it
+# (ADR-0104); the dev cluster runs `tls_disable = true` and answers plain HTTP, so an https address
+# there fails the very first status check with a TLS handshake error. Loopback either way: the
+# Service round-robins across nodes, and an unseal fed to the wrong node advances the wrong counter.
+BAO_LOCAL_ADDR="${GITFROK_OPENBAO_LOCAL_ADDR:-https://127.0.0.1:8200}"
 
 die() { printf 'openbao-operator: %s\n' "$1" >&2; exit "${2:-1}"; }
 
@@ -73,12 +83,12 @@ esac
 bao_in() {
   local n="$1"; shift
   kubectl -n "$NS" exec -i "${STS}-${n}" -c openbao -- \
-    env BAO_ADDR=https://127.0.0.1:8200 bao "$@"
+    env BAO_ADDR="$BAO_LOCAL_ADDR" bao "$@"
 }
 bao_root() {
   local n="$1"; shift
   kubectl -n "$NS" exec -i "${STS}-${n}" -c openbao -- \
-    env BAO_ADDR=https://127.0.0.1:8200 BAO_TOKEN="$ROOT" bao "$@"
+    env BAO_ADDR="$BAO_LOCAL_ADDR" BAO_TOKEN="$ROOT" bao "$@"
 }
 
 # TWO THINGS ABOUT `bao status` THAT BREAK THE OBVIOUS IMPLEMENTATION, both measured against the
