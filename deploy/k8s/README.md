@@ -168,11 +168,17 @@ Note also why no gate caught this: the custody TLS branch has never been taken a
 serves custody with `tls_disable = true` over loopback HTTP, and the platform gate's `loopback-http`
 fixture correctly refuses that relaxation reaching production — so both doors are shut at once.
 
-## Live state: both clusters are up and the stateful set is running, 2026-09-22 (second build)
+## Live state: both clusters torn down again, 2026-09-22 (after the second build)
 
-**Rebuilt the same day it was torn down.** `deploy/gcp` applied 15/15 units across both projects,
-and both platform overlays are applied and converged. `deploy/TEARDOWN-RUNBOOK.md` records the
-teardown this replaced and what a rebuild does *not* restore.
+**Built, and torn down again the same day.** Both GKE clusters were deleted on 2026-09-22 after the
+second build, so **nothing below is running** — read the table as what the second build reached and
+proved, not as what exists. Everything *outside* the clusters survives and is still billing: 25
+orphaned PVC disks, both `zt-connector` VMs, both Cloud NAT routers and four reserved addresses.
+`deploy/TEARDOWN-RUNBOOK.md` has the sweep and the rebuild.
+
+What the second build proved, and is therefore a property of these manifests rather than of that
+cluster: `deploy/gcp` applied **15/15 units** across both projects, both platform overlays converged,
+and the control-plane overlay dry-ran **13/13 clean** with the ADR-0104 CA mount in place.
 
 | | `prod-cp` | `prod-dp` |
 |---|---|---|

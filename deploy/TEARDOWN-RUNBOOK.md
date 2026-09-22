@@ -102,18 +102,31 @@ are recorded here as the fallback rather than an afterthought.
 
 ### 5. Sweep, and only then believe it
 
-Nothing is torn down until this prints zeros. Run for **both** projects:
+Nothing is torn down until this prints zeros. Run for **both** projects — and note the shell:
+**this script was wrong until 2026-09-22, and wrong in the direction that reassures.** It used
+`gcloud $R list ... 2>/dev/null`; zsh does not word-split an unquoted parameter, so gcloud received
+`"compute instances"` as a single argument, exited 2, and `2>/dev/null` turned that into a count of
+zero. On a zsh login shell the sweep certified an untouched environment as fully torn down. It was
+caught by disbelieving a row — the sweep claimed no instances while the connector VM was plainly
+running — which is the habit this section actually depends on:
 
 ```sh
 for P in gitfrok-prod-cp gitfrok-prod-dp; do
   echo "== $P"
   for R in "container clusters" "compute instances" "compute disks" \
            "compute routers" "compute addresses" "compute forwarding-rules"; do
-    printf '%-26s %s\n' "$R" \
-      "$(gcloud $R list --project=$P --format='value(name)' 2>/dev/null | wc -l | tr -d ' ')"
+    # `eval` and NOT `gcloud $R list`: zsh does not word-split an unquoted parameter, so the
+    # unevalled form passes "compute instances" as ONE argument and gcloud exits 2 with
+    # "Invalid choice". Paired with the 2>/dev/null this section used to carry, that printed a
+    # reassuring 0 for every row — a sweep that reports a perfect teardown on a full environment.
+    # Errors are surfaced rather than counted, for the same reason.
+    out=$(eval gcloud $R list --project="$P" --format="'value(name)'" 2>&1) || {
+      printf '%-26s ERROR: %s\n' "$R" "$(printf '%s' "$out" | head -1)"; continue; }
+    printf '%-26s %s\n' "$R" "$(printf '%s' "$out" | grep -c .)"
   done
-  printf '%-26s %s\n' "artifacts repositories" \
-    "$(gcloud artifacts repositories list --project=$P --format='value(name)' 2>/dev/null | wc -l | tr -d ' ')"
+  out=$(gcloud artifacts repositories list --project="$P" --format='value(name)' 2>&1) \
+    && printf '%-26s %s\n' "artifacts repositories" "$(printf '%s' "$out" | grep -c .)" \
+    || printf '%-26s ERROR: %s\n' "artifacts repositories" "$(printf '%s' "$out" | head -1)"
   gcloud storage buckets list --project=$P --format='value(name)' 2>/dev/null
 done
 ```
