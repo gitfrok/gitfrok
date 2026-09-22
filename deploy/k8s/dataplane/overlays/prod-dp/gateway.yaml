@@ -5,7 +5,7 @@
 # data plane is the opposite case — it is the SaaS, and a git host nobody can reach is not one.
 # ADR-0095 decision 11 left this open ("the vendor's own data plane publishes nothing under this
 # ADR"); invariant 12 makes that a decision to take rather than assume, so it is taken in the
-# Proposed ADR this overlay cites and is NOT smuggled in as a manifest detail.
+# ADR this overlay cites (ADR-0107, Accepted 2026-09-23) and is NOT smuggled in as a manifest detail.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:

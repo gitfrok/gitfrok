@@ -2,7 +2,7 @@
 # Kustomize conversion of the BYO installer; T-0085 is still blocked on SPEC-0068, and when it
 # lands its bundle goes under `byo/`. THIS base is the first-party half and differs from the BYO
 # one in exactly one property, which is the whole reason it needs its own decision: it opens an
-# inbound path. See the prod-dp overlay and the Proposed ADR it cites.
+# inbound path. See the prod-dp overlay and ADR-0107 (Accepted).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

@@ -31,7 +31,7 @@ which workloads exist (SPEC-0067 AC11).
 | OpenBao | **yes** | no — custody is control-plane-side (ADR-0066) |
 | Zitadel | **yes** | no — the OIDC issuer serves the browser surface |
 | SeaweedFS | no | yes — ADR-0050 scopes it to data-plane large objects |
-| first-party workloads | `controlplane/overlays/prod-cp` | `dataplane/overlays/prod-dp` (ADR-0107, **Proposed**) |
+| first-party workloads | `controlplane/overlays/prod-cp` | `dataplane/overlays/prod-dp` (ADR-0107, Accepted) |
 | a public inbound path | the Gateway on `app-`/`auth-gitfrok` | **yes** — the Git door on `git-gitfrok` (ADR-0107) |
 
 `check-platform-kustomize.sh` and `check-controlplane-kustomize.sh` assert this asymmetry. It is
@@ -39,9 +39,8 @@ not an accident of what got written first.
 
 **Two rows in that table changed on 2026-09-23 and one of them is a decision, not a fact.** The
 data plane now has a first-party overlay *and* a public inbound path, which ADR-0095 decision 11
-explicitly left open and ADR-0107 takes up. ADR-0107 is **Proposed**: the overlay is live and the
-decision is not yet accepted, which is the honest state and is recorded here rather than in
-somebody's memory.
+explicitly left open and ADR-0107 takes up. ADR-0107 was **Accepted on 2026-09-23**, after the
+overlay had been live and proven for most of a day — the order is recorded rather than tidied.
 
 **Nothing in `make verify` reads `deploy/k8s/dataplane/`.** Both Kustomize gates are hard-coded to
 their own trees, so the newest overlay — the only one that opens a port to the internet — is the
@@ -210,7 +209,7 @@ and the control-plane overlay dry-ran **13/13 clean** with the ADR-0104 CA mount
 **Updated 2026-09-23.** The two rows above that said "not applied" and "not applicable until
 T-0085" were true when written and false by the time anyone read them, which is the failure mode a
 status table has. What changed: all five images are published, `deploy/k8s/dataplane/` exists
-(ADR-0107, **Proposed**), and `git clone` / `git push` work from the public internet.
+(ADR-0107, Accepted), and `git clone` / `git push` work from the public internet.
 
 **The application databases had ZERO tables until 2026-09-23 — on BOTH clusters.** None of the
 twelve backend migrations had ever been applied to production. Nothing reported it, because nothing
