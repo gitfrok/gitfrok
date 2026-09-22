@@ -51,7 +51,7 @@ expect_refusal ephemeral-address  "AC8 — the agent door taking an ephemeral ad
 expect_refusal literal-credential "AC4 — a database URL as a literal"
 expect_refusal fourth-workload    "AC1/AC2 — a fourth, third-party workload"
 expect_refusal no-acme-listener   "AC7 — the Gateway losing its :80 ACME listener"
-expect_refusal wrong-address-name "AC8 — a reserved-address name the tofu unit does not reserve"
+expect_refusal wrong-address-name/prod-cp "AC8 — a reserved-address name the tofu unit does not reserve"
 expect_refusal reader-on-control  "AC10 — a reader address on the control plane, which the binary refuses at boot"
 expect_refusal https-no-ca-mount/prod-cp "SPEC-0071 AC11 — an https custody address with no CA mounted"
 expect_refusal https-no-ca-env/prod-cp "SPEC-0071 AC11 — a mounted CA that nothing tells the binary to read"
