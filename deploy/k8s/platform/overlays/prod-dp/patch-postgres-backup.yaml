@@ -6,6 +6,14 @@ kind: Cluster
 metadata:
   name: postgres
 spec:
+  # See prod-cp's copy for why this is required and why it cannot come from OpenTofu. Its own
+  # project, its own service account: `ksa_annotations["gitfrok/postgres"]` from
+  # ../../../gcp/live/prod-dp/workload-identity, which is a different email to prod-cp's by
+  # ADR-0092 decision 2 — there is no shared identity between the planes either.
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        iam.gke.io/gcp-service-account: prod-dp-postgres@gitfrok-prod-dp.iam.gserviceaccount.com
   backup:
     barmanObjectStore:
       destinationPath: "gs://gitfrok-prod-dp-postgres-backups/postgres"

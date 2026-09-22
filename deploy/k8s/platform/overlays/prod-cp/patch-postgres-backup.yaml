@@ -7,6 +7,19 @@ kind: Cluster
 metadata:
   name: postgres
 spec:
+  # `gkeEnvironment: true` below means "authenticate as this pod's Google identity" — so without
+  # this annotation there is no identity to be, and every WAL archive fails:
+  #   ContinuousArchiving=False  unexpected failure invoking barman-cloud-wal-archive: exit status 2
+  # while the Cluster still reports Ready=True, because archiving is a condition and not a probe.
+  # The value is `terragrunt output ksa_annotations` from ../../../gcp/live/prod-cp/workload-identity
+  # under key `gitfrok/postgres`. That unit has always emitted it and ADR-0092 decision 4 forbids it
+  # from applying it, so this is where it lands. Environment-specific, like the bucket, hence the
+  # overlay. The bucket grant itself (roles/storage.objectAdmin on the GSA) is already in the
+  # backups unit — this is the only missing link in that chain.
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        iam.gke.io/gcp-service-account: prod-cp-postgres@gitfrok-prod-cp.iam.gserviceaccount.com
   backup:
     barmanObjectStore:
       destinationPath: "gs://gitfrok-prod-cp-postgres-backups/postgres"

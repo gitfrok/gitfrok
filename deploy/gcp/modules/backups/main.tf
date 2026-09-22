@@ -59,3 +59,21 @@ resource "google_storage_bucket_iam_member" "writers" {
   role   = "roles/storage.objectAdmin"
   member = each.value
 }
+
+# objectAdmin covers objects and NOT the bucket resource itself, and barman-cloud's very first
+# call is `barman-cloud-check-wal-archive`, which does a bucket GET:
+#
+#   ERROR: Can't connect to cloud provider: 403 GET .../b/gitfrok-prod-dp-postgres-backups
+#   prod-dp-postgres@... does not have storage.buckets.get access ... (or it may not exist)
+#
+# so every WAL archive fails while the Cluster still reports Ready=True — archiving is a status
+# condition, not a probe, which is why the first run of these manifests looked healthy and was
+# not. legacyBucketReader is the narrowest role that carries storage.buckets.get; the alternative,
+# roles/storage.admin, would also grant deleting the bucket to the thing writing into it.
+resource "google_storage_bucket_iam_member" "writers_bucket_read" {
+  for_each = toset(var.writer_members)
+
+  bucket = google_storage_bucket.postgres_backups.name
+  role   = "roles/storage.legacyBucketReader"
+  member = each.value
+}
