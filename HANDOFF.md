@@ -45,28 +45,42 @@ the `image-publish` workflow**, so they are unsigned, have no `.release` manifes
 rather than digest, and have burned `0.1.0` under the registry's `immutableTags`. T-0092 item 3.
 `operator-app` is not published at all.
 
-## Production on GCP — live, and serving Git (2026-09-23)
+## Production on GCP — purged to $0 (2026-09-23), after it had served Git
 
-Rebuilt at minimum cost on 2026-09-22 (ADR-0106: both clusters zonal, `asia-southeast1-a`,
-2 × `e2-standard-4` each), and on 2026-09-23 it became a working Git host.
+**Nothing is running and nothing bills.** On the owner's instruction ("purge everything to $0 on
+productions") both clusters and everything billable in `gitfrok-prod-cp` and `gitfrok-prod-dp` were
+destroyed on 2026-09-23, and the seven `*gitfrok*` Cloudflare records were deleted rather than left
+resolving to released addresses. Verified by sweep: zero clusters, instances, disks, snapshots,
+addresses, routers, load-balancer parts, certificates, registries and secrets. **What remains is free:**
+the two projects (kept, not deleted — a deleted project's ID can never be reused, and
+`gitfrok-prod-cp` is hard-coded throughout the tree, registry path included), their default VPC
+firewall rules, and the two `*-tfstate` buckets (1.4 KB and 0.9 KB, empty state).
 
-**What works, proven from outside the cluster:**
+**The data exists only on the operator's laptop now**, in `~/.gitfrok/backups/2026-09-23/` (0700):
+`git bundle`s of `7solutions/welcome.git` and `dev/hello.git` (heads verified against the server),
+`pg_dump -Fc` of prod-cp `gitfrok` and `zitadel` and prod-dp `gitfrok` (validated with the server's
+`pg_restore -l`: 21, 141 and 21 table-data entries; the `7solutions` tenant row is in the prod-dp
+dump), and the deleted Cloudflare records as JSON. Nothing else holds a copy — the CNPG backup buckets
+and every snapshot were deleted to reach $0.
 
-| | |
+**Everything below is what was PROVEN while it was up.** It is a property of the tree, not of those
+clusters, which is why it is kept: a rebuild from this tree should reach the same state, and where it
+does not, that is a regression.
+
+| proven 2026-09-23, before the purge | |
 |---|---|
-| **Git hosting** | `https://gitfrok.7.solutions/git/<tenant>/<repo>.git` (ADR-0108) — `git clone` and `git push` proven; `git-gitfrok.7.solutions` is the same door (ADR-0107). First tenant: **`7solutions`**, repo `welcome.git`. Tenant isolation proven: a `7solutions` PAT is refused by tenant `dev` |
-| **TLS** | browser-trusted everywhere: Let's Encrypt at the origin for `app-`/`auth-gitfrok` (cert-manager, ADR-0095 decision 7's own mechanism); Google-managed for the two Git names |
-| **Data plane (prod-dp)** | `dataplane` 1/1, `git-storaged` 1/1, Postgres/Redpanda/SeaweedFS — installed from `deploy/k8s/dataplane/overlays/prod-dp` |
-| **Control plane (prod-cp)** | `bff`, `webfrontend`, Zitadel, Postgres, Redpanda, Valkey, OpenBao all Running — **except `controlplane`, CrashLoopBackOff on the sealed barrier** |
-| **Databases** | all twelve backend migrations applied on both clusters — they had **zero tables** until 2026-09-23 |
-| **Tree == cluster** | `kubectl diff` empty for the controlplane, dataplane and cert-manager installers; `make verify` exit 0 |
+| **Git hosting** | `https://gitfrok.7.solutions/git/<tenant>/<repo>.git` (ADR-0108) — `git clone` and `git push` from the public internet; `git-gitfrok.7.solutions` was the same door (ADR-0107). Tenant isolation proven: a `7solutions` PAT was refused by tenant `dev` |
+| **TLS** | browser-trusted everywhere: Let's Encrypt at the origin for `app-`/`auth-gitfrok` via cert-manager; Google-managed for the two Git names |
+| **Installers** | `deploy/k8s/{platform,controlplane,dataplane}` applied with `kubectl diff` empty against the live clusters; `make verify` exit 0 |
+| **Storage** | the git tier on `premium-rwo` per ADR-0106 decision 4, migrated live with refs and `fsck` verified |
+| **Databases** | all twelve backend migrations applied on both clusters — a manual step no installer owns (T-0092 item 4) |
 
-**Using it** is three operator steps — create the bare repo, issue a PAT over a port-forward, clone
+**Using it, once rebuilt,** is three operator steps — create the bare repo, issue a PAT over a port-forward, clone
 with the `/git/` prefix. `deploy/k8s/README.md` § *Using the Git host* has the exact commands.
 **"Ready to use" is true for an operator, not for a tenant:** there is no self-service repo creation
 or credential issuance yet (T-0092 item 7).
 
-**What still blocks a complete product**, in order of how badly:
+**What would still block a complete product after a rebuild**, in order of how badly:
 
 1. **OpenBao is uninitialised and sealed**, so the control plane cannot start. The ceremony is one
    command, `scripts/openbao-operator.sh all <shares-file>`, and **only a share-holder runs it, in
@@ -83,8 +97,8 @@ or credential issuance yet (T-0092 item 7).
    `git-storaged-data` (`premium-rwo`), refs and `fsck` verified, old disk snapshotted then deleted
    (T-0092 item 12). **PR-6 is still unmet:** one storage node, no synchronous replica.
 
-**Infrastructure created outside OpenTofu**, which ADR-0092 says should not happen and T-0092 item 11
-records (`deploy/TEARDOWN-RUNBOOK.md` step 4a lists the manual deletions until it is fixed): the `prod-dp-git-gateway` global address, the Certificate Manager DNS authorizations,
+**Infrastructure that had to be created outside OpenTofu** — and must be again on a rebuild, by hand,
+until T-0092 item 11 is fixed (`deploy/TEARDOWN-RUNBOOK.md` lists both directions): the `prod-dp-git-gateway` global address, the Certificate Manager DNS authorizations,
 certificates and map (`gitfrok-dp-certmap`), and the Cloudflare records for `git-gitfrok`,
 `gitfrok`, and their two `_acme-challenge` CNAMEs. A `tofu destroy` will not remove them and a
 rebuild will not recreate them.

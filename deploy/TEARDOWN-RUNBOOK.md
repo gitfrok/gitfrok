@@ -154,6 +154,30 @@ for P in gitfrok-prod-cp gitfrok-prod-dp; do
 done
 ```
 
+### What the 2026-09-23 purge added to this runbook
+
+The second complete teardown, run after the environment had served Git to a real tenant. Three
+things it hit that the first did not, each now worth doing on purpose:
+
+- **Take local backups BEFORE step 1, when the clusters hold anything real.** Step 1 deletes the CNPG
+  backup buckets and step 3 deletes the volumes, so after them there is no copy. On this run:
+  `git bundle create … --all` per repository (verify with `git bundle verify` and compare heads to
+  the server), `kubectl exec postgres-1 -- pg_dump -Fc <db>` per database, and validation by piping
+  each dump back into `pg_restore -l` inside the pod when no local `pg_restore` exists. Stored under
+  `~/.gitfrok/backups/<date>/`, mode 0700.
+- **Delete Gateways and `type=LoadBalancer` Services BEFORE the clusters.** The controller then
+  removes its own forwarding rules, URL maps, backend services and health checks. Even so, GKE left a
+  `k8s-…-node-http-hc` **firewall rule** and two **NEGs** behind, and the firewall rule made
+  `prod-cp/network`'s destroy fail with *"network resource … is already being used by … firewalls/k8s-…"*.
+  Delete `k8s-*` firewall rules and all NEGs, then re-run destroy for `network` and `project-services`.
+- **`modules/backups` has `force_destroy = false`**, so destroy refuses a bucket CNPG has written WAL
+  into. Empty it first (`gcloud storage rm -r gs://<bucket>/**`) — which is the moment the last remote
+  copy of the database goes, so the local backup above comes first.
+
+**Two false positives in any sweep that adds more resource types:** `gcloud compute images list`
+prints Google's ~250 public images (use `--no-standard-images`), and `gcloud artifacts repositories
+list` prints a "Listing items under project…" line that `grep -c .` counts as a repository.
+
 ## What survives a complete teardown, deliberately
 
 | Thing | Why it stays | Cost |

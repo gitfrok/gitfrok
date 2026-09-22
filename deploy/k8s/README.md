@@ -207,6 +207,12 @@ and the control-plane overlay dry-ran **13/13 clean** with the ADR-0104 CA mount
 | Out-of-band Secrets | all 9 present, incl. `openbao-ca` | 5 present (`postgres-*`, `gitfrok-database`, `gitfrok-pat-verifier`, `gitfrok-seaweedfs-s3`) |
 | App database | 21 tables, 7 schemas | 21 tables, 7 schemas |
 
+**PURGED 2026-09-23.** Everything in the table above was true until the owner ordered production torn
+down to $0 the same day: both clusters, every disk and snapshot, the backups, the registry, the
+addresses and all seven Cloudflare records are gone. The table is kept as the record of what this
+tree was proven to produce. Data backups are local to the operator (`~/.gitfrok/backups/2026-09-23/`,
+see HANDOFF.md).
+
 **Updated 2026-09-23.** The two rows above that said "not applied" and "not applicable until
 T-0085" were true when written and false by the time anyone read them, which is the failure mode a
 status table has. What changed: all five images are published, `deploy/k8s/dataplane/` exists
@@ -310,7 +316,10 @@ click and the correct click differ here.
 The `addresses` unit reserves the two external addresses this tree consumes **by name**; a rename on
 either side fails at GKE programming time with no diff to read.
 
-## Using the Git host (`gitfrok.7.solutions`)
+## Using the Git host (`gitfrok.7.solutions`) — once rebuilt
+
+**Not running since 2026-09-23** (purged to $0). Everything below applies to a rebuilt environment;
+the DNS records it names were deleted and must be recreated.
 
 **Give tenants `gitfrok.7.solutions`** (ADR-0108). `git-gitfrok.7.solutions` is the same door and stays
 valid; both names reach the same Gateway, route and backend. The first tenant is `7solutions`, with

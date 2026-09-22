@@ -22,11 +22,11 @@ make dev-smoke      # assert the cluster is actually serving
 
 ## Production
 
-Live on GCP. **Git hosting:** `https://gitfrok.7.solutions/git/<tenant>/<repo>.git` — clone and push
-work today; repository creation and PAT issuance are still operator steps
-([`deploy/k8s/README.md`](deploy/k8s/README.md) § *Using the Git host*). The web app is up at
-`app-gitfrok.7.solutions` but **nobody can log in yet**, and the control plane waits on the OpenBao
-unseal ceremony. [`HANDOFF.md`](HANDOFF.md) has the full state and what blocks the rest.
+**Torn down to $0 on 2026-09-23**, the day after it first served Git: `git clone` and `git push`
+worked from the public internet at `https://gitfrok.7.solutions/git/<tenant>/<repo>.git` before the
+owner purged it. Nothing runs and no DNS record points anywhere. Rebuild with
+[`deploy/TEARDOWN-RUNBOOK.md`](deploy/TEARDOWN-RUNBOOK.md) § *Rebuild*; [`HANDOFF.md`](HANDOFF.md)
+has what was proven, where the data backup lives, and what would still block a complete product.
 
 ## Where to look
 
