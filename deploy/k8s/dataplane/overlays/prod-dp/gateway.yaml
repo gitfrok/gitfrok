@@ -37,6 +37,20 @@ spec:
       allowedRoutes:
         namespaces:
           from: Same
+    # The tenant-facing name (ADR-0108). Same door, same backend, same `/git/` prefix — a second
+    # hostname on one Gateway, not a second surface. Its own listener because a listener carries one
+    # hostname, and its own certificate-map entry because a managed certificate is per name.
+    - name: tenant-https
+      protocol: HTTPS
+      port: 443
+      hostname: "gitfrok.7.solutions"
+      tls:
+        mode: Terminate
+        options:
+          networking.gke.io/cert-manager-certs: ""
+      allowedRoutes:
+        namespaces:
+          from: Same
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -47,6 +61,7 @@ spec:
     - name: gitfrok-dp
   hostnames:
     - "git-gitfrok.7.solutions"
+    - "gitfrok.7.solutions"
   rules:
     # Only `/git/` is published. The front door's own prefix is `/git/`
     # (backend/internal/gitfrontdoor/http.go), and publishing `/` would put the LFS batch route and

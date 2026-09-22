@@ -309,7 +309,11 @@ click and the correct click differ here.
 The `addresses` unit reserves the two external addresses this tree consumes **by name**; a rename on
 either side fails at GKE programming time with no diff to read.
 
-## Using the Git host (`git-gitfrok.7.solutions`)
+## Using the Git host (`gitfrok.7.solutions`)
+
+**Give tenants `gitfrok.7.solutions`** (ADR-0108). `git-gitfrok.7.solutions` is the same door and stays
+valid; both names reach the same Gateway, route and backend. The first tenant is `7solutions`, with
+`welcome.git`.
 
 Live since 2026-09-23. `git clone` and `git push` both work from the public internet with a
 browser-trusted certificate; the three steps below are what the journey actually needs, and the
@@ -333,7 +337,7 @@ inside the cluster and is deliberately not published, so it is reached over a po
 ```sh
 kubectl -n gitfrok port-forward svc/dataplane 19090:9090 &
 grpcurl -plaintext -import-path governance/contracts -proto proto/identity/v1/identity.proto \
-  -d '{"tenant_id":"dev","actor_id":"user-admin","label":"laptop",
+  -d '{"tenant_id":"<tenant>","actor_id":"<actor>","label":"laptop",
        "scope_labels":["repo.read","repo.write"],"roles":["owner"]}' \
   127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator.IssuePAT
 ```
@@ -344,7 +348,7 @@ The plaintext token exists in exactly that one response and is never readable ag
 matches on it, and the published `HTTPRoute` only exposes that prefix:
 
 ```sh
-git clone https://admin:$PAT@git-gitfrok.7.solutions/git/<tenant>/<repo>.git
+git clone https://admin:$PAT@gitfrok.7.solutions/git/<tenant>/<repo>.git
 ```
 
 ### Three things about this door that are decisions
