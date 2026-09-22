@@ -141,10 +141,15 @@ default `http.Client`, so it verifies against the system root pool only: it take
 and `controlplane/overlays/prod-cp` mounts no CA and sets no CA env var. The image is `FROM
 scratch` carrying just `/etc/ssl/certs/ca-certificates.crt`, so the private CA is not in that pool
 and `apply -k controlplane/overlays/prod-cp` would fail at TLS to custody even with images
-published and OpenBao unsealed. Go honours `SSL_CERT_FILE`, so mounting the CA and setting it is
-the likely minimal fix — but *which* of "mount the CA", "put it in the image", or "issue the
-custody certificate from a CA the image already trusts" is right is an owner decision against
-ADR-0066, so it is recorded here rather than chosen.
+published and OpenBao unsealed. **[ADR-0104](../../governance/docs/adr/0104-custody-tls-trust-for-the-control-plane.md) (Proposed)
+states this and proposes the fix**: an explicit `Config.CAFile` / `GITFROK_CUSTODY_CA_FILE` and an
+operator-created `openbao-ca` Secret, rather than `SSL_CERT_FILE` — which Go uses *instead of* the
+default root file, so it would silently drop the public roots every other TLS destination needs. It
+is Proposed, so nothing has been built against it yet.
+
+Note also why no gate caught this: the custody TLS branch has never been taken anywhere. `deploy/dev`
+serves custody with `tls_disable = true` over loopback HTTP, and the platform gate's `loopback-http`
+fixture correctly refuses that relaxation reaching production — so both doors are shut at once.
 
 ## Live state: both clusters are up and the stateful set is running, 2026-09-22 (second build)
 
