@@ -5,6 +5,17 @@
 # one defect and must be refused; the shipped overlay must pass. Both halves matter — a gate that
 # fails on everything is as useless as one that fails on nothing.
 #
+# EVERY FIXTURE LIVES AT <name>/prod-cp/, and that is load-bearing rather than tidy.
+# check-controlplane-kustomize.sh derives the expected reserved-address names and the
+# deploy/gcp/live/<env>/addresses lookup from the overlay's BASENAME. A fixture directory called
+# anything else therefore trips three AC8 violations on its own name, no matter what defect it
+# models — and since expect_refusal reads only the exit status, such a fixture is refused for a
+# reason that has nothing to do with it. `wrong-address-name` was refused for years that way while
+# asserting nothing: with its typo CORRECTED it was still refused. All thirteen were re-checked on
+# 2026-09-22 by removing each defect and confirming the fixture then flips to ACCEPTED, which is the
+# only evidence that the defect is what refuses it. Add new fixtures the same way, and run that
+# check rather than trusting a red result.
+#
 # Exit: 0 all fixtures behaved · 1 a fixture was accepted or the real tree was refused
 
 set -eu
@@ -44,15 +55,15 @@ expect_acceptance() {
 }
 
 echo "check-controlplane-kustomize.sh: negative fixtures"
-expect_refusal secret-generator   "AC3 — a secretGenerator in a kustomization"
-expect_refusal authored-secret    "AC3 — a Secret authored by the tree"
-expect_refusal l7-on-agent-door   "AC6 — an HTTPRoute routing to the agent door"
-expect_refusal ephemeral-address  "AC8 — the agent door taking an ephemeral address"
-expect_refusal literal-credential "AC4 — a database URL as a literal"
-expect_refusal fourth-workload    "AC1/AC2 — a fourth, third-party workload"
-expect_refusal no-acme-listener   "AC7 — the Gateway losing its :80 ACME listener"
+expect_refusal secret-generator/prod-cp   "AC3 — a secretGenerator in a kustomization"
+expect_refusal authored-secret/prod-cp    "AC3 — a Secret authored by the tree"
+expect_refusal l7-on-agent-door/prod-cp   "AC6 — an HTTPRoute routing to the agent door"
+expect_refusal ephemeral-address/prod-cp  "AC8 — the agent door taking an ephemeral address"
+expect_refusal literal-credential/prod-cp "AC4 — a database URL as a literal"
+expect_refusal fourth-workload/prod-cp    "AC1/AC2 — a fourth, third-party workload"
+expect_refusal no-acme-listener/prod-cp   "AC7 — the Gateway losing its :80 ACME listener"
 expect_refusal wrong-address-name/prod-cp "AC8 — a reserved-address name the tofu unit does not reserve"
-expect_refusal reader-on-control  "AC10 — a reader address on the control plane, which the binary refuses at boot"
+expect_refusal reader-on-control/prod-cp  "AC10 — a reader address on the control plane, which the binary refuses at boot"
 expect_refusal https-no-ca-mount/prod-cp "SPEC-0071 AC11 — an https custody address with no CA mounted"
 expect_refusal https-no-ca-env/prod-cp "SPEC-0071 AC11 — a mounted CA that nothing tells the binary to read"
 expect_refusal custody-ca-from-tls-secret/prod-cp "SPEC-0071 AC10 — the CA taken from openbao-tls, which holds the server's private key"
