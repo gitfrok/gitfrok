@@ -70,9 +70,11 @@ command -v kubectl >/dev/null 2>&1 || die "kubectl not on PATH" 3
 
 mode="${1:-}"
 outfile="${2:-}"
+# No standalone `init`: init without wiring would revoke the only root credential at exit and
+# leave a barrier nobody can wire (OpenBao refuses unauthenticated root generation by default).
 case "$mode" in
-  all|init|unseal|wire) ;;
-  *) die "usage: $0 {all|init|unseal|wire} <shares-file>" ;;
+  all|unseal|wire) ;;
+  *) die "usage: $0 {all|unseal|wire} <shares-file>" ;;
 esac
 [ -n "$outfile" ] || die "name the shares file, e.g. ~/gitfrok-openbao-shares.txt"
 
@@ -113,7 +115,6 @@ try: print(json.load(sys.stdin).get('$2'))
 except Exception: print('unknown')" 2>/dev/null || echo unknown
 }
 
-ROOT=""
 cleanup() {
   # The root credential is revoked whether we succeeded or not. A failed wiring run that leaves a
   # live root token behind is strictly worse than one that leaves nothing wired.
@@ -128,21 +129,35 @@ cleanup() {
     ROOT=""
   fi
 }
+# Defined before the trap is armed: under `set -u` a trap that reads an unset ROOT would itself fail.
+ROOT=""
 case "$mode" in all|wire) trap cleanup EXIT ;; esac
 
 # ---------------------------------------------------------------------------- init
-if [ "$mode" = all ] || [ "$mode" = init ]; then
+if [ "$mode" = all ]; then
   init_state=$(status_field 0 initialized)
   if [ "$init_state" = "True" ]; then
-    die "already initialised — init runs ONCE per cluster, ever. Use '$0 unseal $outfile'."
+    # `all` is RE-RUNNABLE. A run that initialised and then stopped part-way (a standby slow to
+    # unseal, a network blip) must be recoverable by running the same command again — not by an
+    # operator composing a different one under pressure. Init is skipped; unseal and wire continue.
+    printf 'openbao-operator: already initialised — skipping init, continuing with unseal and wire\n'
+    [ -r "$outfile" ] || die "already initialised but $outfile is not readable — the shares live there"
+  else
+    printf 'openbao-operator: initialising %s shares, threshold %s (ADR-0066 decision 4)\n' "$SHARES" "$THRESHOLD"
+    umask 077
+    # The init output holds the shares AND the initial root credential. Only the shares go to the
+    # file. The first version redirected the whole output there while this header promised the
+    # root credential "never touches disk" — it did, in the same file as the shares.
+    _init=$(bao_in 0 operator init -key-shares="$SHARES" -key-threshold="$THRESHOLD") \
+      || die "bao operator init failed — check whether the barrier initialised before retrying"
+    : > "$outfile"
+    chmod 600 "$outfile"
+    printf '%s\n' "$_init" | grep -E '^Unseal Key [0-9]+:' > "$outfile" \
+      || die "init output held no shares — NOT written anywhere else; re-init is impossible, inspect the barrier"
+    ROOT=$(printf '%s\n' "$_init" | grep -E '^Initial Root Token:' | sed 's/^[^:]*: *//' || true)
+    _init=""
+    printf 'openbao-operator: shares written to %s (0600). Split them across five holders and DELETE it.\n' "$outfile"
   fi
-  printf 'openbao-operator: initialising %s shares, threshold %s (ADR-0066 decision 4)\n' "$SHARES" "$THRESHOLD"
-  umask 077
-  : > "$outfile"
-  bao_in 0 operator init -key-shares="$SHARES" -key-threshold="$THRESHOLD" > "$outfile" \
-    || die "bao operator init failed; $outfile may be partial — inspect and delete it"
-  chmod 600 "$outfile"
-  printf 'openbao-operator: shares written to %s (0600). Split them across five holders and DELETE it.\n' "$outfile"
 fi
 
 [ -r "$outfile" ] || die "cannot read $outfile"
@@ -161,42 +176,87 @@ while IFS= read -r _share; do
 done <<EOF
 $(grep -E '^Unseal Key [0-9]+:' "$outfile" | sed 's/^[^:]*: *//')
 EOF
-ROOT=$(grep -E '^Initial Root Token:' "$outfile" | sed 's/^[^:]*: *//' || true)
 [ "${#KEYS[@]}" -ge "$THRESHOLD" ] || die "$outfile holds ${#KEYS[@]} shares, need at least $THRESHOLD"
 
-# ---------------------------------------------------------------------------- unseal
-if [ "$mode" = all ] || [ "$mode" = unseal ]; then
-  n=0
-  while [ "$n" -lt "$REPLICAS" ]; do
-    # A freshly started standby reports Initialized=false and REFUSES a share until it has pulled
-    # the initialised Raft state from the leader via retry_join. Feeding it early is not an error
-    # the operator sees — it is a refusal that looks like a wrong share (MVP-RUNBOOK §6a).
-    tries=0
-    while [ "$(status_field "$n" initialized)" != "True" ]; do
-      tries=$((tries + 1))
-      [ "$tries" -lt 60 ] || die "${STS}-${n} never reported Initialized — check retry_join"
-      printf '  waiting for %s-%s to join the raft (%s)\n' "$STS" "$n" "$tries"
-      python3 -c 'import time; time.sleep(2)'
-    done
-    if [ "$(status_field "$n" sealed)" = "False" ]; then
-      printf '  %s-%s already unsealed\n' "$STS" "$n"
-      n=$((n + 1)); continue
-    fi
-    i=0
-    while [ "$i" -lt "$THRESHOLD" ]; do
-      bao_in "$n" operator unseal -- "${KEYS[$i]}" >/dev/null 2>&1 \
-        || die "share $((i + 1)) refused by ${STS}-${n}"
-      i=$((i + 1))
-    done
-    [ "$(status_field "$n" sealed)" = "False" ] || die "${STS}-${n} still sealed after $THRESHOLD shares"
-    printf '  %s-%s unsealed\n' "$STS" "$n"
-    n=$((n + 1))
-  done
+# A shares file written by the first version of this script also holds an "Initial Root Token"
+# line. That credential was revoked when the run ended, so it is dead — but it is still a root
+# token sitting beside the shares, and nothing below reads it. Scrub it, portably (no `sed -i`).
+if grep -qE '^Initial Root Token:' "$outfile"; then
+  _tmp="$outfile.tmp.$$"
+  ( umask 077; grep -vE '^Initial Root Token:' "$outfile" > "$_tmp" ) && mv "$_tmp" "$outfile" && chmod 600 "$outfile"
+  printf 'openbao-operator: removed a stale root-token line from %s (it was already revoked)\n' "$outfile"
 fi
 
+# ---------------------------------------------------------------------------- unseal one node
+unseal_node() {
+  n="$1"
+  # A freshly started standby reports Initialized=false and REFUSES a share until it has pulled
+  # the initialised Raft state from the leader via retry_join. Feeding it early is not an error
+  # the operator sees — it is a refusal that looks like a wrong share (MVP-RUNBOOK §6a).
+  tries=0
+  while [ "$(status_field "$n" initialized)" != "True" ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 60 ] || die "${STS}-${n} never reported Initialized — check retry_join"
+    printf '  waiting for %s-%s to join the raft (%s)\n' "$STS" "$n" "$tries"
+    python3 -c 'import time; time.sleep(2)'
+  done
+  if [ "$(status_field "$n" sealed)" = "False" ]; then
+    printf '  %s-%s already unsealed\n' "$STS" "$n"
+    return 0
+  fi
+  i=0
+  while [ "$i" -lt "$THRESHOLD" ]; do
+    bao_in "$n" operator unseal -- "${KEYS[$i]}" >/dev/null 2>&1 \
+      || die "share $((i + 1)) refused by ${STS}-${n}"
+    i=$((i + 1))
+  done
+  # THE THIRD SHARE DOES NOT UNSEAL A JOINING STANDBY SYNCHRONOUSLY. Measured on the dev cluster
+  # on 2026-09-23: openbao-1 reported sealed immediately after its third share, the first version
+  # of this script died on that, and the node logged "post-unseal setup complete" about a second
+  # later. So poll, briefly, before calling it a failure.
+  tries=0
+  while [ "$(status_field "$n" sealed)" != "False" ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 30 ] || die "${STS}-${n} still sealed 30s after $THRESHOLD shares"
+    python3 -c 'import time; time.sleep(1)'
+  done
+  printf '  %s-%s unsealed\n' "$STS" "$n"
+}
+
 # ---------------------------------------------------------------------------- wire
-if [ "$mode" = all ] || [ "$mode" = wire ]; then
-  [ -n "$ROOT" ] || die "no root credential in $outfile — wiring needs the initial root token"
+wire() {
+  if [ -z "$ROOT" ]; then
+    # No root credential from this run's init. OpenBao can mint one from a quorum of shares —
+    # BUT `disable_unauthed_generate_root_endpoints` DEFAULTS TO TRUE in OpenBao 2.x, and then the
+    # attempt is refused with 403 (measured on the dev image, 2026-09-23). That is a sound default
+    # and this script does not weaken it; it says what the choices are instead.
+    printf 'openbao-operator: minting a one-time root credential from %s shares (generate-root)\n' "$THRESHOLD"
+    bao_in 0 operator generate-root -cancel >/dev/null 2>&1 || true
+    _g=$(bao_in 0 operator generate-root -init -format=json 2>&1) || die "generate-root is refused by this barrier:
+    $(printf '%s' "$_g" | grep -m1 -iE 'denied|error' )
+  OpenBao disables unauthenticated root generation by default (disable_unauthed_generate_root_endpoints).
+  The barrier IS UNSEALED. Whether it is wired cannot be checked without a root credential:
+    - if the run that initialised it finished ("wired" and "root credential revoked" printed),
+      it is wired and nothing more is needed. For restarts, use '$0 unseal <file>', not 'all'.
+    - if that run stopped before wiring, no root credential exists to wire it with:
+        dev, where the barrier holds nothing yet: delete the openbao PVCs and re-run '$0 all <file>'
+        otherwise: set disable_unauthed_generate_root_endpoints = false in the server config for the
+        duration, restart and unseal, re-run '$0 wire <file>', then set it back — an owner decision"
+    _nonce=$(printf '%s' "$_g" | python3 -c 'import json,sys; print(json.load(sys.stdin)["nonce"])')
+    _otp=$(printf '%s' "$_g" | python3 -c 'import json,sys; print(json.load(sys.stdin)["otp"])')
+    _g=""; _enc=""; i=0
+    while [ "$i" -lt "$THRESHOLD" ]; do
+      _r=$(bao_in 0 operator generate-root -format=json -nonce="$_nonce" -- "${KEYS[$i]}") \
+        || die "generate-root refused share $((i + 1))"
+      _enc=$(printf '%s' "$_r" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("encoded_token") or d.get("encoded_root_token") or "")')
+      i=$((i + 1))
+    done
+    _r=""
+    [ -n "$_enc" ] || die "generate-root completed without an encoded credential"
+    ROOT=$(bao_in 0 operator generate-root -decode="$_enc" -otp="$_otp") || die "generate-root -decode failed"
+    _enc=""; _otp=""; _nonce=""
+    [ -n "$ROOT" ] || die "generate-root produced an empty credential"
+  fi
 
   # Every write below is idempotent: re-running after a partial failure must converge, not refuse.
   if ! bao_root 0 auth list -format=json 2>/dev/null | grep -q '"kubernetes/"'; then
@@ -227,7 +287,39 @@ if [ "$mode" = all ] || [ "$mode" = wire ]; then
   printf 'openbao-operator: kubernetes auth, %s mount, policy %s and role %s wired (ns=%s sa=%s)\n' \
     "$TRANSIT_MOUNT" "$ROLE" "$ROLE" "$NS" "$CONSUMER_SA"
   printf 'openbao-operator: the transit key was NOT created here — the control plane is its only creator.\n'
-fi
+}
+
+# ---------------------------------------------------------------------------- the order
+# WIRE BEFORE THE STANDBYS, and this ordering is the fix for a real failure. The first version
+# unsealed all three nodes and only then wired. On 2026-09-23 a standby was slow to report unsealed,
+# the script died, the EXIT trap revoked the root credential — and OpenBao's default refuses to mint
+# another from the shares. Result: a barrier unsealed and permanently unwireable without a config
+# change. Wiring needs only the ACTIVE node (openbao-0, unsealed first so Raft elects it), so the root
+# credential is spent and revoked before any standby can fail.
+case "$mode" in
+  all)
+    if [ -n "$ROOT" ]; then
+      # This run initialised: a root credential exists and must be spent before anything else can
+      # fail. Active node, wire, revoke — then the standbys.
+      unseal_node 0
+      wire
+      cleanup
+      n=1; while [ "$n" -lt "$REPLICAS" ]; do unseal_node "$n"; n=$((n + 1)); done
+    else
+      # Already initialised: no root credential is at risk, so unseal EVERYTHING first. The re-run
+      # is most often an unseal after a restart, and it must not leave standbys sealed just because
+      # the (already done, or now impossible) wiring step comes afterwards.
+      n=0; while [ "$n" -lt "$REPLICAS" ]; do unseal_node "$n"; n=$((n + 1)); done
+      wire
+    fi
+    ;;
+  unseal)
+    n=0; while [ "$n" -lt "$REPLICAS" ]; do unseal_node "$n"; n=$((n + 1)); done
+    ;;
+  wire)
+    wire
+    ;;
+esac
 
 cleanup
 printf 'openbao-operator: done. Restart the control plane: kubectl -n %s rollout restart deploy/controlplane\n' "$NS"
