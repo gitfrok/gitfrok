@@ -4,10 +4,22 @@
 (Accepted).** Read it first; it explains every choice this tree makes, and where it and this README
 disagree, the ADR wins (ADR-0001).
 
-> **Nothing is provisioned. Stripped to zero on 2026-09-22**, after a build, a teardown, a rebuild
-> (15/15 units) and a second teardown the same day. Verified empty in both projects: clusters,
-> instances, disks, routers, addresses, forwarding rules and registries. What survives is what costs
-> nothing — the two VPCs, the two `*-tfstate` buckets and the projects themselves.
+> **Nothing billable is provisioned, and the free scaffolding is.** As of 2026-09-22, after a build,
+> a teardown, a rebuild (15/15 units), a full sweep to zero, and then a deliberate partial rebuild of
+> only the units that cost nothing.
+>
+> **Applied and running at ~$0:** `project-services`, `workload-identity` (7 service accounts),
+> `image-publish-identity` (the WIF pool and publisher SA), `artifact-registry` (empty, public-read
+> per ADR-0098) and `backups` (two empty buckets). The two VPCs and subnets survived every teardown
+> and were never re-applied. **Verified absent in both projects:** clusters, instances, disks,
+> routers and addresses — all zero.
+>
+> **Not applied, because these are what cost money:** `gke` (~$750/mo and effectively the whole
+> bill), Cloud NAT (~$32/mo per gateway — it lives in the `network` unit but `enable_nat` turns it
+> off), `addresses` (~$7/mo each, since a *reserved but unused* static IP still bills) and
+> `zt-connector` (~$7/mo each). Applying `network` as written recreates NAT, so the free rebuild
+> skips it entirely rather than relying on the VPC being idempotent.
+>
 > [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) covers both directions, including the disk sweep
 > that a cluster deletion does not do for you. **Read the present tense below as "what an apply
 > creates", not "what is running".**
