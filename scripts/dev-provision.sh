@@ -74,7 +74,13 @@ base64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 # declaration store (T-0037, SPEC-0042 AC3): a control plane given
 # GITFROK_DATABASE_URL breaks hard on the first declaration read or write if
 # they are missing, so they apply with the same discipline.
-step "Database migrations (tenant, audit, identity, policy, security, agent, residency)"
+# SEVEN MIGRATIONS WERE MISSING FROM THIS LIST until 2026-09-23: repository (x3), codereview,
+# release, notifications, ci. The data plane composes those modules on Postgres whenever
+# GITFROK_DATABASE_URL is set, so every repository-list, settings, notification and release read
+# failed as a coarse "unavailable" — indistinguishable from an authorization refusal. Found by
+# logging in through the data-plane BFF (SPEC-0073 AC6) and getting a correct session that could
+# read nothing. The same twelve-file list was used on production before it was purged.
+step "Database migrations (tenant, audit, identity, policy, security, agent, residency, repo, codereview, release, notifications, ci)"
 for m in \
   backend/platform/db/migrations/0001_tenancy_baseline.sql \
   backend/modules/audit/internal/adapters/postgres/migrations/0001_audit_log.sql \
@@ -87,7 +93,14 @@ for m in \
   backend/modules/security/internal/adapters/postgres/migrations/0003_security_scan_report.sql \
   backend/modules/agent/internal/adapters/postgres/migrations/0001_agent_enrolment.sql \
   backend/modules/agent/internal/adapters/postgres/migrations/0002_release_trust_plane_state.sql \
-  backend/modules/residency/internal/adapters/postgres/migrations/0001_residency_declarations.sql; do
+  backend/modules/residency/internal/adapters/postgres/migrations/0001_residency_declarations.sql \
+  backend/modules/repository/internal/adapters/postgres/migrations/0001_repository_registry.sql \
+  backend/modules/repository/internal/adapters/postgres/migrations/0002_repository_settings.sql \
+  backend/modules/repository/internal/adapters/postgres/migrations/0003_repository_landing.sql \
+  backend/modules/codereview/internal/adapters/postgres/migrations/0001_codereview.sql \
+  backend/modules/release/internal/adapters/postgres/migrations/0001_releases.sql \
+  backend/modules/notifications/internal/adapters/postgres/migrations/0001_notifications.sql \
+  backend/modules/ci/internal/adapters/postgres/migrations/0001_ci_jobs.sql; do
   [ -f "$m" ] || die "migration not found: $m"
   echo "  applying $m"
   "${KUBECTL[@]}" exec -i deployment/postgres -n "$NS" -- \
@@ -96,11 +109,11 @@ done
 schema_list=$("${KUBECTL[@]}" exec deployment/postgres -n "$NS" -- psql -U postgres -d gitfrok -tAc \
   "SELECT schema_name FROM information_schema.schemata") || die "cannot list schemas"
 missing=""
-for s in tenant audit identity policy security agent residency; do
+for s in tenant audit identity policy security agent residency repo codereview release notifications ci; do
   printf '%s\n' "$schema_list" | grep -qx "$s" || missing="$missing $s"
 done
 [ -z "$missing" ] || die "schemas missing after migrations:$missing"
-echo "  schemas tenant/audit/identity/policy/security/agent/residency present"
+echo "  schemas tenant/audit/identity/policy/security/agent/residency/repo/codereview/release/notifications/ci present"
 # Table-level check, the same shape as the schema guard: one table per Phase-2
 # migration plus the Phase-3.1 agent tables, so a silently truncated migration
 # set is caught before the plane starts denying on a missing decision_records

@@ -71,11 +71,10 @@ spec:
         # git-storaged as RepositoryReader, no control-plane door — which the manifest already was;
         # it simply never said so, and has crash-looped with "GITFROK_PLANE is not set" since.
         #
-        # CONSEQUENCE, measured 2026-09-23: a data-plane BFF serves NO /login (404). ADR-0094
-        # decision 4 puts identity and login on the control plane, whose backend door does not
-        # register OIDCLogin — so neither plane value yields a working login on this code. That is
-        # governance T-0092 item 8 / ADR-0102 (Accepted 2026-09-23, not yet implemented), not a dev
-        # misconfiguration.
+        # LOGIN: since bff@14adef6 (ADR-0102, SPEC-0073) a data-plane BFF serves its own
+        # /login, /callback and /logout through the data plane's OIDCLogin, and refuses to start
+        # without GITFROK_SESSION_STORE=valkey (below). Before that it answered 404 on /login and no
+        # plane value let anyone log in.
         - name: GITFROK_PLANE
           value: "data"
         # ADR-0100 decision 5 renamed GITFROK_PDP_ADDR, which asserted a role this door no longer
