@@ -243,7 +243,7 @@ ratios to reason with, not a quote.
 | Nodes | 6 × `n2-standard-4` (2 clusters × 3 zones) | **4** × `e2-standard-4` (2 × 2) | `location` — zonal |
 | Cluster management | 2 | 2 | unchanged; one zonal cluster may fall under GKE's free-tier credit |
 | Boot disks | 6 × 200–500GB `pd-ssd` | 4 × 100GB `pd-balanced` | `system_pool.disk_*` |
-| PVCs | 1,260Gi `premium-rwo` | **390Gi** `standard-rwo` | the overlays' `patch-storage.yaml` |
+| PVCs | 1,260Gi `premium-rwo` | **390Gi** `standard-rwo`, **+ 20Gi `premium-rwo`** for the git tier since 2026-09-23 (ADR-0106 decision 4) | the platform overlays' `patch-storage.yaml`; `deploy/k8s/dataplane/base/git-storaged.yaml` |
 | Cloud NAT | 2 | 2 | required by private nodes (ADR-0011) — not reducible |
 | Connector VMs | 2 × `e2-micro` | 2 × `e2-micro` | required by ADR-0097 — not reducible |
 | CI runner ceiling | 20 × `n2-standard-8` | **4** × `e2-standard-4` | idle cost is zero either way; this bounds a busy queue |

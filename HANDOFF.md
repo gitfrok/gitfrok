@@ -79,10 +79,9 @@ or credential issuance yet (T-0092 item 7).
    unconditionally; `identity.NewPostgres` exists and nothing calls it (T-0092 item 2).
 4. **Every OpenBao restart re-seals** — Shamir + Raft, no auto-unseal. On a zonal autoscaling pool
    that is every node upgrade (T-0092 item 6; an ADR-0066 decision, the owner's).
-5. **The git-storaged volume violates ADR-0106 decision 4.** That Accepted ADR requires the git tier
-   to declare a `premium-rwo` claim; the shipped PVC is `standard-rwo`. `storageClassName` is
-   immutable on a PVC, so fixing it means migrating the live repositories to a new volume (T-0092
-   item 12).
+5. ~~**The git-storaged volume violates ADR-0106 decision 4.**~~ **Fixed 2026-09-23** — migrated to
+   `git-storaged-data` (`premium-rwo`), refs and `fsck` verified, old disk snapshotted then deleted
+   (T-0092 item 12). **PR-6 is still unmet:** one storage node, no synchronous replica.
 
 **Infrastructure created outside OpenTofu**, which ADR-0092 says should not happen and T-0092 item 11
 records (`deploy/TEARDOWN-RUNBOOK.md` step 4a lists the manual deletions until it is fixed): the `prod-dp-git-gateway` global address, the Certificate Manager DNS authorizations,

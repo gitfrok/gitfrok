@@ -352,13 +352,20 @@ matches on it, and the published `HTTPRoute` only exposes that prefix:
 git clone https://admin:$PAT@gitfrok.7.solutions/git/<tenant>/<repo>.git
 ```
 
-### One thing about this door that is wrong
+### The repository volume, and what moving it taught
 
-**The repository volume violates ADR-0106 decision 4.** That Accepted ADR says the git tier "must
-declare its own `premium-rwo` claim"; `git-storaged-repositories` was shipped as `standard-rwo`.
-`storageClassName` is immutable on a PVC, so the fix is a migration — copy the bare repos out,
-recreate the claim as `premium-rwo`, copy them back — during which Git is down. Not done; recorded in
-T-0092.
+**Fixed 2026-09-23.** The git tier first shipped on a `standard-rwo` claim, against ADR-0106 decision
+4's explicit `premium-rwo` requirement. It now runs on `git-storaged-data` (`premium-rwo`, 20Gi). The
+move used a **new claim name** so the old volume stayed untouched until the copy was proven: every
+ref identical, `git fsck --full` clean on both repositories, then clone and push verified over
+`https://gitfrok.7.solutions`. The old disk is deleted; its last state is the snapshot
+`git-storaged-standard-rwo-final-20260923` in `gitfrok-prod-dp` — delete it once nobody wants it.
+
+**What the move measured, for next time.** git-storaged was down about two minutes, but **Git was
+unusable for longer**: the data plane's gRPC client to `git-storaged:9000` sits in reconnect backoff
+after the storage pod goes away, and clones fail with `Could not read from remote repository` until
+its log prints `ref watch connected`. Any git-storaged restart has that tail. Check the data plane's
+log, not the storage pod's status, before declaring Git back.
 
 ### Three things about this door that are decisions
 

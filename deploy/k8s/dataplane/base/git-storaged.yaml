@@ -23,7 +23,12 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: git-storaged-repositories
+  # NOT the original name, and that is the migration's safety property rather than a rename for
+  # taste. The first claim, `git-storaged-repositories`, was standard-rwo against ADR-0106 decision 4,
+  # and storageClassName is immutable on a PVC. Keeping the name would have meant deleting the only
+  # copy of every tenant repository BEFORE the replacement existed. A new name let the new volume be
+  # filled and verified — refs identical, `git fsck --full` clean — while the old one sat untouched.
+  name: git-storaged-data
   labels:
     app.kubernetes.io/name: git-storaged
     app.kubernetes.io/part-of: gitfrok-dataplane
@@ -34,12 +39,11 @@ spec:
   # the FUSE arm; 0 of 229 on block. git-storaged refuses a FUSE repository root outright, so a
   # misconfiguration here fails to start rather than corrupting refs (invariant 7).
   accessModes: ["ReadWriteOnce"]
-  # Stated, never inherited — and currently WRONG. ADR-0106 decision 4 (Accepted) requires the git
-  # tier to declare its own `premium-rwo` claim, because ADR-0033's block-volume contract attaches
-  # to this claim and not to a cluster default. This shipped as standard-rwo on 2026-09-23 and the
-  # violation is recorded in governance T-0092. The field is immutable on a PVC: changing this line
-  # alone makes the next `kubectl apply` fail, so the fix is a repository migration, not an edit.
-  storageClassName: standard-rwo
+  # premium-rwo because ADR-0106 decision 4 says so, in as many words: "when the git tier lands it
+  # must declare its own premium-rwo claim". ADR-0033's contract attaches to THIS claim and not to a
+  # cluster default. Stated, never inherited: every other claim in this environment is standard-rwo,
+  # so inheriting would silently get it wrong.
+  storageClassName: premium-rwo
   resources:
     requests:
       storage: 20Gi
@@ -152,7 +156,7 @@ spec:
       volumes:
         - name: repositories
           persistentVolumeClaim:
-            claimName: git-storaged-repositories
+            claimName: git-storaged-data
         - name: policy
           configMap:
             name: gitfrok-policy-bundle
