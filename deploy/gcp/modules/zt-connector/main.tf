@@ -94,6 +94,15 @@ resource "google_compute_instance" "connector" {
     block-project-ssh-keys = "TRUE"
   }
 
+  # ONE escaping rule governs this heredoc, and getting it wrong is silent. `$${` is the only
+  # escape OpenTofu recognises — it renders a literal `${` and is what keeps `${TUNNEL_TOKEN:-}`
+  # out of interpolation. A bare `$$` is NOT an escape: it renders as `$$`, which bash reads as
+  # its own PID. The first version of this script wrote `$$(`, `$$*` and `$$VAR` throughout, so
+  # the rendered file was a bash syntax error and `google-startup-scripts` exited 2 on every
+  # boot since the module was written. cloudflared was therefore never installed on any
+  # connector, and nothing surfaced it because the instance stays RUNNING and the operator path
+  # in deploy/k8s/README.md is IAP + `ssh -D`, which does not use the tunnel. Write `$` for a
+  # shell sigil here; write `$${` only to defer a `${` to bash.
   metadata_startup_script = <<-SCRIPT
     #!/bin/bash
     # Installs cloudflared and starts it against the tunnel token held in Secret Manager.
@@ -104,7 +113,7 @@ resource "google_compute_instance" "connector" {
     # tunnel. Re-run after adding the version.
     set -euo pipefail
 
-    log() { echo "[zt-connector] $$*" | systemd-cat -t zt-connector -p info; echo "[zt-connector] $$*"; }
+    log() { echo "[zt-connector] $*" | systemd-cat -t zt-connector -p info; echo "[zt-connector] $*"; }
 
     if ! command -v cloudflared >/dev/null 2>&1; then
       log "installing cloudflared from pkg.cloudflare.com"
@@ -119,14 +128,14 @@ resource "google_compute_instance" "connector" {
 
     # Read the token through the metadata server rather than gcloud, which a Debian GCE image does
     # not reliably carry. Private Google Access covers the API call with no external IP.
-    ACCESS_TOKEN=$$(curl -s -H "Metadata-Flavor: Google" \
+    ACCESS_TOKEN=$(curl -s -H "Metadata-Flavor: Google" \
       "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
       | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 
-    SECRET_JSON=$$(curl -s -H "Authorization: Bearer $$ACCESS_TOKEN" \
+    SECRET_JSON=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
       "https://secretmanager.googleapis.com/v1/projects/${var.project_id}/secrets/${google_secret_manager_secret.tunnel_token.secret_id}/versions/latest:access" || true)
 
-    TUNNEL_TOKEN=$$(printf '%s' "$$SECRET_JSON" | python3 -c '
+    TUNNEL_TOKEN=$(printf '%s' "$SECRET_JSON" | python3 -c '
     import sys, json, base64
     try:
         d = json.load(sys.stdin)
@@ -146,7 +155,7 @@ resource "google_compute_instance" "connector" {
 
     log "installing the cloudflared service"
     cloudflared service uninstall >/dev/null 2>&1 || true
-    cloudflared service install "$$TUNNEL_TOKEN"
+    cloudflared service install "$TUNNEL_TOKEN"
     systemctl enable --now cloudflared
     log "cloudflared running"
   SCRIPT
