@@ -31,10 +31,22 @@ which workloads exist (SPEC-0067 AC11).
 | OpenBao | **yes** | no — custody is control-plane-side (ADR-0066) |
 | Zitadel | **yes** | no — the OIDC issuer serves the browser surface |
 | SeaweedFS | no | yes — ADR-0050 scopes it to data-plane large objects |
-| first-party workloads | `controlplane/overlays/prod-cp` | ADR-0013's data-plane installer, not here |
+| first-party workloads | `controlplane/overlays/prod-cp` | `dataplane/overlays/prod-dp` (ADR-0107, **Proposed**) |
+| a public inbound path | the Gateway on `app-`/`auth-gitfrok` | **yes** — the Git door on `git-gitfrok` (ADR-0107) |
 
 `check-platform-kustomize.sh` and `check-controlplane-kustomize.sh` assert this asymmetry. It is
 not an accident of what got written first.
+
+**Two rows in that table changed on 2026-09-23 and one of them is a decision, not a fact.** The
+data plane now has a first-party overlay *and* a public inbound path, which ADR-0095 decision 11
+explicitly left open and ADR-0107 takes up. ADR-0107 is **Proposed**: the overlay is live and the
+decision is not yet accepted, which is the honest state and is recorded here rather than in
+somebody's memory.
+
+**Nothing in `make verify` reads `deploy/k8s/dataplane/`.** Both Kustomize gates are hard-coded to
+their own trees, so the newest overlay — the only one that opens a port to the internet — is the
+one with no gate. It renders no Secret and states its `storageClassName`, and *nothing checks
+either*. That is a filed follow-up on ADR-0107, not a claim that it is fine.
 
 ## Reaching the clusters at all
 
@@ -256,6 +268,9 @@ The nine an operator creates, and which overlay consumes each:
 | `gitfrok-database` | `url` | controlplane, `prod-cp` |
 | `gitfrok-pat-verifier` | `key` | controlplane, `prod-cp` |
 | **`openbao-ca`** | `ca.crt` | controlplane, `prod-cp` (ADR-0104, SPEC-0071) |
+| `gitfrok-database` | `url` | dataplane, `prod-dp` — a **different** role password from prod-cp's |
+| `gitfrok-pat-verifier` | `key` | dataplane, `prod-dp` — base64 of **at least 32 decoded bytes**, or the Git front door refuses to start |
+| `gitfrok-seaweedfs-s3` | `access-key`, `secret-key` | dataplane, `prod-dp` — all five S3 settings or none |
 
 **`openbao-ca` is the only one of the nine that is not secret** — it is a CA certificate, a public
 verification input. It is called out because both mistakes cost something: handling it as a secret
@@ -280,3 +295,54 @@ click and the correct click differ here.
 **Backup and restore for the stateful set is still open**, as is a staging environment (ADR-0099).
 The `addresses` unit reserves the two external addresses this tree consumes **by name**; a rename on
 either side fails at GKE programming time with no diff to read.
+
+## Using the Git host (`git-gitfrok.7.solutions`)
+
+Live since 2026-09-23. `git clone` and `git push` both work from the public internet with a
+browser-trusted certificate; the three steps below are what the journey actually needs, and the
+first two surprise people.
+
+**1. The repository must already exist as a bare repo.** `git-storaged` serves only repositories
+that are already on disk — the `git/v1` contract has **no create-repository RPC**, so a push to a
+name nobody created fails rather than creating it. Until a tenant-facing create path exists, that is
+an operator action:
+
+```sh
+kubectl -n gitfrok exec deploy/git-storaged -- sh -c \
+  'mkdir -p /var/lib/gitfrok/repositories/<tenant>/<repo>.git &&
+   cd /var/lib/gitfrok/repositories/<tenant>/<repo>.git && git init -q --bare -b main'
+```
+
+**2. The password is a PAT, and the identity door is not public.** HTTP Basic carries the PAT as the
+password (any username; `admin` by convention). The door that mints one listens on `dataplane:9090`
+inside the cluster and is deliberately not published, so it is reached over a port-forward:
+
+```sh
+kubectl -n gitfrok port-forward svc/dataplane 19090:9090 &
+grpcurl -plaintext -import-path governance/contracts -proto proto/identity/v1/identity.proto \
+  -d '{"tenant_id":"dev","actor_id":"user-admin","label":"laptop",
+       "scope_labels":["repo.read","repo.write"],"roles":["owner"]}' \
+  127.0.0.1:19090 gitsaas.identity.v1.CredentialAuthenticator.IssuePAT
+```
+
+The plaintext token exists in exactly that one response and is never readable again.
+
+**3. The URL carries a literal `/git/` prefix.** Not decoration — `internal/gitfrontdoor/http.go`
+matches on it, and the published `HTTPRoute` only exposes that prefix:
+
+```sh
+git clone https://admin:$PAT@git-gitfrok.7.solutions/git/<tenant>/<repo>.git
+```
+
+### Three things about this door that are decisions
+
+- **DNS-only in Cloudflare, and it must stay that way.** A `git push` is one request whose body is
+  the whole pack; the Cloudflare proxy caps request bodies, so proxying this record works for every
+  small push and fails on the first large one. `agents-gitfrok` is DNS-only for a different reason
+  (ADR-0095 decision 5) and `app-`/`auth-gitfrok` are proxied — the three are not interchangeable.
+- **TLS is a Google-managed certificate**, attached by the `networking.gke.io/certmap` annotation,
+  not cert-manager. Its renewal depends on the `_acme-challenge.git-gitfrok` **CNAME** in Cloudflare.
+  Deleting that record breaks renewal months later and silently.
+- **No SSH.** `GITFROK_GIT_SSH_ADDR` exists in the binary and is set in zero deployments. An L7
+  Gateway cannot carry SSH; ADR-0107 decision 7 records why that is a separate decision rather than
+  a missing line.
