@@ -264,7 +264,16 @@ if command -v helm >/dev/null 2>&1; then
             d="${oref#*@sha256:}"
             case "$d" in
               *[!0-9a-f]* | "") report "operator image digest is not 64 hex characters: $oref" ;;
-              *) [ "${#d}" -eq 64 ] && found_pin=1 || report "operator image digest is not 64 hex characters: $oref" ;;
+              # if/else rather than `A && B || C`: the `&&` form is only correct here because
+              # `found_pin=1` cannot fail, and an assertion whose correctness rests on that is one
+              # edit away from reporting a violation it just accepted (SC2015).
+              *)
+                if [ "${#d}" -eq 64 ]; then
+                  found_pin=1
+                else
+                  report "operator image digest is not 64 hex characters: $oref"
+                fi
+                ;;
             esac
             ;;
           *) report "operator image is not the vendor's digest pin from values.yaml ($op_repo@sha256:...): $oref" ;;

@@ -54,16 +54,44 @@ fi
 # Parsed as YAML, not grepped. The first version of this gate grepped, and its own comment saying
 # "no secretGenerator" tripped it — a grep assertion that a comment can satisfy or break is the
 # exact defect this file exists to catch elsewhere.
-find "$cp_dir" "$overlay" -name 'kustomization.yaml' -print0 | sort -zu | tr -d '\0' >/dev/null 2>&1; find "$cp_dir" "$overlay" -name 'kustomization.yaml' -print0 | xargs -0 python3 - <<'KGEN' || fail=1
-import sys, yaml
+# NO PIPE INTO xargs HERE, and that is a fix rather than a style choice. The previous form was
+#     find ... -print0 | xargs -0 python3 - <<'KGEN'
+# in which the heredoc redirects XARGS's stdin, so xargs read the Python source as its item list
+# instead of the file list, and ran `python3 -` with stdin on /dev/null — an empty program, exit 0.
+# This assertion had therefore NEVER RUN. shellcheck called it (SC2259, an error, not a note) and
+# it was true. Python walks the roots itself, so there is no second stdin to fight over.
+#
+# The line also carried a leading `find ... | sort -zu | tr -d '\0' >/dev/null 2>&1;` whose output
+# went to /dev/null and whose status was discarded — it did nothing at all, and is gone.
+python3 - "$cp_dir" "$overlay" <<'KGEN' || fail=1
+import os
+import sys
+
+import yaml
+
+roots = sys.argv[1:]
+paths = sorted({
+    os.path.join(d, "kustomization.yaml")
+    for root in roots
+    for d, _, files in os.walk(root)
+    if "kustomization.yaml" in files
+})
+
+# The tripwire that would have caught the dead pipe on day one: a check that reads zero files
+# passes silently and is indistinguishable from a check that found nothing wrong.
+if not paths:
+    print("CP-KUSTOMIZE VIOLATION: AC3: no kustomization.yaml found under " + ", ".join(roots) +
+          " — the secretGenerator assertion had nothing to read, which is not the same as clean")
+    sys.exit(1)
+
 bad = 0
-for path in sys.argv[1:]:
+for path in paths:
     with open(path) as fh:
         doc = yaml.safe_load(fh) or {}
     if not isinstance(doc, dict):
         continue
-    if 'secretGenerator' in doc:
-        print(f'CP-KUSTOMIZE VIOLATION: AC3: {path} declares secretGenerator — ADR-0096 decision 5 forbids it')
+    if "secretGenerator" in doc:
+        print(f"CP-KUSTOMIZE VIOLATION: AC3: {path} declares secretGenerator — ADR-0096 decision 5 forbids it")
         bad = 1
 sys.exit(bad)
 KGEN

@@ -55,12 +55,38 @@ else
 fi
 
 # --- secretGenerator, parsed rather than grepped ------------------------------------------------
-find "$plat" ${PLATFORM_OVERLAYS:+"$PLATFORM_OVERLAYS"} -name 'kustomization.yaml' -print0 | xargs -0 python3 - <<'KGEN' || fail=1
-import sys, yaml
+# NO PIPE INTO xargs HERE, and that is a fix rather than a style choice. The previous form was
+#     find ... -print0 | xargs -0 python3 - <<'KGEN'
+# in which the heredoc redirects XARGS's stdin, so xargs read the Python source as its item list
+# instead of the file list, and ran `python3 -` with stdin on /dev/null — an empty program, exit 0.
+# This assertion had therefore NEVER RUN. shellcheck called it (SC2259, an error, not a note) and
+# it was true. Python walks the roots itself, so there is no second stdin to fight over.
+python3 - "$plat" ${PLATFORM_OVERLAYS:+"$PLATFORM_OVERLAYS"} <<'KGEN' || fail=1
+import os
+import sys
+
+import yaml
+
+roots = sys.argv[1:]
+paths = sorted(
+    os.path.join(d, "kustomization.yaml")
+    for root in roots
+    for d, _, files in os.walk(root)
+    if "kustomization.yaml" in files
+)
+
+# The tripwire that would have caught the dead pipe on day one: a check that reads zero files
+# passes silently and is indistinguishable from a check that found nothing wrong.
+if not paths:
+    print("PLATFORM VIOLATION: AC4: no kustomization.yaml found under " + ", ".join(roots) +
+          " — the secretGenerator assertion had nothing to read, which is not the same as clean")
+    sys.exit(1)
+
 bad = 0
-for path in sys.argv[1:]:
-    doc = yaml.safe_load(open(path)) or {}
-    if isinstance(doc, dict) and 'secretGenerator' in doc:
+for path in paths:
+    with open(path) as fh:
+        doc = yaml.safe_load(fh) or {}
+    if isinstance(doc, dict) and "secretGenerator" in doc:
         print(f"PLATFORM VIOLATION: AC4: {path} declares secretGenerator — ADR-0096 decision 5 forbids it")
         bad = 1
 sys.exit(bad)
