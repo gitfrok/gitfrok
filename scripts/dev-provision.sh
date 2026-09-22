@@ -410,19 +410,34 @@ CLIENT_ID=$("${KUBECTL[@]}" get configmap "$OIDC_CM" -n "$NS" -o jsonpath='{.dat
 
 console_token
 
+# The Gitfrok project, found BY NAME and created if absent. This used to take whichever project the
+# search returned first — which on a fresh Zitadel v4 instance is the built-in `ZITADEL` system
+# project, the only one there is. The BFF app, the owner/member/reader roles and the role-assertion
+# switch then all landed inside Zitadel's own project, and the ID token carried no roles at all.
+PROJECT_NAME="Gitfrok"
 PROJECT_ID=$(http /management/v1/projects/_search -X POST \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"queries":[]}' \
-  | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['result'][0]['id'])") \
+  -d "{\"queries\":[{\"nameQuery\":{\"name\":\"$PROJECT_NAME\",\"method\":\"TEXT_QUERY_METHOD_EQUALS\"}}]}" \
+  | python3 -c "import json,sys;r=json.load(sys.stdin).get('result') or [];print(r[0]['id'] if r else '')") \
   || die "project search failed"
-[ -n "$PROJECT_ID" ] || die "no project found in the default org"
+if [ -z "$PROJECT_ID" ]; then
+  PROJECT_ID=$(http /management/v1/projects -X POST \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+    -d "{\"name\":\"$PROJECT_NAME\"}" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))") \
+    || die "creating project $PROJECT_NAME failed: $HTTP_BODY"
+  [ -n "$PROJECT_ID" ] || die "creating project $PROJECT_NAME returned no id: $HTTP_BODY"
+  echo "  created project '$PROJECT_NAME' ($PROJECT_ID)"
+else
+  echo "  project '$PROJECT_NAME' present ($PROJECT_ID)"
+fi
 
 if [ -z "$CLIENT_ID" ]; then
   # A previous run may have created the app without recording it (or the CM was
   # deleted); find by name rather than creating a duplicate.
   found=$("${KUBECTL[@]}" exec deployment/postgres -n "$NS" -- \
     psql -U postgres -d zitadel -tAc \
-    "SELECT oc.client_id FROM projections.apps7_oidc_configs oc JOIN projections.apps7 a ON a.id=oc.app_id AND a.instance_id=oc.instance_id WHERE a.name='$OIDC_APP_NAME' AND oc.client_id != ''" 2>/dev/null || true)
+    "SELECT oc.client_id FROM projections.apps7_oidc_configs oc JOIN projections.apps7 a ON a.id=oc.app_id AND a.instance_id=oc.instance_id WHERE a.name='$OIDC_APP_NAME' AND a.project_id='$PROJECT_ID' AND oc.client_id != ''" 2>/dev/null || true)
   found=$(printf '%s' "$found" | tr -d '\r ')
   if [ -n "$found" ]; then
     CLIENT_ID="$found"
@@ -514,9 +529,47 @@ sc=$(curl -sk --max-time "$TIMEOUT" -o /dev/null -w '%{http_code}' \
   "$ISSUER/zitadel.authorization.v2.AuthorizationService/CreateAuthorization" -X POST \
   -H "Connect-Protocol-Version: 1" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d "{\"userId\":\"$ADMIN_USER_ID\",\"projectId\":\"$PROJECT_ID\",\"organizationId\":\"$ORG_ID\",\"roles\":[\"owner\"]}")
+  -d "{\"userId\":\"$ADMIN_USER_ID\",\"projectId\":\"$PROJECT_ID\",\"organizationId\":\"$ORG_ID\",\"roleKeys\":[\"owner\"]}")
 [ "$sc" = 200 ] || [ "$sc" = 409 ] || die "granting owner to $ADMIN_LOGIN failed (HTTP $sc)"
-echo "  $ADMIN_LOGIN holds the owner role on the project"
+# The field is `roleKeys` (proto `role_keys`, zitadel/authorization/v2, v4.16.2). This sent `roles`,
+# which CreateAuthorization does not reject — it parses the request, drops the unknown field, and
+# creates an authorization carrying NO roles, answering 200. The ID token then held no role claim and
+# the assertion below failed with "roles seen: ''" while every switch read as converged.
+#
+# 409 means "an authorization for this user on this project already exists" — NOT "it carries the
+# owner role". So read the authorization back through authorization.v2 (the v1 grant search does not
+# even return role keys) and, if owner is missing, add it with UpdateAuthorization.
+authz_list() {
+  curl -sk --max-time "$TIMEOUT" "$ISSUER/zitadel.authorization.v2.AuthorizationService/ListAuthorizations" -X POST \
+    -H "Connect-Protocol-Version: 1" -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}'
+}
+authz_field() { # authz_field id|roles — for this user on this project
+  authz_list | python3 -c "
+import json, sys
+for a in json.load(sys.stdin).get('authorizations', []):
+    if a.get('user', {}).get('id') == sys.argv[1] and a.get('project', {}).get('id') == sys.argv[2]:
+        print(a['id'] if sys.argv[3] == 'id' else ','.join(sorted(r.get('key', '') for r in a.get('roles', []))))
+        break" "$ADMIN_USER_ID" "$PROJECT_ID" "$1"
+}
+grant_roles=$(authz_field roles) || die "reading back the authorization for $ADMIN_LOGIN failed"
+case ",$grant_roles," in
+  *,owner,*) ;;
+  *)
+    authz_id=$(authz_field id)
+    [ -n "$authz_id" ] || die "no authorization for $ADMIN_LOGIN on $PROJECT_NAME after create (HTTP $sc)"
+    keys=$(printf '%s' "$grant_roles" | python3 -c "import json,sys;k=[x for x in sys.stdin.read().strip().split(',') if x];print(json.dumps(sorted(set(k+['owner']))))")
+    sc=$(curl -sk --max-time "$TIMEOUT" -o /dev/null -w '%{http_code}' \
+      "$ISSUER/zitadel.authorization.v2.AuthorizationService/UpdateAuthorization" -X POST \
+      -H "Connect-Protocol-Version: 1" -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+      -d "{\"id\":\"$authz_id\",\"roleKeys\":$keys}")
+    [ "$sc" = 200 ] || die "adding owner to $ADMIN_LOGIN's authorization failed (HTTP $sc)"
+    grant_roles=$(authz_field roles)
+    ;;
+esac
+case ",$grant_roles," in
+  *,owner,*) echo "  $ADMIN_LOGIN holds the owner role on project $PROJECT_NAME (read back: {$grant_roles})" ;;
+  *) die "$ADMIN_LOGIN's authorization on $PROJECT_NAME carries {$grant_roles}, not owner" ;;
+esac
 
 # 3. The project must assert roles at authentication.
 proj_assert=$(http "/management/v1/projects/$PROJECT_ID" \
