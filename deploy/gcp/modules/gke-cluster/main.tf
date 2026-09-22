@@ -1,5 +1,6 @@
-# One regional GKE cluster. Both environments instantiate this same module; what differs is whether
-# the API endpoint is private and whether a sandboxed runner pool exists (ADR-0092 decision 2).
+# One GKE cluster, regional or zonal (see `var.location`). Both environments instantiate this same
+# module; what differs is whether the API endpoint is private, whether a sandboxed runner pool
+# exists (ADR-0092 decision 2), and whether the location is a region or a zone.
 #
 # Nothing in this module creates a Kubernetes object. The cluster is the boundary: what runs inside
 # it is ADR-0013's chart and Operator, not OpenTofu.
@@ -8,15 +9,21 @@ locals {
   # Workload Identity's fixed pool name for a project. Pods assume Google service accounts through
   # this rather than through a mounted key — the keyless seam ADR-0010 §3 names.
   workload_pool = "${var.project_id}.svc.id.goog"
+
+  # Regional by default. A zone here makes the cluster zonal, which drops the managed control
+  # plane's multi-zone spread AND the per-zone multiplication of every node pool's node count --
+  # `min_nodes = 1` on a regional cluster is three nodes, not one. Cost posture, not a security or
+  # residency one: the zone is inside the same region, so G7 residency is unchanged.
+  location = coalesce(var.location, var.region)
 }
 
 resource "google_container_cluster" "this" {
   name     = "${var.env_name}-gke"
   project  = var.project_id
-  location = var.region
+  location = local.location
 
-  # A regional cluster spreads the managed control plane across zones. The node count below is
-  # per-zone as a result.
+  # A REGIONAL location spreads the managed control plane across zones and makes the node counts
+  # below per-zone; a ZONAL one does neither. See `var.location`.
   network    = var.network_name
   subnetwork = var.subnet_name
 
@@ -123,10 +130,11 @@ resource "google_container_cluster" "this" {
 resource "google_container_node_pool" "system" {
   name     = "system"
   project  = var.project_id
-  location = var.region
+  location = local.location
   cluster  = google_container_cluster.this.name
 
-  # Per zone. A regional cluster multiplies this by the zones it covers.
+  # Per zone when the location is a region -- so a regional cluster multiplies this by the zones it
+  # covers, and a zonal one does not.
   initial_node_count = var.system_pool.min_nodes
 
   autoscaling {
@@ -174,7 +182,7 @@ resource "google_container_node_pool" "runners" {
 
   name     = "runners"
   project  = var.project_id
-  location = var.region
+  location = local.location
   cluster  = google_container_cluster.this.name
 
   initial_node_count = var.runner_pool.min_nodes

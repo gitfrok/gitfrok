@@ -45,11 +45,31 @@ inputs = {
   # nothing to isolate here.
   runner_pool = null
 
+  # ZONAL, deliberately, and this is the single largest cost lever in the tree. A regional cluster
+  # creates `min_nodes` nodes PER ZONE, so `min_nodes = 1` across asia-southeast1's three zones was
+  # three nodes, not one. Zonal trades the managed control plane's multi-zone spread for roughly a
+  # third of the node bill. Residency is untouched: the zone is inside the same region (G7).
+  #
+  # To restore multi-zone HA, delete this line. The module defaults to the region.
+  location = "asia-southeast1-a"
+
   system_pool = {
-    machine_type = "n2-standard-4"
-    min_nodes    = 1
-    max_nodes    = 5
-    disk_size_gb = 200
-    disk_type    = "pd-ssd"
+    # Same 4 vCPU / 16 GB as n2-standard-4, cheaper family.
+    machine_type = "e2-standard-4"
+
+    # TWO, not one, and the reason is that autoscaling cannot rescue an undersized floor here: no
+    # workload in deploy/k8s/platform/base sets CPU or memory requests, so every pod is schedulable
+    # and the cluster autoscaler never sees a pending pod to scale up FOR. The floor is the whole
+    # budget. Twelve pods -- OpenBao 3, Postgres 3, Redpanda 3, Zitadel 2, Valkey 1 -- do not fit in
+    # one node's ~13 GB allocatable alongside kube-system; they would not fail to schedule, they
+    # would get evicted under memory pressure, which is a much worse failure to read.
+    min_nodes = 2
+    max_nodes = 4
+
+    # pd-balanced, not pd-ssd. The pd-ssd default is justified by ADR-0033's live bare repos on
+    # block volumes -- and the git tier is a DATA-PLANE concern. Nothing on the control plane has
+    # that latency contract, so prod-dp keeps the module default and this environment does not.
+    disk_size_gb = 100
+    disk_type    = "pd-balanced"
   }
 }

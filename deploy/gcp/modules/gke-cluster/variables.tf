@@ -1,5 +1,20 @@
 variable "project_id" { type = string }
 variable "region" { type = string }
+
+variable "location" {
+  description = <<-DESC
+    The cluster's location. Null (the default) means the region -- a REGIONAL cluster, whose managed
+    control plane spans the region's zones and whose node pools create `min_nodes` nodes PER ZONE.
+    Setting a zone here (e.g. "asia-southeast1-a") makes the cluster ZONAL: one managed endpoint in
+    one zone, and `min_nodes` meaning literally `min_nodes`.
+
+    This is a cost/availability trade and nothing else. The zone is inside `region`, so G7 residency
+    is unchanged, and no ADR pins either shape -- ADR-0092 chose the cloud and the two-environment
+    split, not a zone count.
+  DESC
+  type        = string
+  default     = null
+}
 variable "env_name" { type = string }
 variable "labels" {
   type    = map(string)
