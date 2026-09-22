@@ -1,6 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: [../../../deploy/k8s/platform/overlays/prod-cp]
+resources: [../../../../deploy/k8s/platform/overlays/prod-cp]
 secretGenerator:
   - name: postgres-superuser
     literals: [username=postgres, password=hunter2]
