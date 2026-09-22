@@ -202,8 +202,22 @@ and the control-plane overlay dry-ran **13/13 clean** with the ADR-0104 CA mount
 | Postgres (CNPG) | 3/3, `ContinuousArchiving=True` | 3/3, `ContinuousArchiving=True` |
 | Redpanda / Valkey / SeaweedFS | 3/3, 1/1, n/a | 3/3, n/a, 1/1 |
 | Zitadel | 2/2 Running | n/a |
-| First-party workloads | **not applied** — no published images; overlay dry-runs 13/13 clean | not applicable until T-0085 |
-| Out-of-band Secrets | all 9 present, incl. `openbao-ca` | 2 present (`postgres-*`) |
+| First-party workloads | applied — `bff` 1/1, `webfrontend` 1/1, `controlplane` **0/1 CrashLoopBackOff** (sealed barrier) | applied — `dataplane` 1/1, `git-storaged` 1/1 |
+| Public surface | `app-`/`auth-gitfrok`, **Let's Encrypt at the origin** | **`git-gitfrok`**, Google-managed cert (ADR-0107) |
+| Out-of-band Secrets | all 9 present, incl. `openbao-ca` | 5 present (`postgres-*`, `gitfrok-database`, `gitfrok-pat-verifier`, `gitfrok-seaweedfs-s3`) |
+| App database | 21 tables, 7 schemas | 21 tables, 7 schemas |
+
+**Updated 2026-09-23.** The two rows above that said "not applied" and "not applicable until
+T-0085" were true when written and false by the time anyone read them, which is the failure mode a
+status table has. What changed: all five images are published, `deploy/k8s/dataplane/` exists
+(ADR-0107, **Proposed**), and `git clone` / `git push` work from the public internet.
+
+**The application databases had ZERO tables until 2026-09-23 — on BOTH clusters.** None of the
+twelve backend migrations had ever been applied to production. Nothing reported it, because nothing
+looks: the control plane fails earlier on the sealed barrier, and `policy.Decide` **fails closed**
+on a missing `policy.decision_records`, so the symptom would have been every protected action
+denied rather than anything naming a database. Applying them is still a manual step that no
+installer, gate or runbook section owns.
 
 `connected as gitfrok_app to gitfrok ssl=on` verified from inside prod-cp, as on the first build.
 
