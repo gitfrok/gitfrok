@@ -235,5 +235,15 @@ environment's nodes, and it looks like tidying. Raising a PVC is easy; *lowering
 possible without destroying the volume, so the sizes here were chosen while the disks held nothing
 and should be raised deliberately rather than restored by reflex.
 
+**`scripts/check-gke-location.sh` guards the first of those** (T-0091, SPEC-0072): every
+`live/*/gke/terragrunt.hcl` must declare `location`, and `make verify` fails if one does not. Units
+are discovered rather than listed, so a third environment is covered the day it is created.
+
+**What that gate deliberately does NOT assert is the value.** A *region* is accepted exactly as
+readily as a zone — the property under test is that somebody chose, not what they chose. So
+restoring multi-zone HA stays a one-line edit and never becomes an argument with a fitness function:
+set `location` to `asia-southeast1` and the gate is satisfied. ADR-0106 decision 2 asks only that
+whoever does it can name the availability requirement that made it necessary.
+
 **Spot VMs were considered and rejected.** OpenBao, Postgres and Redpanda are quorum workloads;
 preemption costs a quorum, not a pod.

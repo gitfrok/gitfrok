@@ -1,5 +1,5 @@
 # Super-repo orchestration. Real per-repo build/test targets live in each submodule.
-.PHONY: bootstrap submodules dev-up dev-provision dev-smoke dev-north-star update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check runbook-check signed-releases-check
+.PHONY: bootstrap submodules dev-up dev-provision dev-smoke dev-north-star update-pins verify lint-shell codegen codegen-check policy-check threshold-parity surfaces surfaces-check ceremony-check dispatch-check portability-check bench-storage rulesets rulesets-apply rulesets-check trust-bundle-check byo-chart-check custody-check runbook-check signed-releases-check gke-location-check gke-location-test
 bootstrap: submodules ## init submodules + show toolchain floors
 	@./scripts/bootstrap.sh
 verify: ## super-repo fitness gates: dependency direction + version floors + dev image pins (T-0001, invariants 22–23) + BYO install anti-faking (T-0031, SPEC-0039 AC2/AC8) + custody deployment (T-0040 AC5) + runbook completeness (T-0040 AC4) + control-plane installer (T-0084, SPEC-0067) and the third-party stateful set (T-0086, SPEC-0069), each with the proof its gate can fail
@@ -18,6 +18,12 @@ verify: ## super-repo fitness gates: dependency direction + version floors + dev
 	@./scripts/test-controlplane-kustomize.sh
 	@./scripts/check-platform-kustomize.sh
 	@./scripts/test-platform-kustomize.sh
+	@./scripts/check-gke-location.sh
+	@./scripts/test-gke-location.sh
+gke-location-check: ## T-0091 / SPEC-0072: every live gke unit DECLARES its location; deleting the line silently triples the nodes (ADR-0106)
+	@./scripts/check-gke-location.sh
+gke-location-test: ## SPEC-0072 AC4/AC5: prove check-gke-location.sh refuses each defect for its OWN reason, and accepts a region
+	@./scripts/test-gke-location.sh
 lint-shell: ## shellcheck the fitness scripts (T-0009); CI gates this on every PR
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed: https://shellcheck.net"; exit 1; }
 	@shellcheck scripts/*.sh && echo "shellcheck: OK"
