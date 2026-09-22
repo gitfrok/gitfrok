@@ -4,11 +4,17 @@
 (Accepted).** Read it first; it explains every choice this tree makes, and where it and this README
 disagree, the ADR wins (ADR-0001).
 
-> **Both environments are provisioned and running as of 2026-09-22 (second build).** They were
-> applied, torn down to stop billing, and rebuilt the same day; the rebuild applied **15/15 units**
-> across both projects. [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) covers both directions
-> and the things a rebuild does **not** restore. The present tense below is now literal — but read
-> the spend note there before leaving it up.
+> **Nothing is provisioned. Stripped to zero on 2026-09-22**, after a build, a teardown, a rebuild
+> (15/15 units) and a second teardown the same day. Verified empty in both projects: clusters,
+> instances, disks, routers, addresses, forwarding rules and registries. What survives is what costs
+> nothing — the two VPCs, the two `*-tfstate` buckets and the projects themselves.
+> [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) covers both directions, including the disk sweep
+> that a cluster deletion does not do for you. **Read the present tense below as "what an apply
+> creates", not "what is running".**
+>
+> **OpenTofu state is stale by design here**: the clusters and their downstream resources were
+> deleted out of band with `gcloud`, so a `plan` will want to recreate everything. That is correct
+> and is how the rebuild is meant to start.
 
 **Updated 2026-09-22.** Both `project_id` values are real (`gitfrok-prod-cp`, `gitfrok-prod-dp`,
 created 2026-09-22 on billing `2025-10280-7Solutions`), the DNS apex is gone — ADR-0095 made

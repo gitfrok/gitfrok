@@ -170,11 +170,13 @@ fixture correctly refuses that relaxation reaching production — so both doors 
 
 ## Live state: both clusters torn down again, 2026-09-22 (after the second build)
 
-**Built, and torn down again the same day.** Both GKE clusters were deleted on 2026-09-22 after the
-second build, so **nothing below is running** — read the table as what the second build reached and
-proved, not as what exists. Everything *outside* the clusters survives and is still billing: 25
-orphaned PVC disks, both `zt-connector` VMs, both Cloud NAT routers and four reserved addresses.
-`deploy/TEARDOWN-RUNBOOK.md` has the sweep and the rebuild.
+**Built, and stripped to zero the same day.** Both GKE clusters were deleted on 2026-09-22 after the
+second build, and then everything they left behind was swept: 23 orphaned PVC disks, both
+`zt-connector` VMs, both Cloud NAT routers, both reserved addresses, the (empty) Artifact Registry
+repository and both backup buckets. The three Cloudflare records were deleted too, rather than left
+resolving to addresses that now belong to someone else. **Nothing below is running** — read the table
+as what the second build reached and proved, not as what exists. `deploy/TEARDOWN-RUNBOOK.md` has the
+sweep and the rebuild.
 
 What the second build proved, and is therefore a property of these manifests rather than of that
 cluster: `deploy/gcp` applied **15/15 units** across both projects, both platform overlays converged,
