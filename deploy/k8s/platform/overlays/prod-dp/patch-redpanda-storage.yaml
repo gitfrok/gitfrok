@@ -1,0 +1,10 @@
+# Redpanda: 50Gi pd-ssd -> 20Gi pd-balanced.
+#
+# JSON6902, not strategic merge: `volumeClaimTemplates` is an ATOMIC list, so a merge patch would
+# replace the whole entry and silently drop accessModes and the claim's name.
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/storageClassName
+  value: standard-rwo
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+  value: 20Gi

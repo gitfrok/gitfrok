@@ -17,3 +17,16 @@ resources:
 
 patches:
   - path: patch-postgres-backup.yaml
+
+  # Storage cost posture — prod-dp only, so the base is untouched. See patch-storage.yaml for why
+  # ADR-0033 does not attach to any claim currently in this overlay, and what has to happen when
+  # the git tier arrives.
+  - path: patch-storage.yaml
+  - path: patch-redpanda-storage.yaml
+    target:
+      kind: StatefulSet
+      name: redpanda
+  - path: patch-seaweedfs-storage.yaml
+    target:
+      kind: StatefulSet
+      name: seaweedfs

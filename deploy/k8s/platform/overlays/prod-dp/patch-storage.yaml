@@ -1,0 +1,28 @@
+# Storage cost posture for the data plane. prod-dp overlay only; the base is untouched.
+#
+# premium-rwo (pd-ssd) -> standard-rwo (pd-balanced), ~40% cheaper per GB, plus smaller claims.
+# 710Gi of pd-ssd was the single largest line in this environment after the nodes, for a reference
+# deployment holding no data.
+#
+# ADR-0033 IS a data-plane decision, so unlike prod-cp it cannot simply be waved away here -- it is
+# checked instead. Its subject is live bare repos on block volumes, and the git tier has NO manifest
+# anywhere in deploy/k8s: the three components in this overlay are Postgres, Redpanda and SeaweedFS,
+# and ADR-0050 explicitly scopes SeaweedFS to large objects rather than to anything git's rename
+# contract touches. So nothing here carries that contract today.
+#
+# WHEN THE GIT TIER LANDS IT NEEDS ITS OWN premium-rwo CLAIM. That is a property of the claim, not
+# of this overlay's default, and nothing in this file should be read as having decided it.
+#
+# Direction of travel, as on prod-cp: a PVC expands in place but cannot shrink without destroying
+# the volume, so at zero data the reversible mistake is sizing small.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  storage:
+    size: 20Gi
+    storageClass: standard-rwo
+  walStorage:
+    size: 10Gi
+    storageClass: standard-rwo

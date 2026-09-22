@@ -1,0 +1,13 @@
+# SeaweedFS: 200Gi pd-ssd -> 50Gi pd-balanced.
+#
+# This is the component ADR-0050 scopes to LARGE OBJECTS, which is exactly the access pattern that
+# does not need pd-ssd -- and per ADR-0033 it is the tier git was deliberately kept OFF, so the
+# rename-latency contract is not its to carry either.
+#
+# 50Gi is a starting size for a store holding nothing. Expand it when real objects arrive.
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/storageClassName
+  value: standard-rwo
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+  value: 50Gi
