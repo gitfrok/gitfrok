@@ -112,16 +112,27 @@ gains `digest: sha256:...` and drops `newTag`, read from the `.release` manifest
 **2. OpenBao is uninitialised and sealed** on the live `prod-cp` cluster — step 3 above, awaiting a
 share quorum.
 
-## Live state, 2026-09-22
+## Live state: nothing is deployed, 2026-09-22
 
-`platform/overlays/prod-cp` is **applied and healthy**: 12 pods 1/1 — OpenBao 3/3 (Raft, TLS,
-uninitialised and sealed, as intended), Postgres 3/3 via CNPG, Redpanda 3/3, Valkey, Zitadel 2/2.
-Verified `connected as gitfrok_app to gitfrok ssl=on`.
+**Both clusters were torn down on 2026-09-22 to stop billing, so there is nothing running to
+inspect.** Verified zero across both projects: clusters, nodes, disks, routers, addresses,
+forwarding rules and registries. See [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) for what
+that took and how to rebuild.
 
-`controlplane/overlays/prod-cp` **dry-runs 13/13 clean** against the live cluster and has not been
-applied, because its images do not exist yet.
+What was proven while it was up, and is therefore a property of these manifests rather than a
+property of that cluster:
 
-`prod-dp`'s platform overlay has not been applied.
+- `platform/overlays/prod-cp` applied and reached **12 pods 1/1** — OpenBao 3/3 (Raft, TLS,
+  uninitialised and sealed, as intended), Postgres 3/3 via CNPG reporting healthy, Redpanda 3/3,
+  Valkey, Zitadel 2/2 — with `connected as gitfrok_app to gitfrok ssl=on` verified from inside.
+- `controlplane/overlays/prod-cp` **dry-ran 13/13 clean** against that live cluster. It was never
+  applied, because its images still do not exist.
+- `prod-dp`'s platform overlay was never applied.
+
+Three fixes in the base manifests came out of that run and would not have been found by dry-running
+(`redpanda-internal` needing `publishNotReadyAddresses: true`, OpenBao's readiness probe dropping
+`sealedcode=204`, Zitadel needing `enableServiceLinks: false`), which is the argument for treating
+the list above as evidence rather than deleting it along with the cluster.
 
 ## Gates
 

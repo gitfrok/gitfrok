@@ -3,7 +3,7 @@
 One page for an incoming session or a new agent. **`governance/` is the Source of Truth (ADR-0001);**
 where this file disagrees with it, governance is right and this file is stale. This file says *where
 work stands and how to run it*; governance says *what and why*. Verified against the tree on
-**2026-08-23**.
+**2026-09-22**.
 
 ## Navigate
 
@@ -11,7 +11,7 @@ work stands and how to run it*; governance says *what and why*. Verified against
 |---|---|
 | the rules before editing anything | `AGENTS.md` (this repo) → `governance/AGENTS.md` → `governance/docs/agents/invariants.md` |
 | what the product must do | `governance/docs/product/PRD.md` (`PR-#` rows, phases, non-goals) |
-| why it is built this way | `governance/docs/adr/` — index in its `README.md` — ADR-0000 through ADR-0091 |
+| why it is built this way | `governance/docs/adr/` — index in its `README.md` — ADR-0000 through ADR-0103 |
 | a task to pick up | `governance/docs/tasks/` — one file each, own `Status:` and `Repo(s):` |
 | what is actually done | `governance/docs/backlog/README.md` — the epic tables are more current than the task files |
 | phase intent and exit criteria | `governance/docs/roadmap/README.md`, `governance/docs/plans/` |
@@ -20,16 +20,58 @@ work stands and how to run it*; governance says *what and why*. Verified against
 | how a token gets changed | `webfrontend/design/README.md` — edit `tokens.json`, `npm run tokens`, commit both |
 | the brand kit the CVD laws come from | `webfrontend/design/gitfrok-brand-identity-v2.md` — §2 states the three laws |
 | to run the dev cluster | [`deploy/MVP-RUNBOOK.md`](deploy/MVP-RUNBOOK.md) — ordered steps |
+| to deploy to **production** (GKE) | [`deploy/k8s/README.md`](deploy/k8s/README.md) — the bring-up order, and why unseal gates it |
+| what production **infrastructure** exists | [`deploy/gcp/README.md`](deploy/gcp/README.md) — OpenTofu units and their manual seams |
+| to tear production down, or rebuild it | [`deploy/TEARDOWN-RUNBOOK.md`](deploy/TEARDOWN-RUNBOOK.md) — including the orphaned disks a destroy leaves behind |
 | per-manifest detail and the defect record | [`deploy/dev/README.md`](deploy/dev/README.md) |
 | what a review already found | `phase-2-code-review.md`, `-wave2.md`, `phase-3-code-review.md`, `phase-3.1-code-review.md`, `phase-3.1-plan-review.md` (this repo's root) |
 
 ## Current pins
 
-Verified with `git submodule status` at super-repo **`9ebfc37`**:
-**governance `e3ac15f`** · **backend `e12f4a9`** · **bff `3d02a23`** · **webfrontend `23a76d8`**.
+Verified with `git submodule status` at super-repo **`4a4978a`**:
+**governance `01852a7`** · **backend `92c8acf`** · **bff `3c02149`** · **webfrontend `f4d1612`**.
 
-All five repositories are green in CI at these commits, and all five service images are signed and
-published. The dev cluster runs these images.
+**Read the image claim carefully, it changed.** The images that are signed and published are the
+`docker.io/gitfrok/*` ones the dev cluster runs. **ADR-0098 retired that registry** and moved
+first-party publishing to `asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok`, where **nothing
+has been published yet** — the registry is empty, and the `image-publish` workflow has never run
+because `COSIGN_PRIVATE_KEY` does not exist. So: dev runs published images; production has no images
+at all.
+
+## Production on GCP: built, proven, then torn down (2026-09-22)
+
+Phase work above is about the **dev** cluster. Production is a separate, newer story and this is its
+whole state:
+
+**Nothing is running.** Both GKE clusters and everything billable were destroyed on 2026-09-22 to
+stop cost. Verified zero in `gitfrok-prod-cp` and `gitfrok-prod-dp`: clusters, nodes, disks,
+routers, addresses, forwarding rules, registries. The two projects and their `*-tfstate` buckets
+still exist; the three Cloudflare DNS records still exist and now point at **released** addresses,
+which is worse than nothing and should be removed.
+
+**What was proven while it was up**, and is a property of the manifests rather than of that cluster:
+the third-party stateful set reached **12 pods 1/1** on `prod-cp` (OpenBao 3/3 sealed by design,
+Postgres 3/3 via CNPG, Redpanda 3/3, Valkey, Zitadel 2/2), and the control-plane overlay dry-ran
+**13/13** clean against it. Three base-manifest defects were found only by running it, which is why
+that evidence is kept rather than deleted with the cluster.
+
+**The two things that still block a usable production deployment**, both reserved for a human by
+governance rather than by tooling:
+
+1. **OpenBao initialise + quorum unseal.** Five shares to five holders, out of band — ADR-0066
+   decision 4 and `deploy/MVP-RUNBOOK.md` §6a. No auto-unseal exists anywhere, deliberately. The
+   control plane composes its agent CA exclusively through custody, so a sealed barrier means the
+   agent door cannot sign and enrolment issuance refuses.
+2. **`COSIGN_PRIVATE_KEY` and the GitHub `image-publish` environment.** ADR-0044's custody rule puts
+   the release private key only in the protected pipeline, so it cannot be generated into the tree.
+   Nothing is published until it exists. `deploy/k8s/README.md` carries the exact variable values.
+
+Decisions made for production that were not in the Phase story: **ADR-0092** (GCP + OpenTofu),
+**0093** (control plane gets its own installer), **0095** (Cloudflare-authoritative DNS, and why the
+agent door can never be proxied), **0096** (Kustomize only, no Helm), **0097** (private API
+endpoints reached through Zero Trust), **0098** (Artifact Registry, `docker.io` retired), **0099**
+(the third-party stateful set), **0100/0101** (which plane serves and owns what), and **0102/0103**
+still **Proposed**.
 
 ## Where work stands (2026-08-23)
 

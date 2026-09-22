@@ -4,6 +4,12 @@
 (Accepted).** Read it first; it explains every choice this tree makes, and where it and this README
 disagree, the ADR wins (ADR-0001).
 
+> **Nothing is provisioned right now.** Both environments were applied on 2026-09-22 and torn
+> down the same day to stop billing — see [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md), which
+> also covers the rebuild and the two things a rebuild does **not** restore (the Zero Trust tunnel
+> token and the Cloudflare records). The projects and the state buckets still exist; everything
+> billable does not. Read the present tense below as "what an apply creates", not "what is running".
+
 **Updated 2026-09-22.** Both `project_id` values are real (`gitfrok-prod-cp`, `gitfrok-prod-dp`,
 created 2026-09-22 on billing `2025-10280-7Solutions`), the DNS apex is gone — ADR-0095 made
 Cloudflare authoritative and retired the Cloud DNS unit — and **both** clusters' Kubernetes API
