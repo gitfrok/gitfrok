@@ -150,13 +150,62 @@ terragrunt run --all --non-interactive --backend-bootstrap -- apply -auto-approv
 buckets. Then follow [`k8s/README.md`](k8s/README.md) in order: CNPG operator → platform overlay →
 **OpenBao initialise and quorum unseal** → control-plane overlay.
 
-Two things the rebuild does not restore, because they were never in the tree:
+### The rebuild does not start from zero, and one thing actively refuses
+
+**Workload Identity pools and providers are SOFT-deleted for 30 days, and the name stays
+reserved.** This is the one step of the rebuild that fails outright. On the documented rebuild
+`live/prod-cp/image-publish-identity` died with:
+
+    Error: Error creating WorkloadIdentityPool: googleapi: Error 409: Requested entity already exists
+
+and took `artifact-registry` down with it, being downstream. The pool is not gone — it is `DELETED`
+and holding its name:
+
+```sh
+gcloud iam workload-identity-pools list --location=global --project=gitfrok-prod-cp --show-deleted
+# prod-cp-github   DELETED
+
+gcloud iam workload-identity-pools undelete prod-cp-github \
+  --location=global --project=gitfrok-prod-cp
+gcloud iam workload-identity-pools providers undelete github-oidc \
+  --workload-identity-pool=prod-cp-github --location=global --project=gitfrok-prod-cp
+```
+
+Undeleting is not enough on its own: the restored objects are absent from OpenTofu state, so the
+next apply hits the same 409. Import them, then apply:
+
+```sh
+cd deploy/gcp/live/prod-cp/image-publish-identity
+terragrunt import google_iam_workload_identity_pool.github \
+  "projects/gitfrok-prod-cp/locations/global/workloadIdentityPools/prod-cp-github"
+terragrunt import google_iam_workload_identity_pool_provider.github \
+  "projects/gitfrok-prod-cp/locations/global/workloadIdentityPools/prod-cp-github/providers/github-oidc"
+terragrunt apply
+cd ../artifact-registry && terragrunt apply     # skipped by the failure above
+```
+
+Service accounts soft-delete the same way. On the documented rebuild the publisher SA had already
+been recreated within the same run, so only the pool and provider needed this.
+
+**`run --all apply` exits 0 having run 7 of 9 units.** `gcp/README.md` warns about the wrapper's
+exit code for `plan`; it is exactly as true for `apply`, and it is how the 409 above was nearly
+missed. Count `Apply complete!` lines against the unit count — do not read `$?`.
+
+Two things the rebuild does not restore at all, because they were never in the tree:
 
 - **The Zero Trust tunnel token.** `zt-connector` creates the Secret Manager container and never its
   value. Until it is populated the connector boots, logs that the secret is empty, and exits 0 — a
-  healthy instance, no tunnel, and a Kubernetes API nobody can reach. See `gcp/README.md`.
-- **The three Cloudflare records**, which must be recreated against the **new** reserved addresses.
-  `agents-gitfrok` must be **DNS-only**; a proxied record terminates TLS and breaks every agent
+  healthy instance, no tunnel, and a Kubernetes API nobody can reach. See `gcp/README.md`. Creating
+  the tunnel, adding the token, resetting the instance and adding the private-network route are all
+  Cloudflare-API calls; the **Access policy naming who may use that route is not**, and until it
+  exists every device enrolled on the account can reach the route.
+- **The three Cloudflare records**, which must be repointed at the **new** reserved addresses — and
+  note *repointed*, not recreated: a teardown leaves them in place, resolving to released IPs. On
+  the documented rebuild the global address came back **identical** (`34.98.93.111`, so `app-` and
+  `auth-gitfrok` needed no change) while the agent door's did not — and the old agent IP had by then
+  been recycled into this same project's **NAT** pool, so `agents-gitfrok` was pointing at our own
+  NAT gateway. Check every record against `terragrunt output dns_records`; do not assume either way.
+  `agents-gitfrok` must stay **DNS-only**; a proxied record terminates TLS and breaks every agent
   enrolment (ADR-0095 decisions 3–5).
 
 And the OpenBao shares from the previous life are worthless: a rebuilt cluster is a new barrier with

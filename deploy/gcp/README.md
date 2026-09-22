@@ -4,11 +4,11 @@
 (Accepted).** Read it first; it explains every choice this tree makes, and where it and this README
 disagree, the ADR wins (ADR-0001).
 
-> **Nothing is provisioned right now.** Both environments were applied on 2026-09-22 and torn
-> down the same day to stop billing — see [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md), which
-> also covers the rebuild and the two things a rebuild does **not** restore (the Zero Trust tunnel
-> token and the Cloudflare records). The projects and the state buckets still exist; everything
-> billable does not. Read the present tense below as "what an apply creates", not "what is running".
+> **Both environments are provisioned and running as of 2026-09-22 (second build).** They were
+> applied, torn down to stop billing, and rebuilt the same day; the rebuild applied **15/15 units**
+> across both projects. [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) covers both directions
+> and the things a rebuild does **not** restore. The present tense below is now literal — but read
+> the spend note there before leaving it up.
 
 **Updated 2026-09-22.** Both `project_id` values are real (`gitfrok-prod-cp`, `gitfrok-prod-dp`,
 created 2026-09-22 on billing `2025-10280-7Solutions`), the DNS apex is gone — ADR-0095 made
@@ -121,16 +121,14 @@ Tool versions are constrained in `root.hcl` (OpenTofu ≥ 1.12.6, Terragrunt ≥
 
 These exist because they cross a boundary OpenTofu should not cross silently.
 
-**Cross-project image pull.** `prod-dp` has no registry; it reads `prod-cp`'s. After both
-environments apply, take `prod-dp`'s `workload_identity.service_account_emails["dataplane"]` and add
-it to `reader_members` in `live/prod-cp/artifact-registry/terragrunt.hcl`:
-
-```hcl
-reader_members = ["serviceAccount:prod-dp-dataplane@gitfrok-prod-dp.iam.gserviceaccount.com"]
-```
-
-It is two steps rather than a `dependency` block because the two environments hold separate state,
-and a read grant across a project boundary is worth seeing in a diff.
+**~~Cross-project image pull.~~ Closed by ADR-0098, and this section was stale.** It used to say
+that after both environments apply you take `prod-dp`'s
+`workload_identity.service_account_emails["dataplane"]` and add it to `reader_members` in
+`live/prod-cp/artifact-registry/terragrunt.hcl`. **Do not.** ADR-0098 decision 2 made the
+repository publicly readable (`reader_members = ["allUsers"]`) precisely so that a data plane — ours
+or a customer's — pulls with no vendor credential. The unit already says so in its own comment.
+A named per-plane grant now adds nothing and implies a credential requirement that ADR-0047
+explicitly forbids operator manifests from carrying.
 
 **The three Cloudflare DNS records.** `addresses` outputs `dns_records`, which is the actual answer
 to "what do I type into Cloudflare": `app-gitfrok` and `auth-gitfrok` point at the global address and
@@ -159,20 +157,20 @@ them to whatever renders the manifests.
 
 ## What is missing, and is not an oversight
 
-**The control plane has no installer yet.** `../dev/*.yaml` is Minikube-only by ADR-0024, and
-ADR-0013's chart is the *data-plane* installer. ADR-0093 decided the control plane gets its own, and
-ADR-0096 (Accepted 2026-09-22) made it **Kustomize at `deploy/k8s/controlplane/`** — which **T-0084
-has not built**. So this tree can provision the control-plane cluster and nothing can yet deploy the
-control plane into it. It still blocks a first real deployment and is still not something to work
-around here.
+**~~The control plane has no installer yet.~~ Built, and applied.** T-0084 built it at
+`deploy/k8s/controlplane/` per ADR-0093 and ADR-0096, and T-0086 built the third-party stateful set
+at `deploy/k8s/platform/`. As of 2026-09-22 both `platform` overlays are **applied and running** on
+the two clusters this tree provisions. What still cannot be applied is the *first-party* half, for
+want of a published image — see `../k8s/README.md`, which is the source of truth for the workload
+side and lists all three remaining blockers.
 
 **Helm is gone from this tree's vocabulary** (ADR-0096 decision 1). Where a sentence above says
 "chart", read "installer": `deploy/helm/gitfrok-dataplane` is the last one left and T-0085 converts
 it.
 
-**The third-party stateful set has no production artifact.** ADR-0093 decision 2 declares Postgres,
-Valkey, Redpanda, OpenBao and Zitadel as *required inputs*; `../dev` is Minikube's and is not it.
-This blocks a first deployment independently of the installer above.
+**~~The third-party stateful set has no production artifact.~~ Built (T-0086) and running.**
+`../k8s/platform/overlays/{prod-cp,prod-dp}` are applied on both clusters, Postgres archiving WAL to
+the `backups` bucket in each project.
 
 Ingress/TLS/DNS is **no longer open** — ADR-0095 (Accepted 2026-09-22) decided it, and this tree
 carries its two cluster-level halves: `gateway_api_config` and the L7 addon the managed Gateway

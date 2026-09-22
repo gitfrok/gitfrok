@@ -43,12 +43,18 @@ Both Kubernetes API endpoints are **private with no authorized networks** (ADR-0
 `zt-connector` VM in the cluster's node subnet, reached over IAP TCP forwarding:
 
 ```sh
-gcloud compute start-iap-tunnel prod-cp-zt-connector 22 \
-  --local-host-port=localhost:2222 --zone=asia-southeast1-a --project=gitfrok-prod-cp &
-ssh -i ~/.ssh/google_compute_engine -p 2222 -D 1080 -N -o StrictHostKeyChecking=no \
-  "$USER"@localhost &
+gcloud compute ssh prod-cp-zt-connector --zone=asia-southeast1-a --project=gitfrok-prod-cp \
+  --tunnel-through-iap --ssh-flag=-D --ssh-flag=1080 --ssh-flag=-N --ssh-flag=-f
+gcloud container clusters get-credentials prod-cp-gke --region=asia-southeast1 \
+  --project=gitfrok-prod-cp --internal-ip
 HTTPS_PROXY=socks5://localhost:1080 kubectl get nodes
 ```
+
+**Use `gcloud compute ssh --tunnel-through-iap`, not `start-iap-tunnel` plus your own `ssh -i`.**
+An earlier revision of this section recommended the hand-rolled pair; against a *freshly created*
+connector it fails with `Permission denied (publickey)`, because gcloud is what provisions the
+key onto the instance, and the backgrounded tunnel process also dies with the shell that started
+it. This matters exactly when you need it — right after a rebuild.
 
 The connector **must** stay in the node subnet: GKE grants that subnet's primary range access to a
 private endpoint by default, and from anywhere else the control plane times out without naming the
@@ -90,7 +96,8 @@ have the same ordering constraint, every time.
 
 ## What blocks a first real deployment today
 
-Two things, both operator-held. Neither is a code defect and neither is worked around here.
+Three things. The first two are operator-held; the third is a gap in the tree, recorded rather
+than worked around.
 
 **1. The first-party images are not published.** `controlplane/overlays/prod-cp/kustomization.yaml`
 pins `newTag: 0.1.0` against `asia-southeast1-docker.pkg.dev/gitfrok-prod-cp/gitfrok/*`, and nothing
@@ -104,36 +111,89 @@ repository:
 | `GCP_IMAGE_PUBLISHER_SA` | `prod-cp-image-publisher@gitfrok-prod-cp.iam.gserviceaccount.com` |
 
 plus an `image-publish` environment holding `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` and
-`RELEASE_SIGNING_KEY`, then `workflow_dispatch` at `0.1.0`. **The cosign signing key does not exist
-yet** — it has to be generated and stored before the first publish, and it is a separate trust chain
-from the `.release` manifest signature (ADR-0098). When the workflow runs, each `images:` entry
-gains `digest: sha256:...` and drops `newTag`, read from the `.release` manifest the same run signs.
+`RELEASE_SIGNING_KEY`, then `workflow_dispatch` at `0.1.0`. When the workflow runs, each `images:`
+entry gains `digest: sha256:...` and drops `newTag`, read from the `.release` manifest the same run
+signs. Both variables above are non-secret and are `terragrunt output workflow_inputs` from
+`../gcp/live/prod-cp/image-publish-identity`; both were re-verified after the 2026-09-22 rebuild.
+
+**On the cosign key, precisely — an earlier revision of this file said it "does not exist yet",
+and that is not what the tree shows.** `deploy/dev/trust/image-publish/image-publish-2026-08.pub`
+is committed, with fingerprint `547f43d0d7b89a9fc7c12c5c3a4961725b0f42c5cda199e5431393a884533e6f`.
+So a keypair *was* generated in August and its public half is the pinned verification key. What is
+unknown from the tree is whether anyone still holds the private half. The two cases are different
+work and only the owner can tell them apart:
+
+- **The private key is held** → load it as `COSIGN_PRIVATE_KEY`/`COSIGN_PASSWORD` in the
+  `image-publish` environment. Nothing else changes; no governance commit.
+- **The private key is lost** → this is an **ADR-0044 rotation**, not a fresh generation. Generate
+  a new pair, add the new `.pub` *beside* the existing one, let consumers accept both, and remove
+  the old file only once nothing is signed by it. That is a governance change and a versioned
+  trust-bundle commit, not a secret paste.
 
 **2. OpenBao is uninitialised and sealed** on the live `prod-cp` cluster — step 3 above, awaiting a
 share quorum.
 
-## Live state: nothing is deployed, 2026-09-22
+**3. The control plane has no way to trust the custody CA, and this blocks step 4 independently of
+both of the above.** `openbao-tls` is necessarily signed by a private CA — its SANs are
+`openbao-{0,1,2}.openbao-internal`, which no public CA will ever issue for. The custody adapter
+(`backend/modules/agent/internal/adapters/custody/openbao.go`) enforces `https` and dials with a
+default `http.Client`, so it verifies against the system root pool only: it takes no CA-file option
+and `controlplane/overlays/prod-cp` mounts no CA and sets no CA env var. The image is `FROM
+scratch` carrying just `/etc/ssl/certs/ca-certificates.crt`, so the private CA is not in that pool
+and `apply -k controlplane/overlays/prod-cp` would fail at TLS to custody even with images
+published and OpenBao unsealed. Go honours `SSL_CERT_FILE`, so mounting the CA and setting it is
+the likely minimal fix — but *which* of "mount the CA", "put it in the image", or "issue the
+custody certificate from a CA the image already trusts" is right is an owner decision against
+ADR-0066, so it is recorded here rather than chosen.
 
-**Both clusters were torn down on 2026-09-22 to stop billing, so there is nothing running to
-inspect.** Verified zero across both projects: clusters, nodes, disks, routers, addresses,
-forwarding rules and registries. See [`../TEARDOWN-RUNBOOK.md`](../TEARDOWN-RUNBOOK.md) for what
-that took and how to rebuild.
+## Live state: both clusters are up and the stateful set is running, 2026-09-22 (second build)
 
-What was proven while it was up, and is therefore a property of these manifests rather than a
-property of that cluster:
+**Rebuilt the same day it was torn down.** `deploy/gcp` applied 15/15 units across both projects,
+and both platform overlays are applied and converged. `deploy/TEARDOWN-RUNBOOK.md` records the
+teardown this replaced and what a rebuild does *not* restore.
 
-- `platform/overlays/prod-cp` applied and reached **12 pods 1/1** — OpenBao 3/3 (Raft, TLS,
-  uninitialised and sealed, as intended), Postgres 3/3 via CNPG reporting healthy, Redpanda 3/3,
-  Valkey, Zitadel 2/2 — with `connected as gitfrok_app to gitfrok ssl=on` verified from inside.
-- `controlplane/overlays/prod-cp` **dry-ran 13/13 clean** against that live cluster. It was never
-  applied, because its images still do not exist.
-- `prod-dp`'s platform overlay was never applied.
+| | `prod-cp` | `prod-dp` |
+|---|---|---|
+| GKE, private endpoint | 3 nodes Ready | 3 nodes Ready |
+| Platform overlay | applied — 12 pods | applied — 7 pods |
+| OpenBao | 3/3 Running, **uninitialised and sealed** | n/a |
+| Postgres (CNPG) | 3/3, `ContinuousArchiving=True` | 3/3, `ContinuousArchiving=True` |
+| Redpanda / Valkey / SeaweedFS | 3/3, 1/1, n/a | 3/3, n/a, 1/1 |
+| Zitadel | 2/2 Running | n/a |
+| First-party workloads | **not applied** — no published images | not applicable until T-0085 |
 
-Three fixes in the base manifests came out of that run and would not have been found by dry-running
-(`redpanda-internal` needing `publishNotReadyAddresses: true`, OpenBao's readiness probe dropping
-`sealedcode=204`, Zitadel needing `enableServiceLinks: false`), which is the argument for treating
-the list above as evidence rather than deleting it along with the cluster.
+`connected as gitfrok_app to gitfrok ssl=on` verified from inside prod-cp, as on the first build.
 
+**Three defects were found by running this, and none of them could have been found by rendering
+it.** Each is fixed in the tree and verified against the live clusters:
+
+- **The Zero Trust connector had never worked, on any boot, since the module was written.** An
+  OpenTofu heredoc escapes `${` as `$${` and nothing else, so the script's `$$(`, `$$*` and `$$VAR`
+  rendered literally and `google-startup-scripts` exited 2 every time. `cloudflared` was therefore
+  never installed and no tunnel ever existed. It went unseen because the operator path below is IAP
+  + `ssh -D`, which reaches the connector's sshd and never uses the tunnel. Both tunnels now report
+  healthy with 4 connections.
+- **SeaweedFS could not start.** Its entrypoint chowns `/data` and `su-exec`s to uid 1000, which
+  needs a capability `drop: ["ALL"]` removes. It was the only workload here without a pod-level
+  `securityContext`, which is exactly the manifest that had never been applied — `prod-dp`'s
+  overlay had never run.
+- **CNPG had never archived a WAL**, while reporting `Ready=True` throughout, because archiving is
+  a status condition and not a probe. Two independent causes: the `postgres` service account
+  carried no Workload Identity annotation, so `gkeEnvironment: true` had no identity to be; and
+  `roles/storage.objectAdmin` does not carry `storage.buckets.get`, which is
+  `barman-cloud-check-wal-archive`'s first call.
+
+**The operator path, corrected.** Use `gcloud compute ssh --tunnel-through-iap`, not a hand-rolled
+`start-iap-tunnel` plus `ssh -i ~/.ssh/google_compute_engine`: on a freshly created connector the
+hand-rolled form fails `Permission denied (publickey)`, because gcloud is what provisions the key.
+
+```sh
+gcloud compute ssh prod-cp-zt-connector --zone=asia-southeast1-a --project=gitfrok-prod-cp \
+  --tunnel-through-iap --ssh-flag=-D --ssh-flag=1080 --ssh-flag=-N --ssh-flag=-f
+gcloud container clusters get-credentials prod-cp-gke --region=asia-southeast1 \
+  --project=gitfrok-prod-cp --internal-ip
+HTTPS_PROXY=socks5://localhost:1080 kubectl get nodes
+```
 ## Gates
 
 ```sh
